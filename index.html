@@ -22,7 +22,7 @@
 <meta name="application-name" content="Flotta">
 <meta name="msapplication-TileColor" content="#1F3864">
 <meta name="msapplication-TileImage" content="/icons/icon-192.png">
-<title>Gestionale flotta e noleggi</title>
+<title>Matherion Fleet — Gestione flotta</title>
 <script>/* exceljs.min.js */
 /*! ExcelJS 19-10-2023 */
 
@@ -755,22 +755,23 @@ main{padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env
   .grid{min-width:0}
 }
 </style>
+<link rel="stylesheet" href="/fleet-ui.css">
 </head>
 <body>
 <header class="bar"><div class="bar-in">
-  <button class="btn menubtn" id="bMenu" aria-label="Mostra o nascondi il menu" title="Mostra o nascondi il menu (Ctrl+B)"><span>☰</span><span class="mlab">Menu</span></button>
-  <div class="brand">
-    <h1>Registro noleggio furgoni</h1>
-    <div class="file" id="fileinfo">Nessun registro aperto</div>
-  </div>
-  <div class="conto hidden" id="conto"><span id="contoChi"></span><button class="btn" id="bEsci" title="Esci dall’account">Esci</button></div>
-  <label class="autosave hidden" id="asWrap"><input type="checkbox" id="autosave" checked> Salvataggio automatico</label>
-  <button class="btn" id="bOpen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Apri</button>
-  <button class="btn" id="bNew">Nuovo registro</button>
-  <button class="btn hidden" id="bExport" title="Scarica una copia datata del registro">Esporta copia</button>
-  <button class="btn hidden" id="bClose">Chiudi sessione</button>
-  <button class="btn gold hidden" id="bSave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span id="bSaveL">Salva</span></button>
-  <input type="file" id="fOpen" accept=".xlsx" class="hidden">
+ <button class="btn menubtn" id="bMenu" aria-label="Mostra o nascondi il menu" title="Mostra o nascondi il menu (Ctrl+B)"><span>☰</span><span class="mlab">Menu</span></button>
+ <div class="brand">
+ <h1>Matherion <span style="font-weight:400;opacity:.7">Fleet</span></h1>
+ <div class="file" id="fileinfo">Nessun registro aperto</div>
+ </div>
+ <div class="conto hidden" id="conto"><span id="contoChi"></span><button class="btn" id="bEsci" title="Esci dall’account">Esci</button></div>
+ <label class="autosave hidden" id="asWrap"><input type="checkbox" id="autosave" checked> Salvataggio automatico</label>
+ <button class="btn" id="bOpen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Apri</button>
+ <button class="btn" id="bNew">Nuovo registro</button>
+ <button class="btn hidden" id="bExport" title="Scarica una copia datata del registro">Esporta copia</button>
+ <button class="btn hidden" id="bClose">Chiudi sessione</button>
+ <button class="btn gold hidden" id="bSave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span id="bSaveL">Salva</span></button>
+ <input type="file" id="fOpen" accept=".xlsx" class="hidden">
 </div></header>
 
 <button class="sidetab" id="sideTab" aria-label="Mostra il menu" title="Mostra il menu (Ctrl+B)">☰ Menu</button>
@@ -1615,12 +1616,10 @@ const redirectUri=()=>location.origin+location.pathname;
 async function msConfig(){
   if(MS.cfg!==undefined)return MS.cfg;
   let c=null;
-  /* La configurazione pubblicata ha priorità: evita che un vecchio Client ID
-     salvato nel browser continui a prevalere dopo un aggiornamento. */
-  if(/^https?:$/.test(location.protocol)){
-    try{const r=await fetch('config.json',{cache:'no-store'});if(r.ok)c=await r.json();}catch(e){}
+  try{c=JSON.parse(localStorage.getItem('ms-config')||'null');}catch(e){}
+  if(!c&&/^https?:$/.test(location.protocol)){
+    try{const r=await fetch('/config.json',{cache:'no-store'});if(r.ok)c=await r.json();}catch(e){}
   }
-  if(!c){try{c=JSON.parse(localStorage.getItem('ms-config')||'null');}catch(e){}}
   MS.cfg=(c&&c.clientId&&c.tenantId)?c:null;
   return MS.cfg;
 }
@@ -7457,7 +7456,24 @@ async function generate(){
 }
 
 
+const fleetPaths={cruscotto:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',mezzi:'M3 16V9l3-5h12l3 5v7M3 10h18M6 16h12M6 16v4H3v-4M21 16v4h-3v-4M6 13h2M16 13h2',contratti:'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',man:'M14 6a5 5 0 0 0-6 6L3 17l4 4 5-5a5 5 0 0 0 6-6l-3 3-4-4z',sin:'M12 3 2 21h20zM12 9v5M12 17v1',gio:'M5 5h14v16H5zM8 3v4M16 3v4M5 10h14M8 14h3M8 17h7',dip:'M16 21v-3a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v3M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8M17 3a4 4 0 0 1 0 8M22 21v-3a4 4 0 0 0-3-4',fatturazione:'M4 3h16v18l-4-2-4 2-4-2-4 2zM8 7h8M8 11h8M8 15h4',parametri:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',default:'M4 5h16v15H4zM4 10h16M9 10v10'};
+function fleetIcon(k){return `<svg class="navicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${fleetPaths[k]||fleetPaths.default}"/></svg>`;}
+const fleetOriginalSide=renderSide;
+renderSide=function(){fleetOriginalSide();document.querySelectorAll('#side .sitem').forEach(b=>{const t=b.querySelector('span');if(t)t.insertAdjacentHTML('afterbegin',fleetIcon(b.dataset.tab));});};
+const fleetOriginalDashboard=renderCruscotto;
+renderCruscotto=function(){fleetOriginalDashboard();const h=document.querySelector('#main .pagehead h2');if(h)h.textContent='La tua flotta, a colpo d’occhio';};
+VIEWS.cruscotto=()=>renderCruscotto();
+renderStart=function(){
+ const modules=[['mezzi','Flotta e veicoli','Anagrafica, disponibilità, documenti e contratti di acquisizione.'],['contratti','Noleggi e contratti','Canoni, durate, restituzioni e generazione dei contratti.'],['gio','Operatività quotidiana','Giornaliere, presenze, chilometri e foto dei mezzi.'],['man','Manutenzioni','Interventi, officine, fermi tecnici e appuntamenti.'],['sin','Sinistri e verbali','Pratiche, danni, sanzioni e rinotifiche.'],['dip','Persone e dotazioni','Dipendenti, assegnazioni, dispositivi e carte.'],['fatturazione','Amministrazione','Fatturazione, proforma, società e fornitori.'],['cruscotto','Controllo e scadenze','Indicatori, revisioni, promemoria e calendario.']];
+ $('#main').innerHTML=`<div class="welcome"><div class="welcome-top"><span class="welcome-word">Matherion / Gestione flotta</span><div class="status-chip"><i style="background:${msAttivo()?'#299065':'#bd821e'}"></i>${msAttivo()?'Microsoft 365 configurato':'Microsoft 365 da configurare'} <a class="connection-action" href="/configura.html">Gestisci →</a></div></div><div id="resumeBox"></div><section class="launch"><div class="launch-copy"><small>MUOVIAMO IDEE, GUIDIAMO SOLUZIONI</small><h2>Tutta la tua flotta.<br><em>Un unico spazio.</em></h2><p>Veicoli, persone e attività: entra nel tuo registro e gestisci ogni fase del lavoro, dall’assegnazione alla restituzione.</p><div class="acts">${msAttivo()?'<button class="btn primary" id="fleetSP">Apri da SharePoint</button>':''}<button class="btn ${msAttivo()?'':'primary'}" id="fleetOpen">Apri il tuo registro →</button><button class="btn" id="fleetNew">Nuovo registro</button></div><p style="font-size:11px;margin-top:18px">${FSA?'Puoi collegare la cartella sincronizzata e salvare direttamente nel registro.':'Su questo dispositivo puoi importare e scaricare il registro Excel.'}</p></div><div class="launch-art"><div class="fleet-visual"><div class="fleet-visual-top"><img src="/icons/marchio.png" alt=""><div>Matherion Fleet<br><span style="color:#8fb3c1;font-size:10px">Il tuo centro operativo</span></div></div><div class="visual-row"><span>Flotta</span><b>Veicoli & documenti</b></div><div class="visual-row"><span>Operatività</span><b>Persone & attività</b></div><div class="visual-row"><span>Controllo</span><b>Scadenze & costi</b></div><div style="margin-top:20px;color:#7fced8;font-size:10px;letter-spacing:.1em">DAL COMPUTER AL TELEFONO</div></div></div></section><div class="section-title"><h3>Ogni attività, al posto giusto</h3><span>Tutti i moduli nel gestionale completo</span></div><div class="modules">${modules.map(([k,t,p])=>`<article class="module-card"><div class="module-icon">${fleetIcon(k)}</div><h4>${t}</h4><p>${p}</p></article>`).join('')}</div><div class="entry-options"><article class="entry-card"><div><h3>App autisti e responsabili</h3><p>Giornaliere e foto del mezzo direttamente dal telefono.</p></div><a href="/app/" class="btn">Apri app →</a></article><article class="entry-card"><div><h3>Collega l’azienda</h3><p>Configura l’accesso Microsoft 365 e la cartella SharePoint.</p></div><a href="/configura.html" class="btn">Configura →</a></article></div><div class="fleet-footer">I dati vengono letti dal registro scelto. Il collegamento aziendale si attiva dopo la configurazione.</div></div>`;
+ $('#fleetOpen').onclick=()=>FSA?pickFolder():pickFile();
+ $('#fleetNew').onclick=async()=>{if(!await guardUnsaved())return;busy(true,'Creazione del registro');try{await loadWorkbook(b64ToBuf(XLSX_B64),REG_NAME);S.mode='download';S.dir=null;S.fh=null;S.fileTs=0;busy(false);await afterOpen('Registro dal modello: salva una copia Excel per conservare i dati.');}catch(e){busy(false);toast(e.message,true);}};
+ if($('#fleetSP'))$('#fleetSP').onclick=apriSharePoint;
+ fillResume();
+};
+
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
 </script>
-</body>
+<a class="setup-link" href="/configura.html" aria-label="Configura collegamento Microsoft 365">⚙ Collegamento aziendale</a>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4575a50ce8f0e57',t:'MTc5MTE1MDEwOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
