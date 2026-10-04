@@ -1,0 +1,36 @@
+{
+  "name": "Gestionale flotta Matherion",
+  "short_name": "Flotta",
+  "description": "Gestione della flotta: mezzi, noleggi, giornaliere, manutenzioni, sinistri e scadenze. I dati restano nel registro Excel della cartella di lavoro.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "lang": "it",
+  "dir": "ltr",
+  "background_color": "#F3F5FA",
+  "theme_color": "#1F3864",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-48.png",  "sizes": "48x48",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-64.png",  "sizes": "64x64",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-96.png",  "sizes": "96x96",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-128.png", "sizes": "128x128", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-384.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Giornaliere di oggi", "short_name": "Giornaliere", "url": "/?vai=gio",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Mezzi", "short_name": "Mezzi", "url": "/?vai=mezzi",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Scadenze", "short_name": "Scadenze", "url": "/?vai=scad",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}

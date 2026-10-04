@@ -1,0 +1,11 @@
+{
+  "organizzazione": "Matherion Srl",
+  "tenantId": "e6ca7b18-0458-4470-a9b6-613048bf7a6a",
+  "clientId": "b3942b65-6ba9-44b6-9d10-ba29cf9ed375",
+  "sharepoint": {
+    "host": "matherion.sharepoint.com",
+    "sito": "/",
+    "raccolta": "Documenti condivisi",
+    "cartella": "Flotta/Noleggio"
+  }
+}

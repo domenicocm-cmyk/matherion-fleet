@@ -1,0 +1,34 @@
+{
+  "name": "Flotta – filiale Amazon Burago",
+  "short_name": "Burago",
+  "description": "Gestione della filiale Amazon Burago: mezzi, giornaliere, manutenzioni, sinistri, dotazioni e dipendenti. Scrive sul registro condiviso della struttura.",
+  "id": "/burago",
+  "start_url": "/burago",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "lang": "it",
+  "dir": "ltr",
+  "background_color": "#F3F5FA",
+  "theme_color": "#8A6B10",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-48-burago.png",  "sizes": "48x48",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-64-burago.png",  "sizes": "64x64",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-96-burago.png",  "sizes": "96x96",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-128-burago.png", "sizes": "128x128", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192-burago.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-256-burago.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-384-burago.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512-burago.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192-burago.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512-burago.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Giornaliere di oggi", "short_name": "Giornaliere", "url": "/burago?vai=gio",
+      "icons": [{ "src": "/icons/icon-192-burago.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Mezzi", "short_name": "Mezzi", "url": "/burago?vai=mezzi",
+      "icons": [{ "src": "/icons/icon-192-burago.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}

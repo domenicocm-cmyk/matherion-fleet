@@ -1,0 +1,12 @@
+{
+  "_come_si_usa": "Copia questo file in config.json, compila i valori e pubblica. Se config.json non c'è, il gestionale si apre senza accesso, come prima.",
+  "organizzazione": "Fast Rent",
+  "tenantId": "INCOLLA-QUI-IL-DIRECTORY-ID",
+  "clientId": "INCOLLA-QUI-L-APPLICATION-ID",
+  "sharepoint": {
+    "host": "fastrent.sharepoint.com",
+    "sito": "/sites/Flotta",
+    "raccolta": "Documenti",
+    "cartella": "Flotta"
+  }
+}

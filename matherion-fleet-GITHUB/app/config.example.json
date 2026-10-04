@@ -1,0 +1,7 @@
+{
+  "_come_si_usa": "Copia in config.json accanto all'app, compila e pubblica. Gli stessi valori del gestionale.",
+  "organizzazione": "Fast Rent",
+  "tenantId": "INCOLLA-QUI-IL-DIRECTORY-ID",
+  "clientId": "INCOLLA-QUI-L-APPLICATION-ID",
+  "sharepoint": { "host": "fastrent.sharepoint.com", "sito": "/sites/Flotta", "raccolta": "Documenti", "cartella": "Flotta" }
+}
