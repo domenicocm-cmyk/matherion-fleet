@@ -1,64 +1,69 @@
-# Pubblicare un aggiornamento
+# Pubblicare un aggiornamento — Matherion Fleet
 
-Una volta collegato il repository a Vercel, mettere in linea una versione nuova
-è una cosa da due minuti.
+La produzione è pubblicata con **GitHub Pages** all'indirizzo
+https://fleet.matherion.com/.
 
-## La strada normale: ti arrivano i file già pronti
+## Branch
 
-Ti vengono consegnati `index.html` e `burago.html` già costruiti.
+- `main`: produzione.
+- `sviluppo`: modifiche e test.
+- `backup-stabile-2026.10.05`: baseline stabile da non modificare.
 
-1. Copiali in questa cartella, sovrascrivendo quelli che ci sono.
-2. Apri `sw.js` e porta la riga `const VER` alla versione nuova, per esempio
-   `const VER = 'flotta-2026.11.14';`. È quella riga che fa buttare via la copia
-   vecchia tenuta nei browser: se non la cambi, chi ha l'app già aperta continua
-   a vedere la versione precedente.
-3. Aggiungi una riga a `CHANGELOG.md`.
-4. Poi:
+## Procedura sicura
 
-```bash
-git add -A
-git commit -m "gestionale 2026.11.14"
-git push
-```
-
-Vercel se ne accorge da solo e pubblica in meno di un minuto.
-
-## La strada automatica: un comando solo
-
-Se hai `python3` (su macOS di solito c'è; altrimenti si installa con
-`xcode-select --install`), ti basta il file centrale — quello che metteresti su
-OneDrive — e il resto lo fa lo script:
-
-```bash
-python3 strumenti/aggiorna.py ~/Downloads/Gestionale_Flotta_Noleggi.html
-git add -A && git commit -m "gestionale 2026.11.14" && git push
-```
-
-Lo script ricava la versione web per la sede centrale, rigenera la copia bloccata
-sulla filiale Amazon Burago, allinea la versione in `sw.js` e aggiorna il
-`CHANGELOG.md`. Se il file sorgente dovesse cambiare forma lo script si ferma e
-te lo dice, senza scrivere niente a metà.
-
-### Aggiungere un'altra filiale
-
-In `strumenti/aggiorna.py` c'è la riga `FILIALE = "Amazon Burago"`. Per una
-seconda filiale duplica il blocco che genera `burago.html`, cambia nome del
-centro di costo e del file (es. `cinisello.html`), e aggiungi un manifest
-`manifest-cinisello.webmanifest` sul modello di quello esistente. Oppure chiedi
-il file già pronto.
+1. Parti sempre dalla branch `sviluppo`.
+2. Aggiorna soltanto i file necessari.
+3. **Non sovrascrivere `config.json`** quando aggiorni `index.html`,
+   `fleet-ui.css` o altri componenti dell'interfaccia.
+4. Se cambia una risorsa mantenuta in cache, aggiorna anche la versione della
+   cache in `sw.js` per evitare che i browser continuino a usare file vecchi.
+5. Verifica la differenza rispetto a `main` prima della pubblicazione.
+6. Porta in `main` soltanto la versione già controllata.
+7. Attendi il completamento del deployment GitHub Pages.
 
 ## Verifica dopo la pubblicazione
 
-1. Apri l'indirizzo in una finestra anonima: in basso a sinistra, sotto il logo,
-   deve comparire la versione nuova.
-2. Su una postazione che ha l'app installata deve apparire l'avviso
-   *«C'è una versione nuova»*. Se non appare entro mezz'ora, chiudi e riapri
-   l'app: significa che `const VER` in `sw.js` non è stata cambiata.
-3. Apri `/burago` e controlla che il menu si fermi a nove voci e che sotto il
-   logo ci sia scritto *Filiale Amazon Burago*.
+Apri https://fleet.matherion.com/ e controlla:
 
-## Tornare indietro
+- versione e interfaccia corrette;
+- accesso con account Microsoft;
+- apertura del registro SharePoint;
+- caricamento dei dati esistenti;
+- menu, CSS e icone;
+- assenza di errori evidenti.
 
-Su Vercel, *Deployments* → scegli quello di prima → *Promote to Production*.
-Ci vogliono pochi secondi e nessun dato è coinvolto: il registro `.xlsx` sta
-nella cartella OneDrive e non viene toccato da nessuna pubblicazione.
+Per una verifica più forte, eseguire una piccola modifica controllata su un
+record di test e verificare che, dopo il salvataggio e il ricaricamento, il dato
+sia ancora presente. Rimuovere poi il dato di test.
+
+## File da trattare con particolare attenzione
+
+### config.json
+
+Contiene gli identificativi pubblici necessari alla SPA e il percorso
+SharePoint. Non deve essere sostituito automaticamente con copie provenienti da
+pacchetti o versioni precedenti.
+
+### fleet-ui.css
+
+È necessario per la grafica dell'interfaccia Matherion. Se manca, il gestionale
+può caricarsi ma presentare menu e icone non correttamente dimensionati.
+
+### sw.js
+
+Gestisce la cache della PWA. Quando una nuova pubblicazione sembra non comparire
+non bisogna presumere subito un errore dell'HTML: verificare anche la versione
+della cache/service worker.
+
+## Ripristino
+
+Se una nuova versione presenta problemi, non modificare SharePoint, Entra ID,
+DNS o `config.json` nel tentativo di correggere un problema puramente
+applicativo.
+
+La versione stabile 2026.10.05 è conservata nella branch
+`backup-stabile-2026.10.05` e può essere usata come riferimento per riportare
+il codice di produzione allo stato funzionante.
+
+I dati della flotta sono su SharePoint e sono separati dal codice pubblicato su
+GitHub Pages.
