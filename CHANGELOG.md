@@ -19,3 +19,9 @@
 - **2026.10.05f** — pubblicata il 05/10/2026 — i mezzi fermi dichiarano dove
   si trovano e su quale centro di costo maturano; la proforma stampata resta
   allegata alla proforma; nuova sezione Documenti, creati e mancanti.
+- **2026.10.05g** — pubblicata il 05/10/2026 — confronto fra le foto di
+  consegna e di riconsegna: affiancate, sovrapponibili con una tendina, e con
+  le zone cambiate evidenziate sulla foto di rientro.
+- **2026.10.05h** — pubblicata il 05/10/2026 — il registro si aggiorna da solo
+  quando salva un'altra postazione, senza chiudere la sessione; gerarchie di
+  accesso con le protezioni contro il restare chiusi fuori.

@@ -831,6 +831,45 @@ body{font-size:14px;letter-spacing:-.015em}
    veicolo a 81, con il modello spezzato su otto righe. Il tetto riporta la
    colonna a 151px e la riga da 214 a 159. */
 .grid thead th{max-width:150px}
+
+/* ---------- confronto fra le foto di consegna e riconsegna ---------- */
+.cfok{color:var(--ok);font-weight:700}
+.cfdue{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cfdue figure{margin:0}
+.cfdue img{width:100%;display:block;border-radius:10px;border:1px solid var(--line);background:var(--surface-2)}
+.cfdue figcaption{font-size:12px;color:var(--muted);margin-top:6px}
+.cfslider{position:relative;line-height:0;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.cfslider>img{width:100%;display:block}
+.cfslider .cftop{position:absolute;inset:0}
+.cfslider .cftop img{width:100%;height:100%;object-fit:cover;display:block}
+.cfslider input[type=range]{position:absolute;left:4%;right:4%;bottom:10px;width:92%;margin:0}
+.cfzone{position:relative;line-height:0;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.cfzone img{width:100%;display:block}
+.cfbox{position:absolute;border:2px solid var(--warn);border-radius:4px;
+  box-shadow:0 0 0 2px #0006 inset;pointer-events:none}
+.cfbox b{position:absolute;top:-2px;left:-2px;background:var(--warn);color:#fff;
+  font-size:11px;line-height:1;padding:3px 5px;border-radius:4px 0 4px 0}
+@media(max-width:700px){.cfdue{grid-template-columns:1fr}}
+
+/* ---------- striscia dell'aggiornamento ---------- */
+.aggbanner{position:fixed;left:16px;right:16px;bottom:16px;z-index:60;display:flex;gap:16px;
+  align-items:center;flex-wrap:wrap;justify-content:space-between;
+  background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--warn);
+  border-radius:12px;padding:12px 16px;box-shadow:0 10px 36px #0b1e2733}
+.aggbanner b{display:block;font-size:14px}
+.aggbanner span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+.aggbanner .aggact{display:flex;gap:8px;flex-wrap:wrap}
+body.app .aggbanner{bottom:76px;left:10px;right:10px;padding:10px 12px}
+@media(max-width:700px){.aggbanner{flex-direction:column;align-items:stretch}
+  .aggbanner .aggact{justify-content:flex-end}}
+
+/* ---------- striscia della prova di un ruolo ---------- */
+.provabanner{position:fixed;left:16px;bottom:16px;z-index:61;display:flex;gap:14px;align-items:center;
+  background:var(--bar);color:var(--bar-ink);border-radius:999px;padding:9px 10px 9px 18px;
+  box-shadow:0 10px 36px #0b1e2744;font-size:13px;max-width:calc(100vw - 32px)}
+.provabanner b{color:var(--gold)}
+.provabanner .btn{background:var(--surface);border-color:var(--surface)}
+body.app .provabanner{bottom:76px;left:10px;right:10px}
 </style>
 </head>
 <body>
@@ -1112,7 +1151,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.05f';
+const APP_VERSION='2026.10.05h';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -1238,7 +1277,7 @@ function renderUtenti(){
       {k:'centroCosto',label:'Centro di costo',all:'Tutti',opts:()=>filialeOpts()}],
     rowClass:u=>u.attivo==='No'?'rowwarn':'',
     cols:[
-      {l:'Nome',v:u=>`<b>${esc(u.nome||'')}</b>`},
+      {l:'Nome',v:u=>`<b>${esc(u.nome||'')}</b>${SONO_IO(u)?'<span class="sub">sei tu</span>':''}`},
       {l:'Email',v:u=>esc(u.email||'')},
       {l:'Ruolo',v:u=>{const k=ruoloKey(u.ruolo);return k?pillS(RUOLI[k].l,k==='master'?'ok':k==='lettura'?'':'warn'):pillS('da definire','bad');}},
       {l:'Ambito',v:u=>ruoloKey(u.ruolo)==='filiale'
@@ -1247,13 +1286,39 @@ function renderUtenti(){
       {l:'Stato',v:u=>u.attivo==='No'?pillS('disattivato','bad'):pillS('attivo','ok')},
       {l:'Ultimo accesso',v:u=>esc(u.ultimoAccesso||'–')},
     ],
-    after:`<div class="panel" style="margin-top:14px"><h3>Che cosa vede ciascun ruolo</h3>
+    after:`${ruoloReale()==='master'?`<div class="panel" style="margin-top:14px">
+      <h3>Prova un ruolo prima di assegnarlo</h3>
+      <p class="muted" style="font-size:13px;margin:-2px 0 10px">Guarda il gestionale con gli occhi di un altro ruolo, senza uscire e senza cambiare account.
+      È una prova: i tuoi poteri restano intatti e torni te stesso con un clic. Serve a verificare che una persona veda quello che deve
+      prima di dirle di entrare.</p>
+      <div class="acts" style="justify-content:flex-start">
+        ${Object.entries(RUOLI).filter(([k])=>k!=='master').map(([k,r])=>
+          `<button class="btn ${S.comeRuolo===k?'primary':''}" data-prova="${k}">Vedi come ${esc(r.l)}</button>`).join('')}
+        ${S.comeRuolo?'<button class="btn ghost" data-prova="">Torna a essere me</button>':''}
+      </div>
+      <div class="field s3" style="margin-top:10px" data-provacdc><label>Centro di costo per la prova «Filiale»</label>
+        <select class="input" data-provacdcsel><option value="">— scegli —</option>${
+          cdcOpts().map(o=>`<option value="${esc(o.v)}" ${S.comeCdc===o.v?'selected':''}>${esc(o.l)}</option>`).join('')}</select></div>
+    </div>`:''}
+    ${masterAttivi().length?'':`<div class="panel" style="margin-top:14px;border-left:3px solid var(--warn)">
+      <b>Nessun Master attivo in elenco.</b>
+      <p class="muted" style="margin:6px 0 0;font-size:13px">Finché è così, chiunque entri ha pieni poteri: è l’uscita di sicurezza che impedisce
+      di restare chiusi fuori, ma non è uno stato in cui lasciare il registro. Nomina un Master adesso.</p></div>`}
+    <div class="panel" style="margin-top:14px"><h3>Che cosa vede ciascun ruolo</h3>
       <table class="grid"><thead><tr><th>Ruolo</th><th>Sezioni</th><th>Modifiche</th></tr></thead><tbody>
       ${Object.values(RUOLI).map(r=>`<tr><td><b>${esc(r.l)}</b></td><td>${esc(r.d)}</td>
         <td>${r.scrivi===null?'tutte le sezioni che vede':(r.scrivi.length?'solo '+r.scrivi.map(k=>MODS[k]?MODS[k].title:k).join(', '):'nessuna')}</td></tr>`).join('')}
       <tr><td><b>Non in elenco</b></td><td colspan="2">Chi accede con un account che non compare qui non entra.</td></tr>
       </tbody></table>
       <p class="muted" style="margin:10px 0 0">I ruoli valgono dentro il gestionale. Il confine vero lo mette SharePoint: a chi non deve vedere un dato, non va dato accesso al file.</p></div>`,
+  });
+
+  const mp=$('#main');
+  mp.querySelectorAll('[data-prova]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.prova;
+    const sel=mp.querySelector('[data-provacdcsel]');
+    if(k==='filiale'&&sel&&!sel.value)return toast('Scegli prima il centro di costo della prova.',true);
+    provaRuolo(k,sel?sel.value:'');
   });
 }
 function renderOggi(){
@@ -1353,12 +1418,17 @@ function renderAccesso(){
   $('#bAccedi').onclick=()=>msAccedi();
 }
 function renderNonAbilitato(){
+  const mm=masterAttivi();
   $('#main').innerHTML=`<section class="hero"><div>
     <div class="logobox"><img src="data:image/png;base64,${LOGO_B64}" alt="Matherion"></div>
-    <h2>Questo account non è abilitato</h2>
-    <p>Hai effettuato l’accesso come <b>${esc(SESSIONE?SESSIONE.email:'')}</b>, ma questo indirizzo non compare fra gli utenti del registro, oppure è stato disattivato.</p>
-    <p>Chiedi a chi amministra il gestionale di aggiungerti in <b>Parametri › Utenti e accessi</b>.</p>
-    <div class="actions"><button class="btn" id="bEsci2">Esci e cambia account</button></div>
+    <h2>Questo account non è ancora abilitato</h2>
+    <p>Sei entrato come <b>${esc(SESSIONE?SESSIONE.email:'')}</b>, ma questo indirizzo non compare fra gli utenti del registro, oppure è stato disattivato.</p>
+    ${mm.length?`<p>Può abilitarti una di queste persone, da <b>Documenti e accessi › Utenti e accessi</b>:</p>
+      <ul style="margin:0 0 14px;padding-left:18px;line-height:1.9">${mm.slice(0,6).map(u=>
+        `<li><b>${esc(u.nome||u.email)}</b>${u.email?` — <a href="mailto:${esc(u.email)}?subject=${encodeURIComponent('Accesso al gestionale flotta')}&body=${encodeURIComponent('Ciao, non riesco a entrare nel gestionale: il mio account è '+(SESSIONE?SESSIONE.email:'')+'. Puoi abilitarmi? Grazie.')}">${esc(u.email)}</a>`:''}</li>`).join('')}</ul>`
+     :`<p>Nel registro non risulta nessun Master attivo. Chi apre il registro per primo torna Master e può rimettere a posto gli accessi: se il file è tuo, riaprilo.</p>`}
+    <p class="muted">Se hai più account aziendali, può essere che tu sia entrato con quello sbagliato.</p>
+    <div class="actions"><button class="btn primary" id="bEsci2">Esci e cambia account</button></div>
   </div></section>`;
   const b=$('#bEsci2');if(b)b.onclick=()=>typeof msEsci==='function'?msEsci():location.reload();
 }
@@ -2681,6 +2751,7 @@ function renderContratti(){
     const b=e.target.closest('[data-act]');if(!b)return;const o=S.rows.find(r=>r.id===b.dataset.id);if(!o)return;
     if(b.dataset.act==='edit')openContract(o);
     if(b.dataset.act==='att')return openNolAttach(o);
+    if(b.dataset.act==='cfr')return confrontaNoleggio(o);
     if(b.dataset.act==='dup'){const c={...o,id:uid(),numero:'',targa:'',inizio:'',fine:'',quadro:''};openContract(c,true);}
     if(b.dataset.act==='del'&&await confirmBox('Eliminare il contratto?',`Il contratto ${esc(o.numero||'')} per la targa ${esc(o.targa)} verrà rimosso dal registro.`,'Elimina',true)){
       S.rows=S.rows.filter(r=>r!==o);S.sel.delete(o.id);markDirty();fillContratti();toast('Contratto eliminato.');}
@@ -2702,7 +2773,7 @@ function fillContratti(){
     <td class="num">${eur(o.canone)}</td><td class="num">${c.giorni}</td>
     <td class="num"><b>${eur(c.importo)}</b><span class="sub">${c.totale!==''?eur(c.totale)+' con IVA':''}</span></td>
     <td>${pill(c.stato)}</td>
-    <td><div class="rowacts"><button class="btn ghost" data-act="edit" data-id="${o.id}">Modifica</button><button class="btn ghost" data-act="att" data-id="${o.id}">Allegati${attachFor('noleggi',o.numero).length?' ('+attachFor('noleggi',o.numero).length+')':''}</button><button class="btn ghost" data-act="dup" data-id="${o.id}">Duplica</button><button class="btn ghost danger" data-act="del" data-id="${o.id}" aria-label="Elimina">Elimina</button></div></td>
+    <td><div class="rowacts"><button class="btn ghost" data-act="edit" data-id="${o.id}">Modifica</button><button class="btn ghost" data-act="att" data-id="${o.id}">Allegati${attachFor('noleggi',o.numero).length?' ('+attachFor('noleggi',o.numero).length+')':''}</button>${confrontabile(o)?`<button class="btn ghost" data-act="cfr" data-id="${o.id}">Confronta foto</button>`:''}<button class="btn ghost" data-act="dup" data-id="${o.id}">Duplica</button><button class="btn ghost danger" data-act="del" data-id="${o.id}" aria-label="Elimina">Elimina</button></div></td>
   </tr>`;}).join(''):`<tr><td colspan="10" class="empty">${S.rows.length?'Nessun contratto corrisponde ai filtri.':'Il registro è vuoto. Aggiungi il primo contratto con “Nuovo contratto”.'}</td></tr>`;
 }
 
@@ -2989,6 +3060,8 @@ const PARAMS_EXTRA=[
  ['firmatario',26,'Firmatario dei documenti',''],
  ['prefissoPF',27,'Prefisso numerazione proforma','PF-'],
  ['cdcInit',28,'Centri di costo inizializzati',''],
+ ['aggiornaAuto',29,'Aggiornamento automatico dal registro (Sì/No)','Sì'],
+ ['aggiornaOgni',30,'Controlla il registro ogni (secondi)',45],
 ];
 
 const MODS={
@@ -3837,6 +3910,7 @@ function openBulkEdit(modKey,list,onDone){
 }
 async function deleteRecord(key,r){
   const m=MODS[key];const name=r.codice||r[m.key]||'record';
+  if(m.canDelete){const no=m.canDelete(r);if(no){toast(no,true);return false;}}
   const att=m.attach?attachFor(key,recRef(key,r)):[];
   if(!await confirmBox('Eliminare il record?',`${esc(name)} verrà eliminato${att.length?` insieme a ${att.length} allegati`:''}.`,'Elimina',true))return false;
   for(const a of att)await removeAttachment(a,true);
@@ -5365,6 +5439,8 @@ function renderDip(){
         return c||q?`<span class="pill ${c&&q?'run':'fut'}">${c}+${q}</span><span class="sub">consegna + riconsegna</span>`:'<span class="muted">nessuna</span>';},
         s:r=>assFoto(r,'apertura').length+assFoto(r,'chiusura').length}],
     rowActions:[{l:'Foto del mezzo',fn:r=>openRecord('ass',r,{onSaved:renderDip})},
+      {l:'Confronta foto',show:r=>assFoto(r,'apertura').length>0&&assFoto(r,'chiusura').length>0,
+       fn:confrontaAssegnazione},
       {l:'Verbale di consegna',fn:stampaAssegnazione},
       {l:'Chiudi oggi',show:r=>!r.al,fn:r=>{r.al=todayISO();const m=mezzoBy(r.targa);if(m&&m.km!=='')r.kmRiconsegna=m.km;markDirty();renderDip();toast('Assegnazione chiusa.');}}],
   });
@@ -6585,13 +6661,74 @@ function utenteCorrente(){
   if(!SESSIONE)return null;
   return (S.utenti||[]).find(u=>emailEq(u.email,SESSIONE.email)&&u.attivo!=='No')||null;
 }
-function ruolo(){
-  if(!SESSIONE)return 'master';
+/* =====================================================================
+   GERARCHIE DI ACCESSO — le protezioni contro il restare fuori
+   Il registro è un file: chi ce l'ha può aprirlo comunque con Excel. Il
+   ruolo serve a dare a ciascuno la sua vista, non a fare da serratura —
+   la serratura sono i permessi di SharePoint. Perciò qui la priorità non è
+   blindare, è non lasciare mai la struttura senza qualcuno che possa
+   rimettere a posto gli accessi.
+   ===================================================================== */
+const masterAttivi=()=>(S.utenti||[]).filter(u=>u.attivo!=='No'&&ruoloKey(u.ruolo)==='master');
+
+/* Il ruolo vero, quello che dice l'anagrafica. */
+function ruoloReale(){
+  if(!SESSIONE)return 'master';                  /* nessun accesso configurato */
   if(!S.wb)return 'master';                      /* senza registro non c'è un elenco utenti */
   if(!(S.utenti||[]).length)return 'master';     /* registro senza utenti: chi entra lo configura */
+  if(!masterAttivi().length)return 'master';     /* uscita di sicurezza: nessun Master in elenco */
   const u=utenteCorrente();if(!u)return 'ospite';
   return ruoloKey(u.ruolo)||'lettura';
 }
+/* Il ruolo che si sta usando: può essere una prova, ma solo verso il basso e
+   solo se davvero sei Master. Nessuna simulazione può dare più poteri. */
+function ruolo(){
+  const vero=ruoloReale();
+  if(vero==='master'&&S.comeRuolo&&RUOLI[S.comeRuolo]&&S.comeRuolo!=='master')return S.comeRuolo;
+  return vero;
+}
+const inProva=()=>ruoloReale()==='master'&&!!S.comeRuolo&&S.comeRuolo!=='master';
+
+function provaRuolo(k,cdc){
+  if(ruoloReale()!=='master')return toast('Solo un Master può provare gli altri ruoli.',true);
+  S.comeRuolo=k||'';S.comeCdc=k==='filiale'?(cdc||''):'';
+  S.tab='cruscotto';render();renderSide();strisciaProva();
+  if(k)toast(`Stai vedendo il gestionale come ${RUOLI[k].l}${S.comeCdc?' – '+cdcNome(S.comeCdc):''}.`);
+  else toast('Sei tornato al tuo ruolo.');
+}
+function strisciaProva(){
+  const vec=document.getElementById('provaBanner');if(vec)vec.remove();
+  if(!inProva())return;
+  const b=document.createElement('div');b.id='provaBanner';b.className='provabanner';
+  b.innerHTML=`<span>Stai guardando come <b>${esc(RUOLI[S.comeRuolo].l)}</b>${S.comeCdc?' · '+esc(cdcNome(S.comeCdc)):''} — è una prova, i tuoi poteri sono intatti.</span>
+    <button class="btn" data-provaesci>Torna a essere me</button>`;
+  document.body.appendChild(b);
+  b.querySelector('[data-provaesci]').onclick=()=>provaRuolo('');
+}
+
+/* ---------- le protezioni sul foglio Utenti ---------- */
+MODS.utenti.validate=(x,errs,rec)=>{
+  const k=ruoloKey(x.ruolo);
+  if(!k)errs.ruolo='Ruolo non riconosciuto';
+  if(k==='filiale'&&!x.centroCosto)errs.centroCosto='Un ruolo Filiale senza centro di costo non vedrebbe niente';
+  if(x.email&&(S.utenti||[]).some(u=>u!==rec&&emailEq(u.email,x.email)))
+    errs.email='Questa email è già in elenco: due righe per la stessa persona si contraddicono';
+  /* l'ultimo Master non si tocca */
+  const altri=masterAttivi().filter(u=>u!==rec);
+  const restaMaster=k==='master'&&x.attivo!=='No';
+  if(!altri.length&&rec&&ruoloKey(rec.ruolo)==='master'&&rec.attivo!=='No'&&!restaMaster)
+    return 'Questo è l’unico Master attivo. Se lo togli, nessuno potrà più gestire utenti e parametri: prima nomina un altro Master, poi torna qui.';
+  return '';
+};
+MODS.utenti.canDelete=r=>{
+  if(ruoloKey(r.ruolo)!=='master'||r.attivo==='No')return '';
+  return masterAttivi().filter(u=>u!==r).length
+    ?'':'Non posso eliminare l’unico Master attivo: resteresti senza nessuno che possa gestire gli accessi.';
+};
+/* Togliersi il Master da soli è legittimo — un altro Master può rimetterti —
+   ma non deve succedere per distrazione: la riga tua è marcata nell'elenco e
+   qui arriva un avviso esplicito prima del salvataggio. */
+const SONO_IO=u=>!!(SESSIONE&&u&&emailEq(u.email,SESSIONE.email));
 const ruoloDef=()=>RUOLI[ruolo()]||null;
 function tabsConsentite(){
   const r=ruoloDef();if(!r)return [];
@@ -7382,6 +7519,7 @@ function gioRiep(seg){
 const FILIALE_TABS=['cruscotto','calendario','mezzi','gio','man','sin','disp','dot','dip'];
 const FILIALE_FISSA="Amazon Burago";
 function filiale(){
+  if(typeof inProva==='function'&&inProva())return S.comeRuolo==='filiale'?(S.comeCdc||''):'';
   const u=utenteCorrente();
   if(u&&ruoloKey(u.ruolo)==='filiale')return u.centroCosto||'';   /* se c'e' un accesso, decide l'account */
   if(!S.cdc||!S.cdc.length)return FILIALE_FISSA;
@@ -7764,6 +7902,21 @@ function renderParam(){
       <span class="muted" data-appstato style="align-self:center"></span>
     </div></div>
   <div class="panel" style="max-width:980px;margin-top:16px">
+    <h3>Aggiornamento automatico</h3>
+    <p class="muted">Il registro è un file solo e lo aprono in più persone. Il gestionale controlla da solo se qualcun altro
+    l’ha salvato e si aggiorna, senza chiudere e riaprire la sessione. Non ricarica mai sopra il tuo lavoro: se hai modifiche
+    non salvate o una scheda aperta, te lo dice e aspetta.</p>
+    <div class="fgrid">
+      <div class="field s3"><label for="p_aggauto">Aggiornamento automatico</label>
+        <select class="input" id="p_aggauto" data-k="aggiornaAuto">${['Sì','No'].map(v=>`<option ${(S.par.aggiornaAuto||'Sì')===v?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="field s3"><label for="p_aggogni">Controlla ogni (secondi)</label>
+        <input class="input" type="number" min="15" max="3600" step="5" id="p_aggogni" data-k="aggiornaOgni" value="${esc(S.par.aggiornaOgni||45)}"></div>
+    </div>
+    <div class="acts" style="justify-content:flex-start">
+      <button class="btn primary" data-aggnow>Controlla adesso</button>
+      <span class="muted" data-aggstato style="align-self:center"></span>
+    </div></div>
+  <div class="panel" style="max-width:980px;margin-top:16px">
     <h3>Piattaforma dei turni</h3>
     <p class="muted">Il piano dei turni diventa una giornaliera aperta per ogni autista: data, turno, orario previsto
     e mezzo, se la piattaforma lo indica. Gli autisti la chiudono dal telefono con km, carburante e foto, e il
@@ -7786,6 +7939,13 @@ function renderParam(){
         `<button data-asp="${v}" class="${aspetto()===v?'on':''}">${l}</button>`).join('')}
     </div></div>`);
   m.querySelectorAll('[data-asp]').forEach(b=>b.onclick=()=>setAspetto(b.dataset.asp));
+  const an=m.querySelector('[data-aggnow]');
+  if(an)an.onclick=async()=>{const s=m.querySelector('[data-aggstato]');
+    if(s)s.textContent='controllo in corso…';
+    const c=await controllaAggiornamenti(true);
+    if(s&&!c)s.textContent='nessuna novità alle '+timeIT(new Date());};
+  const as=m.querySelector('[data-aggstato]');
+  if(as)as.textContent=AGG.ultimo?('ultimo controllo alle '+timeIT(new Date(AGG.ultimo))):'non ancora controllato';
   const tf=m.querySelector('[data-turnifile]');if(tf)tf.onclick=importaTurniDaFile;
   const tc=m.querySelector('[data-turnicart]');if(tc)tc.onclick=()=>importaDaTurni(false);
   const tp=m.querySelector('[data-turniflotta]');if(tp)tp.onclick=()=>pubblicaFlotta(false);
@@ -7959,6 +8119,502 @@ async function docExport(l){
   ws.columns.forEach(c=>{c.width=Math.min(52,Math.max(14,...c.values.slice(1).map(v=>String(v||'').length+2)));});
   await saveFile(`Documenti_${stampNow()}.xlsx`,new Blob([await wb.xlsx.writeBuffer()],{type:XLSX_MIME}));
 }
+
+/* =====================================================================
+   CONFRONTO FOTO: consegna contro riconsegna
+   Mette le due foto dello stesso lato una accanto all'altra, le sovrappone
+   con una tendina, e accende le zone che sono cambiate.
+
+   Su che cosa si basa: non c'è nessun riconoscitore di danni qui dentro —
+   sarebbe una promessa che un file HTML non può mantenere. C'è un confronto
+   di immagini: le due foto vengono portate alla stessa scala, allineate per
+   quel tanto che basta a correggere un'inquadratura leggermente diversa,
+   ripulite dalla differenza di luce, e poi sottratte. Quello che resta sono
+   le zone cambiate. Un graffio nuovo si accende; si accendono anche una
+   pozzanghera, un riflesso, il furgone parcheggiato di fianco. Perciò quello
+   che si legge a video è «zona cambiata», mai «danno»: il mestiere di questa
+   funzione è dire dove guardare, non decidere.
+   ===================================================================== */
+
+const CF_LATO=['Anteriore','Posteriore','Lato guida','Lato passeggero',
+  'Interno e vano di carico','Contachilometri','Danno rilevato','Altro'];
+/* Parole che si trovano nei nomi dei file, comprese quelle dell'app. */
+const CF_SINONIMI=[
+  [/anterior|frontal|\bfront\b|davanti|muso/i,'Anteriore'],
+  [/posterior|\bretro\b|dietro|\bback\b|portellon/i,'Posteriore'],
+  [/lato[\s_-]*guida|sinistr|\bleft\b|\bsx\b/i,'Lato guida'],
+  [/lato[\s_-]*passegger|destr|\bright\b|\bdx\b/i,'Lato passeggero'],
+  [/intern|vano|carico|cargo/i,'Interno e vano di carico'],
+  [/contakm|contachilometri|cruscott|\bkm\b|tachimetr/i,'Contachilometri'],
+  [/danno|graffi|ammacc|damage/i,'Danno rilevato'],
+];
+function fotoSlot(a){
+  const d=String(a.descrizione||'').trim();
+  if(CF_LATO.includes(d))return d;
+  const testo=[d,a.file||''].join(' ');
+  for(const [re,nome] of CF_SINONIMI)if(re.test(testo))return nome;
+  return 'Altro';
+}
+const CF_IMG=a=>/\.(jpe?g|png|webp|gif|bmp)$/i.test(a.file||'');
+
+/* Accoppia per lato, nell'ordine in cui sono state scattate. Quello che
+   resta spaiato non viene forzato dentro una coppia: viene mostrato a parte. */
+function coppieFoto(cons,ricons){
+  const g=l=>{const m={};for(const a of l.filter(CF_IMG)){(m[fotoSlot(a)]=m[fotoSlot(a)]||[]).push(a);}return m;};
+  const A=g(cons),B=g(ricons);
+  const coppie=[],soloA=[],soloB=[];
+  for(const slot of [...new Set([...Object.keys(A),...Object.keys(B)])].sort(
+      (x,y)=>CF_LATO.indexOf(x)-CF_LATO.indexOf(y))){
+    const a=A[slot]||[],b=B[slot]||[];
+    const n=Math.min(a.length,b.length);
+    for(let i=0;i<n;i++)coppie.push({slot,a:a[i],b:b[i]});
+    for(let i=n;i<a.length;i++)soloA.push({slot,att:a[i]});
+    for(let i=n;i<b.length;i++)soloB.push({slot,att:b[i]});
+  }
+  return {coppie,soloA,soloB};
+}
+
+/* ---------- lettura delle immagini ---------- */
+async function cfCarica(att){
+  const b=await getBlob(att);
+  const url=URL.createObjectURL(b);
+  try{
+    const img=await new Promise((ok,no)=>{const i=new Image();
+      i.onload=()=>ok(i);i.onerror=()=>no(new Error('immagine non leggibile'));i.src=url;});
+    return {img,url};
+  }catch(e){URL.revokeObjectURL(url);throw e;}
+}
+
+/* ---------- confronto vero e proprio ---------- */
+const CF_LATOMAX=512;        /* lato lungo di lavoro: oltre non serve */
+
+function cfGrigio(img,w,h){
+  const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+  const cx=cv.getContext('2d',{willReadFrequently:true});
+  cx.drawImage(img,0,0,w,h);
+  const d=cx.getImageData(0,0,w,h).data;
+  const g=new Float32Array(w*h);
+  for(let i=0,p=0;i<g.length;i++,p+=4)g[i]=0.2126*d[p]+0.7152*d[p+1]+0.0722*d[p+2];
+  return g;
+}
+/* Sfocatura a scatola separabile: due passate, costo lineare. */
+function cfBlur(src,w,h,r){
+  if(r<1)return src.slice();
+  const tmp=new Float32Array(w*h),out=new Float32Array(w*h);
+  const n=2*r+1;
+  for(let y=0;y<h;y++){
+    let s=0;const o=y*w;
+    for(let x=-r;x<=r;x++)s+=src[o+Math.min(w-1,Math.max(0,x))];
+    for(let x=0;x<w;x++){
+      tmp[o+x]=s/n;
+      s+=src[o+Math.min(w-1,x+r+1)]-src[o+Math.min(w-1,Math.max(0,x-r))];
+    }
+  }
+  for(let x=0;x<w;x++){
+    let s=0;
+    for(let y=-r;y<=r;y++)s+=tmp[Math.min(h-1,Math.max(0,y))*w+x];
+    for(let y=0;y<h;y++){
+      out[y*w+x]=s/n;
+      s+=tmp[Math.min(h-1,y+r+1)*w+x]-tmp[Math.min(h-1,Math.max(0,y-r))*w+x];
+    }
+  }
+  return out;
+}
+/* Il dettaglio locale: tolta la luce di fondo resta la forma delle cose.
+   Serve perché due foto fatte a ore diverse non siano tutte «cambiate». */
+function cfDettaglio(g,w,h){
+  const fondo=cfBlur(g,w,h,Math.max(4,Math.round(Math.min(w,h)/14)));
+  const out=new Float32Array(g.length);
+  for(let i=0;i<g.length;i++)out[i]=g[i]-fondo[i];
+  return out;
+}
+/* Allineamento: cerca lo spostamento che minimizza la differenza, prima a
+   passo largo e poi a passo uno attorno al migliore. Corregge un'inquadratura
+   spostata di qualche punto percentuale, non una foto scattata da un'altra
+   posizione. Lo scostamento zero va sempre provato, altrimenti due foto
+   identiche finiscono per risultare disallineate. */
+function cfAllinea(A,B,w,h,max){
+  const err=(dx,dy)=>{
+    let s=0,n=0;
+    for(let y=max;y<h-max;y+=3)for(let x=max;x<w-max;x+=3){
+      const d=A[y*w+x]-B[(y+dy)*w+(x+dx)];s+=d*d;n++;
+    }
+    return s/Math.max(1,n);
+  };
+  const cerca=(cx,cy,passo,raggio)=>{
+    let best={dx:cx,dy:cy,err:err(cx,cy)};
+    for(let ky=-raggio;ky<=raggio;ky++)for(let kx=-raggio;kx<=raggio;kx++){
+      const dx=cx+kx*passo,dy=cy+ky*passo;
+      if(Math.abs(dx)>max||Math.abs(dy)>max||(kx===0&&ky===0))continue;
+      const e=err(dx,dy);
+      if(e<best.err)best={dx,dy,err:e};
+    }
+    return best;
+  };
+  const passo=Math.max(1,Math.round(max/4));
+  const grossa=cerca(0,0,passo,4);
+  return passo>1?cerca(grossa.dx,grossa.dy,1,passo):grossa;
+}
+/* Componenti connesse su maschera binaria, senza ricorsione. */
+function cfComponenti(mask,w,h,minPix){
+  const visto=new Uint8Array(w*h),out=[];
+  const pila=new Int32Array(w*h);
+  for(let i=0;i<mask.length;i++){
+    if(!mask[i]||visto[i])continue;
+    let sp=0;pila[sp++]=i;visto[i]=1;
+    let n=0,x0=w,y0=h,x1=0,y1=0,somma=0;
+    while(sp){
+      const p=pila[--sp],px=p%w,py=(p-px)/w;
+      n++;somma+=mask[p];
+      if(px<x0)x0=px;if(px>x1)x1=px;if(py<y0)y0=py;if(py>y1)y1=py;
+      for(let k=0;k<4;k++){
+        const nx=px+(k===0?1:k===1?-1:0),ny=py+(k===2?1:k===3?-1:0);
+        if(nx<0||ny<0||nx>=w||ny>=h)continue;
+        const q=ny*w+nx;
+        if(mask[q]&&!visto[q]){visto[q]=1;pila[sp++]=q;}
+      }
+    }
+    if(n>=minPix)out.push({x:x0,y:y0,w:x1-x0+1,h:y1-y0+1,pixel:n,forza:somma/n});
+  }
+  return out;
+}
+function cfMediana(a){const s=Float32Array.from(a);s.sort();return s[Math.floor(s.length/2)];}
+
+function cfAnalizza(imgA,imgB){
+  const ra=imgA.naturalWidth/imgA.naturalHeight, rb=imgB.naturalWidth/imgB.naturalHeight;
+  if(Math.abs(ra-rb)/Math.max(ra,rb)>0.08)
+    return {comparabile:false,motivo:'le due foto hanno proporzioni diverse: una delle due è stata ritagliata o scattata in verticale'};
+  const w=ra>=1?CF_LATOMAX:Math.round(CF_LATOMAX*ra);
+  const h=ra>=1?Math.round(CF_LATOMAX/ra):CF_LATOMAX;
+  const A=cfDettaglio(cfGrigio(imgA,w,h),w,h);
+  const B=cfDettaglio(cfGrigio(imgB,w,h),w,h);
+  const max=Math.max(4,Math.round(Math.min(w,h)*0.06));
+  const al=cfAllinea(A,B,w,h,max);
+
+  // quanto si somigliano, una volta allineate
+  let sa=0,sb=0,sab=0,n=0;
+  for(let y=max;y<h-max;y++)for(let x=max;x<w-max;x++){
+    const a=A[y*w+x],b=B[(y+al.dy)*w+(x+al.dx)];
+    sa+=a*a;sb+=b*b;sab+=a*b;n++;
+  }
+  const somiglianza=sab/Math.max(1e-6,Math.sqrt(sa*sb));
+
+  /* Una foto scattata con meno luce ha lo stesso disegno, piu' piatto: se non
+     si pareggia l'ampiezza, ogni spigolo del mezzo risulta «cambiato». Qui il
+     dettaglio della seconda viene riportato alla scala della prima, cosi' il
+     confronto guarda la forma e non la forza del contrasto. */
+  const sA=Math.sqrt(sa/Math.max(1,n)),sB=Math.sqrt(sb/Math.max(1,n));
+  const k=(sB>1e-6&&sA>1e-6)?Math.max(0.4,Math.min(2.5,sA/sB)):1;
+  /* L'allineamento lavora a pixel interi, ma due scatti a mano libera sono
+     sfalsati di frazioni di pixel: sui bordi del mezzo resterebbe una riga
+     accesa a ogni spigolo. Per ogni punto si prende quindi la differenza
+     minima nell'intorno di un pixel: un bordo spostato trova sempre un
+     corrispondente lì accanto, un graffio nuovo no. */
+  const diff=new Float32Array(w*h);
+  for(let y=max;y<h-max;y++)for(let x=max;x<w-max;x++){
+    const a=A[y*w+x];let m=Infinity;
+    for(let v=-1;v<=1;v++)for(let u=-1;u<=1;u++){
+      const d=Math.abs(a-k*B[(y+al.dy+v)*w+(x+al.dx+u)]);
+      if(d<m)m=d;
+    }
+    diff[y*w+x]=m;
+  }
+  const liscio=cfBlur(diff,w,h,2);
+
+  // soglia robusta: mediana più scarto mediano, così il rumore del sensore
+  // e una grana diversa non fanno da soli scattare niente
+  const campione=[];for(let i=0;i<liscio.length;i+=7)if(liscio[i]>0)campione.push(liscio[i]);
+  const med=cfMediana(campione);
+  const scarti=campione.map(v=>Math.abs(v-med));
+  const mad=cfMediana(scarti)||1;
+  const soglia=Math.max(med+6*mad,6);
+
+  /* Dove la foto ha gia' uno spigolo marcato — il bordo del cassone, il
+     passaruota, il montante — bastano frazioni di pixel di sfasamento per
+     produrre una differenza. Un segno nuovo invece nasce dove prima non c'era
+     niente. Quindi sugli spigoli si chiede piu' prova che sulle superfici
+     lisce, in proporzione a quanto quello spigolo e' marcato. */
+  const grad=new Float32Array(w*h);
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+    const gx=A[y*w+x+1]-A[y*w+x-1], gy=A[(y+1)*w+x]-A[(y-1)*w+x];
+    grad[y*w+x]=Math.sqrt(gx*gx+gy*gy);
+  }
+  const gradL=cfBlur(grad,w,h,2);
+  const mask=new Float32Array(w*h);
+  let accesi=0;
+  for(let i=0;i<liscio.length;i++){
+    const richiesta=soglia+0.45*gradL[i];
+    if(liscio[i]>richiesta){mask[i]=liscio[i]-richiesta;accesi++;}
+  }
+  const copertura=accesi/(w*h);
+
+  if(somiglianza<0.35)
+    return {comparabile:false,somiglianza,copertura,
+      motivo:'le due foto non inquadrano la stessa cosa abbastanza da poterle confrontare: rifalle dalla stessa posizione'};
+  if(copertura>0.25)
+    return {comparabile:false,somiglianza,copertura,
+      motivo:'è cambiato troppo fra le due foto (luce, sfondo o posizione): il confronto automatico non direbbe niente di utile'};
+
+  const minPix=Math.max(12,Math.round(w*h*0.0006));
+  let zone=cfComponenti(mask,w,h,minPix)
+    .map(z=>({...z,area:z.pixel/(w*h),peso:z.pixel*z.forza,
+      cx:(z.x+z.w/2)/w, cy:(z.y+z.h/2)/h,
+      rx:z.x/w, ry:z.y/h, rw:z.w/w, rh:z.h/h}))
+    .sort((a,b)=>b.peso-a.peso);
+  /* Meglio poche zone da guardare davvero che una coda di riquadri marginali:
+     si tiene quello che pesa almeno un terzo della zona principale. */
+  if(zone.length){const top=zone[0].peso;zone=zone.filter(z=>z.peso>=top*0.33).slice(0,6);}
+  return {comparabile:true,somiglianza,copertura,zone,w,h,soglia,allineamento:al};
+}
+
+function cfDove(z){
+  const v=z.cy<0.34?'in alto':z.cy>0.66?'in basso':'a metà altezza';
+  const o=z.cx<0.34?'a sinistra':z.cx>0.66?'a destra':'al centro';
+  return `${v} ${o}`;
+}
+
+/* ---------- la finestra di confronto ---------- */
+async function apriConfronto({titolo,sottotitolo,consegna,riconsegna}){
+  const {coppie,soloA,soloB}=coppieFoto(consegna||[],riconsegna||[]);
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';
+  d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const urls=[];
+  const chiudi=()=>{urls.forEach(u=>URL.revokeObjectURL(u));sc.remove();d.remove();document.removeEventListener('keydown',kd);};
+  const kd=e=>{if(e.key==='Escape'&&d.isConnected&&!document.querySelector('.modal'))chiudi();};
+  d.innerHTML=`<header><h2>${esc(titolo)}</h2><button class="btn ghost" data-x aria-label="Chiudi">Chiudi</button></header>
+    <div class="body">
+      ${sottotitolo?`<p class="muted">${esc(sottotitolo)}</p>`:''}
+      <div class="panel" style="padding:12px 16px;margin-bottom:14px">
+        <b>Come leggere le zone accese.</b>
+        <p class="muted" style="margin:6px 0 0;font-size:13px">Il confronto allinea le due foto e accende quello che è cambiato.
+        Non riconosce i danni: si accende anche su sporco, pioggia, riflessi, un'ombra diversa o un'inquadratura spostata.
+        Serve a dirti <b>dove guardare</b>; quello che è successo lo decidi tu guardando.</p>
+      </div>
+      ${coppie.length?'<div id="cfLista"></div>':'<div class="panel empty">Non ci sono coppie di foto dello stesso lato da confrontare.</div>'}
+      ${(soloA.length||soloB.length)?`<div class="panel" style="margin-top:14px">
+        <h3>Foto senza corrispondenza</h3>
+        <p class="muted" style="font-size:13px;margin:-2px 0 8px">Scattate da un lato solo: non c'è niente con cui confrontarle.</p>
+        <div style="overflow-x:auto"><table class="grid mini" style="min-width:340px"><tbody>
+        ${soloA.map(x=>`<tr><td>${esc(x.slot)}</td><td>${esc(x.att.file)}</td><td>solo alla consegna</td></tr>`).join('')}
+        ${soloB.map(x=>`<tr><td>${esc(x.slot)}</td><td>${esc(x.att.file)}</td><td>solo alla riconsegna</td></tr>`).join('')}
+        </tbody></table></div></div>`:''}
+    </div>
+    <footer><button class="btn" data-x>Chiudi</button></footer>`;
+  document.body.append(sc,d);
+  sc.onclick=chiudi;d.querySelectorAll('[data-x]').forEach(b=>b.onclick=chiudi);
+  document.addEventListener('keydown',kd);
+  const hd=d.querySelector('header');
+  if(hd&&modoApp()&&!hd.querySelector('.indietro')){
+    const ind=document.createElement('button');ind.className='indietro';
+    ind.setAttribute('aria-label','Indietro');ind.innerHTML=ico('indietro',20);
+    ind.onclick=chiudi;hd.prepend(ind);
+  }
+  const lista=d.querySelector('#cfLista');
+  if(!lista)return;
+
+  for(const [i,c] of coppie.entries()){
+    const box=document.createElement('div');
+    box.className='panel';box.style.marginBottom='14px';
+    box.innerHTML=`<div class="sechead"><h3>${esc(c.slot)}</h3>
+        <span class="muted" data-cfst>confronto in corso…</span></div>
+      <div class="seg" role="group" style="margin-bottom:10px">
+        <button data-v="aff" class="on">Affiancate</button>
+        <button data-v="sov">Sovrapposte</button>
+        <button data-v="dif">Zone cambiate</button>
+      </div>
+      <div data-cfvista></div>`;
+    lista.appendChild(box);
+    const stato=box.querySelector('[data-cfst]');
+    const vista=box.querySelector('[data-cfvista]');
+    let A,B,ris;
+    try{
+      const ca=await cfCarica(c.a),cb=await cfCarica(c.b);
+      urls.push(ca.url,cb.url);A=ca;B=cb;
+    }catch(e){ stato.textContent='foto non leggibile: '+e.message; continue; }
+    try{ ris=cfAnalizza(A.img,B.img); }
+    catch(e){ ris={comparabile:false,motivo:'confronto non riuscito: '+e.message}; }
+
+    const didascalia=`<div class="cfdue"><figure><img src="${A.url}" alt="Consegna ${esc(c.slot)}"><figcaption>Consegna${c.a.dataDocumento?' · '+fmtD(c.a.dataDocumento):''}</figcaption></figure>
+      <figure><img src="${B.url}" alt="Riconsegna ${esc(c.slot)}"><figcaption>Riconsegna${c.b.dataDocumento?' · '+fmtD(c.b.dataDocumento):''}</figcaption></figure></div>`;
+    const sovrapposte=`<div class="cfslider"><img src="${A.url}" alt="Consegna"><div class="cftop"><img src="${B.url}" alt="Riconsegna"></div>
+      <input type="range" min="0" max="100" value="50" aria-label="Tendina di confronto"></div>
+      <p class="muted" style="font-size:12.5px;margin:8px 0 0">A sinistra della tendina la consegna, a destra la riconsegna.</p>`;
+    const zone=(ris.zone||[]);
+    const differenze=ris.comparabile
+      ? `<div class="cfzone"><img src="${B.url}" alt="Riconsegna con le zone cambiate">
+          ${zone.map((z,k)=>`<span class="cfbox" style="left:${(z.rx*100).toFixed(2)}%;top:${(z.ry*100).toFixed(2)}%;width:${(z.rw*100).toFixed(2)}%;height:${(z.rh*100).toFixed(2)}%"><b>${k+1}</b></span>`).join('')}</div>
+         ${zone.length?`<div style="overflow-x:auto;margin-top:10px"><table class="grid mini" style="min-width:320px"><thead><tr><th>#</th><th>Dove</th><th class="num">Quanto</th></tr></thead><tbody>
+            ${zone.map((z,k)=>`<tr><td>${k+1}</td><td>${esc(cfDove(z))}</td><td class="num">${(z.area*100).toFixed(1)}% dell'immagine</td></tr>`).join('')}
+            </tbody></table></div>`
+          :'<p class="muted" style="margin:10px 0 0">Nessuna zona cambiata oltre il rumore delle due foto.</p>'}`
+      : `<div class="panel" style="border-left:3px solid var(--warn)"><b>Confronto non attendibile</b>
+         <p class="muted" style="margin:6px 0 0;font-size:13px">${esc(ris.motivo)}</p></div>`;
+
+    const viste={aff:didascalia,sov:sovrapposte,dif:differenze};
+    const mostra=v=>{vista.innerHTML=viste[v];
+      box.querySelectorAll('[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+      const r=vista.querySelector('.cfslider input');
+      if(r){const top=vista.querySelector('.cftop');
+        const agg=()=>{top.style.clipPath=`inset(0 0 0 ${r.value}%)`;};r.oninput=agg;agg();}
+    };
+    box.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>mostra(b.dataset.v));
+    mostra('aff');
+    stato.innerHTML=ris.comparabile
+      ? (zone.length?`<b class="warnc">${zone.length} ${zone.length===1?'zona cambiata':'zone cambiate'}</b> · somiglianza ${(ris.somiglianza*100).toFixed(0)}%`
+                    :`<b class="cfok">nessuna zona cambiata</b> · somiglianza ${(ris.somiglianza*100).toFixed(0)}%`)
+      : '<b class="warnc">non confrontabili</b>';
+  }
+}
+
+/* Le foto di un contratto di noleggio: quelle attaccate al contratto, più
+   quelle delle giornaliere dello stesso mezzo nel periodo, che è dove
+   finiscono gli scatti fatti dall'app. */
+function fotoNoleggio(row){
+  const dentro=a=>CF_IMG(a);
+  const cons=S.all.filter(a=>a.modulo==='noleggi'&&a.riferimento===row.numero&&a.tipo==='Foto consegna mezzo'&&dentro(a));
+  const ric=S.all.filter(a=>a.modulo==='noleggi'&&a.riferimento===row.numero&&a.tipo==='Foto riconsegna mezzo'&&dentro(a));
+  if(cons.length&&ric.length)return {cons,ric,fonte:'contratto'};
+  // ripiego: le giornaliere del mezzo, la prima e l'ultima del periodo
+  const gg=S.gio.filter(g=>g.targa&&normTarga(g.targa)===normTarga(row.targa)
+      &&g.data>=row.inizio&&g.data<=(row.fine||'9999-12-31'))
+    .sort((a,b)=>a.data<b.data?-1:1);
+  if(gg.length>=1){
+    const primo=gg[0],ultimo=gg[gg.length-1];
+    const c=cons.concat(S.all.filter(a=>a.modulo==='gio'&&a.riferimento===primo.codice&&a.tipo==='Foto consegna mezzo'&&dentro(a)));
+    const r=ric.concat(S.all.filter(a=>a.modulo==='gio'&&a.riferimento===ultimo.codice&&a.tipo==='Foto riconsegna mezzo'&&dentro(a)));
+    if(c.length&&r.length)return {cons:c,ric:r,fonte:'giornaliere'};
+  }
+  return {cons,ric,fonte:'contratto'};
+}
+const confrontabile=row=>{const f=fotoNoleggio(row);return f.cons.length>0&&f.ric.length>0;};
+function confrontaNoleggio(row){
+  const f=fotoNoleggio(row);
+  if(!f.cons.length||!f.ric.length)
+    return toast('Per confrontare servono sia le foto della consegna sia quelle della riconsegna.',true);
+  apriConfronto({
+    titolo:`Consegna e riconsegna · ${row.numero||row.targa}`,
+    sottotitolo:`${row.targa}${row.locataria?' · '+row.locataria:''} · dal ${fmtD(row.inizio)} al ${fmtD(row.fine)}`
+      +(f.fonte==='giornaliere'?' · foto prese dalle giornaliere del periodo':''),
+    consegna:f.cons,riconsegna:f.ric});
+}
+/* Lo stesso per un'assegnazione a un dipendente. */
+function confrontaAssegnazione(a){
+  const cons=S.all.filter(x=>x.modulo==='ass'&&x.riferimento===a.codice&&x.tipo==='Foto consegna mezzo'&&CF_IMG(x));
+  const ric=S.all.filter(x=>x.modulo==='ass'&&x.riferimento===a.codice&&x.tipo==='Foto riconsegna mezzo'&&CF_IMG(x));
+  if(!cons.length||!ric.length)
+    return toast('Per confrontare servono sia le foto della consegna sia quelle della riconsegna.',true);
+  apriConfronto({titolo:`Consegna e riconsegna · ${a.targa}`,
+    sottotitolo:`${dipName(dipBy(a.dipendente))||''} · dal ${fmtD(a.dal)}${a.al?' al '+fmtD(a.al):''}`,
+    consegna:cons,riconsegna:ric});
+}
+
+
+/* =====================================================================
+   AGGIORNAMENTO AUTOMATICO
+   Il registro sta in un file condiviso: quando lo salva un'altra postazione,
+   qui dentro i dati sono vecchi. Il controllo guarda la data di modifica del
+   file — una lettura leggera, non rilegge il contenuto — e interviene solo
+   quando serve.
+
+   Non ricarica mai sopra il lavoro di qualcuno: se ci sono modifiche non
+   salvate, o se c'è una scheda aperta a metà, si limita ad avvisare.
+   ===================================================================== */
+const AGG={base:45000,occupato:false,ultimo:0,banner:false};
+const aggAttivo=()=>!(S.par&&S.par.aggiornaAuto==='No');
+function aggOgni(){
+  const v=+((S.par&&S.par.aggiornaOgni)||0);
+  return v>0?Math.max(15,Math.min(3600,v))*1000:AGG.base;
+}
+/* Una scheda aperta, una finestra di conferma, un confronto foto: ricaricare
+   adesso vorrebbe dire cancellare quello che la persona sta scrivendo. */
+const aggOccupato=()=>!!(document.querySelector('.drawer')||document.querySelector('.modal')
+  ||document.querySelector('.scrim')||document.querySelector('#busy'));
+async function aggFile(){
+  if(S.mode==='folder'&&S.dir)return await S.dir.getFileHandle(S.fileName);
+  return S.fh||null;
+}
+async function controllaAggiornamenti(forzato){
+  if(!S.wb||S.saving||AGG.occupato||S.mode==='download')return false;
+  if(!forzato&&(!aggAttivo()||document.hidden))return false;
+  AGG.occupato=true;
+  try{
+    const fh=await aggFile();if(!fh)return false;
+    const f=await fh.getFile();
+    AGG.ultimo=Date.now();
+    if(!S.fileTs||f.lastModified<=S.fileTs+2000){
+      if(forzato)toast('Il registro è già aggiornato.');
+      return false;
+    }
+    if(!S.dirty&&!aggOccupato()){await ricaricaRegistro(f);return true;}
+    await bannerAggiorna(f);
+    return true;
+  }catch(e){
+    if(forzato)toast('Non riesco a controllare il registro: '+e.message,true);
+    return false;
+  }finally{AGG.occupato=false;}
+}
+/* Rilegge il file e rimette la persona dov'era: stessa sezione, stessa
+   posizione nella pagina. Un aggiornamento che fa saltare altrove è peggio
+   di nessun aggiornamento. */
+async function ricaricaRegistro(f){
+  const tab=S.tab,scroll=window.scrollY,nome=S.fileName;
+  busy(true,'Aggiornamento dal registro');
+  try{
+    const buf=await f.arrayBuffer();
+    await loadWorkbook(buf,nome);
+    S.fileTs=f.lastModified;S.dirty=false;
+    try{await clearDraft();}catch(e){}
+    S.tab=tab;
+  }catch(e){busy(false);return toast('Aggiornamento non riuscito: '+e.message,true);}
+  busy(false);
+  render();renderSide();updateHeader();
+  try{window.scrollTo(0,scroll);}catch(e){}
+  let chi='';
+  try{const l=await readLock();if(l&&l.operatore&&l.operatore!==chiMi())chi=l.operatore;}catch(e){}
+  toast(`Registro aggiornato alle ${timeIT(new Date())}${chi?' — ultimo salvataggio di '+chi:''}.`);
+  togliBanner();
+}
+function togliBanner(){const b=document.getElementById('aggBanner');if(b)b.remove();AGG.banner=false;}
+async function bannerAggiorna(f){
+  if(AGG.banner)return;
+  AGG.banner=true;
+  let chi='';
+  try{const l=await readLock();if(l&&l.operatore&&l.operatore!==chiMi())chi=l.operatore;}catch(e){}
+  const b=document.createElement('div');b.id='aggBanner';b.className='aggbanner';
+  b.innerHTML=`<div><b>Il registro è stato salvato${chi?' da '+esc(chi):' da un’altra postazione'}</b>
+      <span>${S.dirty?'Hai modifiche non ancora salvate. Salvandole, se il file è cambiato sotto ti verrà chiesto come procedere.'
+                     :'Ricarica per vedere quello che hanno inserito gli altri.'}</span></div>
+    <div class="aggact">${S.dirty?'<button class="btn primary" data-aggsalva>Salva le mie modifiche</button>':''}
+      <button class="btn ${S.dirty?'':'primary'}" data-aggora>${S.dirty?'Ricarica e perdi le mie':'Ricarica adesso'}</button>
+      <button class="btn ghost" data-aggno>Più tardi</button></div>`;
+  document.body.appendChild(b);
+  b.querySelector('[data-aggno]').onclick=togliBanner;
+  const ric=async()=>{
+    const fh=await aggFile();if(!fh)return togliBanner();
+    await ricaricaRegistro(await fh.getFile());
+  };
+  b.querySelector('[data-aggora]').onclick=async()=>{
+    if(S.dirty&&!await confirmBox('Ricaricare senza salvare?',
+      'Le modifiche che hai fatto e non hai salvato vengono perse. Restano nella bozza locale, ma non nel registro.',
+      'Ricarica',true))return;
+    await ric();
+  };
+  const bs=b.querySelector('[data-aggsalva]');
+  if(bs)bs.onclick=async()=>{
+    togliBanner();
+    await persist({manual:true,silent:true});
+    /* Se il file è cambiato sotto, persist apre da sé la scelta fra copia,
+       sovrascrittura e ricaricamento: qui si riparte da com'è finita, invece
+       di indovinare. */
+    if(S.dirty)return toast('Le tue modifiche non sono state salvate: il registro non è stato ricaricato.',true);
+    await controllaAggiornamenti(true);
+  };
+}
+setInterval(()=>{controllaAggiornamenti(false);},15000);
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&Date.now()-AGG.ultimo>5000)controllaAggiornamenti(false);
+});
 
 /* ---------- integrazione con il registro ---------- */
 function sheetRows(ws){
