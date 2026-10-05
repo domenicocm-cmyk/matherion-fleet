@@ -18,6 +18,7 @@ l'applicazione, non i dati.
 | `ACCESSI.md` | come registrare l'applicazione in Entra ID, dare i ruoli e spostare il registro su SharePoint |
 | `app/` | l'app dei telefoni per autisti e responsabili → indirizzo `/app` |
 | `APP.md` | come funziona l'app, chi vede che cosa, che cosa fare una volta sola |
+| `TURNI.md` | il collegamento con la piattaforma dei turni: i due file di scambio, campo per campo |
 | `vercel.json` | indirizzi puliti, cache e intestazioni di sicurezza |
 | `robots.txt` | tiene il sito fuori dai motori di ricerca |
 
