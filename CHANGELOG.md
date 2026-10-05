@@ -13,3 +13,9 @@
 - **2026.10.05d** — pubblicata il 05/10/2026 — sistema visivo Matherion
   Fleet: palette blu petrolio, tipografia e spaziature di `fleet-ui.css`,
   in tema chiaro e scuro. Nessun cambiamento di comportamento.
+- **2026.10.05e** — pubblicata il 05/10/2026 — fatturazione: l’avviso dei
+  canoni già in proforma si apre e dice quali contratti, per quale cliente e
+  in quale proforma; i numeri di contratto ripetuti vengono dichiarati.
+- **2026.10.05f** — pubblicata il 05/10/2026 — i mezzi fermi dichiarano dove
+  si trovano e su quale centro di costo maturano; la proforma stampata resta
+  allegata alla proforma; nuova sezione Documenti, creati e mancanti.

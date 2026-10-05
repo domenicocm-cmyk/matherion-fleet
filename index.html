@@ -969,7 +969,7 @@ const FORMULAS={
   V:r=>`IF(OR(F${r}="",G${r}=""),"",IF(TODAY()<F${r},"Da iniziare",IF(TODAY()>G${r},"Concluso","In corso")))`,
 };
 const ALLCOLS='ABCDEFGHIJKLMNOPQRSTUVWXY'.split('');
-const LC={nome:'A',indirizzo:'B',cap:'C',citta:'D',prov:'E',orari:'F',referente:'G',tel:'H'};
+const LC={nome:'A',indirizzo:'B',cap:'C',citta:'D',prov:'E',orari:'F',referente:'G',tel:'H',centroCosto:'I'};
 const PR={mese:2,iva:5,termine:6,preavviso:7,penaleRecesso:8,speseSanz:9,eta:10,anniPat:11,luogo:12,prefisso:13,penaleRit:14,mora:15,quadroTag:16};
 const BASE_ROWS={Noleggi:300,Mezzi:500,'Società':200,'Località':100,Liste:50};
 
@@ -1112,7 +1112,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.05d';
+const APP_VERSION='2026.10.05f';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -1315,7 +1315,7 @@ function renderOggi(){
   m.querySelectorAll('[data-sc]').forEach(b=>b.onclick=()=>{
     const x=sc.find(y=>y.key===b.dataset.sc);if(x&&x.nav)openNav(x.nav);});
 }
-const VIEWS={oggi:()=>renderOggi(),utenti:()=>renderUtenti(),cruscotto:()=>renderCruscotto(),contratti:()=>renderContratti(),stampa:()=>renderStampa(),fatturazione:()=>renderFatt(),mezzi:()=>renderMezzi(),gio:()=>renderGio(),archivio:()=>renderArchivio(),cp:()=>renderCp(),man:()=>renderMan(),sin:()=>renderSin(),vrb:()=>renderVrb(),rinotifiche:()=>renderRinot(),disp:()=>renderDisp(),calendario:()=>ui('calTab').tab==='a'?renderApp():renderCal(),dot:()=>renderDot(),soc:()=>renderSoc(),dip:()=>renderDip(),capfin:()=>renderCap(),cdc:()=>renderCdc(),anag:()=>renderAnag(),parametri:()=>renderParam()};
+const VIEWS={oggi:()=>renderOggi(),utenti:()=>renderUtenti(),cruscotto:()=>renderCruscotto(),contratti:()=>renderContratti(),stampa:()=>renderStampa(),fatturazione:()=>renderFatt(),mezzi:()=>renderMezzi(),gio:()=>renderGio(),archivio:()=>renderArchivio(),cp:()=>renderCp(),man:()=>renderMan(),sin:()=>renderSin(),vrb:()=>renderVrb(),rinotifiche:()=>renderRinot(),disp:()=>renderDisp(),calendario:()=>ui('calTab').tab==='a'?renderApp():renderCal(),dot:()=>renderDot(),soc:()=>renderSoc(),dip:()=>renderDip(),capfin:()=>renderCap(),cdc:()=>renderCdc(),anag:()=>renderAnag(),docs:()=>renderDocsHub(),parametri:()=>renderParam()};
 function render(){updateHeader();applicaModo();
   if(msAttivo()&&!SESSIONE)return renderAccesso();
   if(!S.wb)return renderStart();
@@ -3035,6 +3035,9 @@ mezzi:{sheet:'Mezzi',store:'mezzi',title:'Mezzi',key:'targa',attach:true,wide:tr
    fd('titolare','Società titolare (Albo e capacità finanziaria)','ref',{ref:'soc',flt:'tit',span:'s3'}),
    fd('stato','Stato operativo','sel',{opts:STATI_MEZZO,span:'s3',req:true,def:'Disponibile'}),
    fd('localita','Sede (località di ritiro)','ref',{ref:'loc',span:'s3',alt:['Località (sede)']}),
+   fd('ubicazione','Dove si trova ora','ref',{ref:'loc',span:'s3',hint:'Piazzale, deposito, officina: dove sta il mezzo quando non è a noleggio'}),
+   fd('ubicazioneDal','Fermo qui dal','date',{span:'s3'}),
+   fd('cdcSosta','Centro di costo della sosta','ref',{ref:'cdc',span:'s3',hint:'Vuoto: lo eredita dalla località, poi dal centro di costo del mezzo'}),
    fd('dataIngresso','Ingresso in flotta','date',{span:'s3'}),
    fd('dataUscitaFlotta','Uscita dalla flotta','date',{span:'s3'}),
    fd('km','Km attuali','int',{span:'s3',alt:['Km attuali']}),fd('kmData','Data rilevazione km','date',{span:'s3'}),
@@ -3337,7 +3340,7 @@ all:{sheet:'Allegati',store:'all',title:'Allegati',code:'AL',
    fd('dataDocumento','Data documento','date'),fd('scadenza','Scadenza documento','date'),fd('caricatoIl','Caricato il','date'),
    fd('note','Note','text')]}]},
 };
-const DOC_TIPI=['Visura camerale','Documento identità amministratore','Codice fiscale amministratore','Certificato di attribuzione P.IVA','Contratto','Carta di circolazione','Certificato di proprietà','Polizza assicurativa','Verbale','Foto','Modulo CAI','Denuncia','Perizia','Preventivo','Fattura','Patente','CQC','Carta tachigrafica','Attestazione','Documento di consegna','Foto consegna mezzo','Foto riconsegna mezzo','Altro'];
+const DOC_TIPI=['Visura camerale','Documento identità amministratore','Codice fiscale amministratore','Certificato di attribuzione P.IVA','Contratto','Carta di circolazione','Certificato di proprietà','Polizza assicurativa','Verbale','Foto','Modulo CAI','Denuncia','Perizia','Preventivo','Fattura','Patente','CQC','Carta tachigrafica','Attestazione','Documento di consegna','Foto consegna mezzo','Foto riconsegna mezzo','Proforma','Altro'];
 MODS.all.groups[0].f[2].opts=DOC_TIPI;
 const SHEET_ORDER=['Istruzioni','Noleggi','Mezzi','Contratti fornitori','Assegnazioni','Giornaliere','Manutenzioni','Sinistri','Verbali','Telepass e carte','Movimenti','Proforma','Proforma righe','Società','Dipendenti','Capacità finanziaria','Scadenze','Allegati','Località','Liste','Parametri','Riepilogo'];
 for(const [k,m] of Object.entries(MODS)){m.id=k;m.fields=m.groups.flatMap(g=>g.f);m.fmap=Object.fromEntries(m.fields.map(f=>[f.k,f]));}
@@ -3480,7 +3483,7 @@ const MENU=[
  {g:'Noleggio ai clienti',items:[['contratti','Contratti di noleggio'],['stampa','Stampa contratti'],['fatturazione','Fatturazione e proforma']]},
  {g:'Flotta',items:[['mezzi','Mezzi'],['gio','Giornaliere'],['cp','Contratti leasing e noleggio'],['man','Manutenzioni'],['sin','Sinistri'],['vrb','Verbali'],['rinotifiche','Rinotifiche'],['disp','Telepass e carte carburante'],['archivio','Archivio mezzi']]},
  {g:'Anagrafiche',items:[['soc','Clienti e fornitori'],['dip','Dipendenti e assegnazioni'],['capfin','Capacità finanziaria'],['anag','Località e tipologie']]},
- {g:'',items:[['parametri','Parametri']]},
+ {g:'',items:[['docs','Documenti'],['parametri','Parametri']]},
 ];
 function badges(){
   const sc=scadenzeAll().filter(x=>x.liv==='scaduta'||x.liv==='imminente').length;
@@ -5089,7 +5092,7 @@ function renderMezzi(){
       const conUt=S.mezzi.filter(m=>m.utilizzatore&&!ARCH(m)&&!FUORI_FLOTTA(m.stato));const inU=S.mezzi.filter(m=>!ARCH(m)&&dispo(m).label==='In uso').length;
       const nonRic=[...new Set(conUt.filter(m=>!isTitolareName(m.utilizzatore)).map(m=>m.utilizzatore))];
       return `<div class="panel" style="margin-top:14px;font-size:13.5px"><b>Regola “In uso”.</b> Un mezzo è in uso se è assegnato a un dipendente oppure se l’utilizzatore effettivo è una società titolare.
-        Società titolari: <b>${tit.length?esc(tit.join(', ')):'<span class="late">nessuna – segna Fast Rent come “Società titolare dei veicoli” in Clienti e fornitori</span>'}</b> · Mezzi in uso oggi: <b>${inU}</b>. ${nonRic.length?`Utilizzatori non considerati uso interno: ${esc(nonRic.slice(0,6).join(', '))}${nonRic.length>6?'…':''}.`:''}</div>`;})(),
+        Società titolari: <b>${tit.length?esc(tit.join(', ')):'<span class="late">nessuna – segna Fast Rent come “Società titolare dei veicoli” in Clienti e fornitori</span>'}</b> · Mezzi in uso oggi: <b>${inU}</b>. ${nonRic.length?`Utilizzatori non considerati uso interno: ${esc(nonRic.slice(0,6).join(', '))}${nonRic.length>6?'…':''}.`:''}</div>`+pannelloSosta();})(),
     newLabel:'Nuovo mezzo',searchPh:'Targa, marca, modello, telaio o società',
     search:['targa','marca','modello','telaio','proprietaria','contraente','utilizzatore','tipologia'],
     filters:[{k:'tipologia',label:'Tipologia',opts:tips,all:'Tutte'},
@@ -5097,6 +5100,8 @@ function renderMezzi(){
       {k:'__cli',label:'Cliente',all:'Tutti',opts:()=>[...new Set([...S.rows.filter(r=>r.fine>=todayISO()).map(r=>r.locataria),...S.mezzi.map(m=>m.utilizzatore)].filter(Boolean))].sort(),
         test:(r,v)=>r.utilizzatore===v||S.rows.some(x=>x.targa===r.targa&&x.locataria===v&&x.fine>=todayISO())},
       {k:'centroCosto',label:'Centro di costo',opts:()=>[...new Set(S.mezzi.map(m=>m.centroCosto).filter(Boolean))].sort(),all:'Tutti'},
+      {k:'__ubic',label:'Dove si trova',all:'Tutte',opts:()=>[...new Set(S.mezzi.filter(m=>!ARCH(m)).map(ubicazioneDi).filter(Boolean))].sort(),
+        test:(r,v)=>ubicazioneDi(r)===v},
       {k:'formaDisp',label:'Disponibilità giuridica',opts:()=>MODS.mezzi.fmap.formaDisp.opts,all:'Tutte'},
       {k:'__scad',label:'Scadenze',opts:()=>['Scadute o entro 30 giorni'],all:'Tutte',test:r=>['revisione','bollo','rcaScad','tachigrafo','atp'].some(k=>r[k]&&r[k]<=addDays(todayISO(),30))},
       {k:'__rev',label:'Controllo revisione',all:'Tutti',opts:()=>['Tutti i problemi',...Object.values(REV_LIV).map(x=>x.l)],
@@ -5116,7 +5121,9 @@ function renderMezzi(){
       {l:'Revisione',v:r=>{const rv=revisioneScadenza(r),c=revisioneCheck(r);
         return `${r.revisione?dueCell(r.revisione):'<span class="muted">–</span>'}${c?`<span class="sub ${REV_LIV[c.liv].c==='bad'?'late':'warnc'}">${esc(c.txt)}</span>`:rv?`<span class="sub">${rv.ogni===1?'annuale':'biennale'}</span>`:''}`;}},
       {l:'Polizza RCA',v:r=>dueCell(r.rcaScad)},
-      {l:'Disponibilità',v:r=>{const a=dispo(r);return `<span class="pill ${a.cls}">${esc(a.label)}</span><span class="sub">${a.row?esc(a.row.locataria):a.uso?esc((a.uso.tipo==='dipendente'?'assegnato a ':'')+a.uso.da):''}</span>`;}},
+      {l:'Disponibilità',v:r=>{const a=dispo(r);
+        const dove=a.row?esc(a.row.locataria):a.uso?esc((a.uso.tipo==='dipendente'?'assegnato a ':'')+a.uso.da):sostaTesto(r);
+        return `<span class="pill ${a.cls}">${esc(a.label)}</span><span class="sub">${dove}</span>`;}},
     ],
     rowActions:[
       {l:'Giornaliere',show:r=>S.gio.some(g=>normTarga(g.targa)===normTarga(r.targa)),
@@ -6012,12 +6019,38 @@ async function fatExcel(list){
   wb.calcProperties={fullCalcOnLoad:true};
   return new Blob([await wb.xlsx.writeBuffer()],{type:XLSX_MIME});
 }
+/* Attacca alla proforma la sua copia stampata. Se c'è già una copia con lo
+   stesso nome la sostituisce: ristampare non deve lasciare una scia di file. */
+async function allegaProforma(f,blob,nome){
+  try{
+    const vecchia=S.all.find(a=>a.modulo==='fat'&&a.riferimento===f.codice&&a.tipo==='Proforma');
+    if(vecchia)await removeAttachment(vecchia,true);
+    const path=`Allegati/fat/${safe(f.codice)}/${safe(nome)}`;
+    const arch=await putBlob(path,blob);
+    S.all.push({id:uid(),codice:nextCode(MODS.all),modulo:'fat',riferimento:f.codice,tipo:'Proforma',
+      descrizione:'Copia stampata',file:nome,percorso:path,archivio:arch,
+      dataDocumento:f.data||todayISO(),scadenza:'',caricatoIl:todayISO(),note:''});
+    markDirty();return true;
+  }catch(e){toast('Copia della proforma non allegata: '+e.message,true);return false;}
+}
+const copiaProforma=f=>S.all.find(a=>a.modulo==='fat'&&a.riferimento===f.codice&&a.tipo==='Proforma');
+
 async function sendToAdmin(list){
   if(!list.length)return;
   const docs=list.map(fatDocData);
   const f=await renderDocs('Proforma_Fatturazione',docs,{file:`Proforma_${stampNow()}.docx`});
   const x=await fatExcel(list);
   await saveInFolder(`Fatturazione/${stampNow()}`,[{name:f.name,data:f.blob},{name:`Riepilogo_fatturazione_${stampNow()}.xlsx`,data:x}]);
+  // il file inviato è cumulativo; agli allegati serve una copia per proforma
+  let allegate=0;
+  busy(true,'Allego la copia di ogni proforma');
+  try{
+    for(const p of list){
+      const d=await renderDocs('Proforma_Fatturazione',[fatDocData(p)],{file:`${p.codice}_${safe(p.cliente)}.docx`});
+      if(await allegaProforma(p,d.blob,d.name))allegate++;
+    }
+  }finally{busy(false);}
+  if(allegate)toast(`${allegate} ${allegate===1?'copia allegata alla sua proforma':'copie allegate alle rispettive proforma'}.`);
   if(await confirmBox('Segnare come inviate?',`Segno ${list.length} proforma come “Inviata ad amministrazione” e preparo l’email?`,'Conferma')){
     for(const p of list)if(p.stato==='Bozza'){p.stato='Inviata ad amministrazione';p.dataInvio=todayISO();}
     markDirty();renderFatt();
@@ -6035,9 +6068,14 @@ function renderFatt(){
     cols:[{l:'Proforma',v:r=>`<b>${esc(r.codice)}</b><span class="sub">${fmtD(r.data)}</span>`},{l:'Cliente',v:r=>`${esc(r.cliente)}${r.centroCosto?`<span class="sub">CdC ${esc(cdcNome(r.centroCosto))}</span>`:''}`},
       {l:'Periodo',v:r=>`${fmtD(r.periodoDa)} – ${fmtD(r.periodoA)}`},{l:'Righe',cls:'num',v:r=>S.righe.filter(x=>x.proforma===r.codice).length},
       {l:'Imponibile',cls:'num',v:r=>eur(r.imponibile)},{l:'Totale',cls:'num',v:r=>`<b>${eur(r.totale)}</b>`},
+      {l:'Copia',v:r=>{const a=copiaProforma(r);return a?`<span class="pill ok">allegata</span><span class="sub">${esc(fmtD(a.caricatoIl))}</span>`:'<span class="muted">non stampata</span>';}},
       {l:'Fattura SDI',v:r=>r.numeroFattura?`${esc(r.numeroFattura)}<span class="sub">${fmtD(r.dataFattura)}</span>`:'<span class="muted">–</span>'},
       {l:'Stato',v:r=>pillS(r.stato,{Bozza:'fut','Inviata ad amministrazione':'rent','Fattura emessa SDI':'run',Pagata:'end',Annullata:'end'}[r.stato])}],
-    rowActions:[{l:'Righe',fn:r=>openRighe(r)},{l:'Word',fn:async r=>{const f=await renderDocs('Proforma_Fatturazione',[fatDocData(r)],{file:`${r.codice}_${safe(r.cliente)}.docx`});await saveInFolder('Fatturazione',[{name:f.name,data:f.blob}]);}}],
+    rowActions:[{l:'Righe',fn:r=>openRighe(r)},
+      {l:'Word',fn:async r=>{const f=await renderDocs('Proforma_Fatturazione',[fatDocData(r)],{file:`${r.codice}_${safe(r.cliente)}.docx`});
+        await saveInFolder('Fatturazione',[{name:f.name,data:f.blob}]);
+        if(await allegaProforma(r,f.blob,f.name)){toast('Copia allegata alla proforma: la ritrovi in Documenti.');renderFatt();}}},
+      {l:'Copia stampata',show:r=>!!copiaProforma(r),fn:r=>openAttachment(copiaProforma(r))}],
     selActions:[{l:'Invia ad amministrazione',primary:true,fn:l=>sendToAdmin(l.filter(f=>f.stato!=='Annullata'))},
       {l:'Esporta riepilogo Excel',fn:async l=>saveFile(`Riepilogo_fatturazione_${stampNow()}.xlsx`,await fatExcel(l))}],
   });
@@ -6089,9 +6127,24 @@ function renderFattWizard(tabs){
   const ivaStd=r2((+S.par.iva||0)*100);
   const lines=[];
   const attive=new Set(S.fat.filter(f=>f.stato!=='Annullata').map(f=>f.codice));
-  const giaFatt=new Set(S.righe.filter(r=>r.tipo==='Canone'&&attive.has(r.proforma)&&(!r.dal||r.dal<=me)&&(!r.al||r.al>=ms)&&(r.dal||S.fat.find(f=>f.codice===r.proforma)?.periodoDa===ms)).map(r=>r.origine));
+  const fatDi=new Map();   // numero di contratto -> codice della proforma che lo copre
+  for(const r of S.righe){
+    if(r.tipo!=='Canone'||!attive.has(r.proforma))continue;
+    if(!((!r.dal||r.dal<=me)&&(!r.al||r.al>=ms)&&(r.dal||S.fat.find(f=>f.codice===r.proforma)?.periodoDa===ms)))continue;
+    if(!fatDi.has(r.origine))fatDi.set(r.origine,r.proforma);
+  }
+  const giaFatt=new Set(fatDi.keys());
   u.giaFatt=giaFatt.size;
   const scarti=[];
+  /* Il controllo va per numero di contratto: se due righe portano lo stesso
+     numero, fatturarne una nasconde anche l'altra. Meglio dirlo. */
+  {const conta={};
+   for(const o of S.rows){if(!o.numero||!o.inizio||!o.fine)continue;
+     if(o.fine<ms||o.inizio>me)continue;
+     (conta[o.numero]=conta[o.numero]||[]).push(o);}
+   for(const n of Object.keys(conta)){const g=conta[n];if(g.length<2)continue;
+     scarti.push({n,t:g[0].targa||'',
+       m:`numero di contratto ripetuto su ${g.length} righe (${[...new Set(g.map(x=>x.locataria||'senza cliente'))].join(', ')}): fatturandone una spariscono anche le altre, perché il già fatturato si riconosce dal numero`});}}
   if(u.src.can)for(const o of S.rows){
     if(giaFatt.has(o.numero))continue;
     const a=fromISO(o.inizio),b=fromISO(o.fine);if(!a||!b||o.fine<ms||o.inizio>me)continue;
@@ -6137,7 +6190,16 @@ function renderFattWizard(tabs){
    </div>
    ${nascoste.length?`<p class="muted" style="margin:-4px 0 8px;font-size:13px">Il filtro <b>${esc(u.emit)}</b> sta nascondendo ${nascoste.length} rig${nascoste.length===1?'a':'he'} di ${[...new Set(nascoste.map(x=>x.cli))].length} client${[...new Set(nascoste.map(x=>x.cli))].length===1?'e':'i'} intestate ad altre società. Scegli <b>Tutte le società</b> per vedere tutto.</p>`:''}
    ${scarti.length?`<div class="panel" style="border-left:3px solid var(--warn,#8A5A00)"><b>${scarti.length} contratt${scarti.length===1?'o':'i'} da sistemare in anagrafica</b><table class="grid mini"><tbody>${scarti.map(x=>`<tr><td>${esc(x.n||'(senza numero)')}</td><td>${x.t?plate(x.t):''}</td><td>${esc(x.m)}</td></tr>`).join('')}</tbody></table></div>`:''}
-   ${u.giaFatt?`<p class="muted" style="margin:-4px 0 8px;font-size:13px">${u.giaFatt} canoni di ${esc(monthLabel(ms))} sono già in una proforma e non vengono riproposti (annulla la proforma per rifatturarli).</p>`:''}
+   ${u.giaFatt?`<details class="panel" style="margin:0 0 10px;padding:12px 16px">
+     <summary style="cursor:pointer;font-size:13px;color:var(--muted)">${u.giaFatt} ${u.giaFatt===1?'canone di':'canoni di'} ${esc(monthLabel(ms))} ${u.giaFatt===1?'è già':'sono già'} in una proforma e non ${u.giaFatt===1?'viene riproposto':'vengono riproposti'} — <b style="color:var(--navy)">vedi quali</b></summary>
+     <div style="overflow-x:auto;margin-top:10px"><table class="grid mini" style="min-width:560px"><thead><tr><th>Contratto</th><th>Cliente</th><th>Mezzo</th><th>Proforma</th><th>Stato</th></tr></thead><tbody>${
+       [...fatDi.entries()].map(([num,pf])=>{
+         const o=S.rows.find(x=>x.numero===num&&x.fine>=ms&&x.inizio<=me)||S.rows.find(x=>x.numero===num)||{};
+         const f=S.fat.find(x=>x.codice===pf)||{};
+         return `<tr><td>${esc(num)}</td><td>${esc(o.locataria||'')}</td><td>${o.targa?plate(o.targa):''}</td><td>${esc(pf)}</td><td>${esc(f.stato||'')}</td></tr>`;
+       }).sort().join('')}</tbody></table></div>
+     <p class="muted" style="margin:10px 0 0;font-size:12px">Per rifatturarne uno, annulla la proforma che lo contiene: torna subito in questo elenco. Una proforma in bozza conta come emessa.</p>
+   </details>`:''}
    <p class="muted" style="margin-top:-4px;font-size:13px">IVA proposta: ${ivaStd}% su canoni, spese e franchigie; pedaggi come anticipazioni escluse (natura N1, art. 15 DPR 633/72). Verifica il trattamento con l’amministrazione e correggi le righe dopo la creazione, se serve.</p>
    ${vis.length?vis.map(c=>{const l=lines.filter(x=>x.key===c);const imp=l.reduce((a,x)=>a+r2(x.quantita*x.prezzo),0);const iva=l.reduce((a,x)=>a+r2(r2(x.quantita*x.prezzo)*x.aliquota/100),0);const s=socBy(keyCli(c))||{};
      return `<div class="panel fatcli"><label class="check"><input type="checkbox" data-c="${esc(c)}" ${u.excl.has(c)?'':'checked'}><b>${esc(keyCli(c))}${keyCdc(c)?' – centro di costo '+esc(cdcNome(keyCdc(c))):''}</b><span class="muted">${esc(keyEmit(c)?'da '+keyEmit(c):'emittente da definire')} · ${esc(s.sdi?'SDI '+s.sdi:'codice SDI mancante')} · ${esc(s.piva?'P.IVA '+s.piva:'P.IVA mancante')}</span><span class="grow"></span><b>${eur(imp+iva)}</b></label>
@@ -6543,6 +6605,56 @@ function cdcOpts(societa){
 REF.cdc={opts:()=>cdcOpts(),label:v=>v};
 const cdcBy=v=>S.cdc.find(c=>(c.etichetta||cdcLabel(c))===v);
 const cdcNome=v=>{const c=cdcBy(v);return c?c.nome:v;};
+/* ---------- dove sta un mezzo fermo, e chi ne porta il costo ---------- */
+const locBy=n=>(S.loc||[]).find(l=>l.nome===n);
+/* Dove si trova: quello dichiarato, altrimenti la sede di ritiro. */
+const ubicazioneDi=m=>m&&(m.ubicazione||m.localita)||'';
+/* Chi paga la sosta: la scelta sul mezzo, poi il centro di costo della
+   località, poi quello ordinario del mezzo. */
+function cdcSostaDi(m){
+  if(!m)return '';
+  if(m.cdcSosta)return m.cdcSosta;
+  const l=locBy(ubicazioneDi(m));
+  if(l&&l.centroCosto)return l.centroCosto;
+  return m.centroCosto||'';
+}
+/* Da quanti giorni è fermo lì. Senza data non si inventa un numero. */
+function giorniSosta(m){
+  if(!m||!m.ubicazioneDal)return 0;
+  const d=fromISO(m.ubicazioneDal);if(!d)return 0;
+  return Math.max(0,Math.round((+fromISO(todayISO())-+d)/DAY));
+}
+function sostaTesto(m){
+  const u=ubicazioneDi(m);
+  if(!u)return '<span class="muted">ubicazione non indicata</span>';
+  const c=cdcSostaDi(m),g=giorniSosta(m);
+  return esc(u)+(c?' · '+esc(cdcNome(c)):'')+(g?` · da ${g} ${g===1?'giorno':'giorni'}`:'');
+}
+/* Riepilogo dei fermi per centro di costo: quanti, da quanto, quanto costano. */
+function pannelloSosta(){
+  const fermi=mezziAttivi().filter(m=>!['A noleggio','In uso'].includes(dispo(m).label));
+  if(!fermi.length)return '';
+  const per={};
+  for(const m of fermi){
+    const c=cdcSostaDi(m)||'__senza';
+    const x=per[c]=per[c]||{n:0,gg:0,costo:0,luoghi:new Set(),senzaData:0,senzaLuogo:0};
+    x.n++;const g=giorniSosta(m);x.gg+=g;x.costo+=g*(+m.costoFermo||0);
+    if(!m.ubicazioneDal)x.senzaData++;
+    const u=ubicazioneDi(m);if(u)x.luoghi.add(u);else x.senzaLuogo++;
+  }
+  const righe=Object.entries(per).sort((a,b)=>b[1].n-a[1].n).map(([c,x])=>{
+    const dove=[...x.luoghi].join(', ')+(x.senzaLuogo?(x.luoghi.size?' · ':'')+x.senzaLuogo+' senza ubicazione':'');
+    return `<tr><td>${c==='__senza'?'<span class="muted">senza centro di costo</span>':esc(cdcNome(c))}</td>
+      <td>${dove?esc(dove):'<span class="muted">–</span>'}</td>
+      <td class="num">${x.n}</td>
+      <td class="num">${x.gg?numF.format(x.gg):'<span class="muted">–</span>'}${x.senzaData?`<span class="sub">${x.senzaData} senza data</span>`:''}</td>
+      <td class="num">${x.costo?eur(x.costo):'<span class="muted">–</span>'}</td></tr>`;}).join('');
+  const tot=fermi.length,senzaD=fermi.filter(m=>!m.ubicazioneDal).length;
+  return `<div class="panel" style="margin-top:14px"><h3>Mezzi fermi: dove stanno e chi ne porta il costo</h3>
+    <p class="muted" style="font-size:12.5px;margin:-4px 0 10px">${tot} ${tot===1?'mezzo non è':'mezzi non sono'} a noleggio né in uso. I giorni partono da «Fermo qui dal» e l’importo usa il costo di mancato utilizzo della scheda mezzo: dove manca l’uno o l’altro la riga resta vuota invece di stimare.${senzaD?` Oggi ${senzaD} ${senzaD===1?'mezzo non ha':'mezzi non hanno'} la data.`:''}</p>
+    <div style="overflow-x:auto"><table class="grid mini" style="min-width:560px"><thead><tr><th>Centro di costo</th><th>Dove</th><th class="num">Mezzi</th><th class="num">Giorni</th><th class="num">Costo maturato</th></tr></thead><tbody>${righe}</tbody></table></div></div>`;
+}
+
 function rowCdc(r){
   if(!r)return '';if(r.centroCosto)return r.centroCosto;
   const m=mezzoBy(r.targa);if(m&&m.centroCosto){const c=cdcBy(m.centroCosto);if(c&&c.societa===r.locataria)return m.centroCosto;}
@@ -7468,16 +7580,22 @@ function renderAnag(){
   $('#main').innerHTML=`${pageHead('Località e tipologie','Punti di ritiro e riconsegna dei mezzi ed elenco delle tipologie usate nei menu.')}<div class="split">
     <section>
       <div class="sechead"><h3>Località di ritiro</h3><button class="btn primary" id="aLoc">Nuova località</button></div>
-      <div class="tablewrap"><table class="grid" style="min-width:560px"><thead><tr><th>Località</th><th>Indirizzo</th><th>Orari</th><th>Mezzi</th><th></th></tr></thead><tbody id="tLoc"></tbody></table></div>
+      <div class="tablewrap"><table class="grid" style="min-width:560px"><thead><tr><th>Località</th><th>Indirizzo</th><th>Orari</th><th>Centro di costo</th><th>Mezzi</th><th>Fermi qui</th><th></th></tr></thead><tbody id="tLoc"></tbody></table></div>
     </section>
     <section class="panel">
       <div class="sechead"><h3>Tipologie di mezzo</h3></div>
       <div class="taglist" id="tTip"></div>
       <div class="tagrow" style="margin-top:10px"><input class="input" id="nTip" placeholder="Nuova tipologia"><button class="btn" id="aTip">Aggiungi</button></div>
     </section></div>`;
-  $('#tLoc').innerHTML=S.loc.length?S.loc.map(l=>`<tr><td><b>${esc(l.nome)}</b></td><td>${esc(addr(l))}</td><td>${esc(l.orari)}</td><td class="num">${S.mezzi.filter(m=>m.localita===l.nome&&!ARCH(m)).length}</td>
-    <td><div class="rowacts"><button class="btn ghost" data-e="${l.id}">Modifica</button><button class="btn ghost danger" data-d="${l.id}">Elimina</button></div></td></tr>`).join('')
-    :`<tr><td colspan="5" class="empty">Nessuna località.</td></tr>`;
+  $('#tLoc').innerHTML=S.loc.length?S.loc.map(l=>{
+    const qui=S.mezzi.filter(m=>!ARCH(m)&&ubicazioneDi(m)===l.nome);
+    const fermi=qui.filter(m=>!['A noleggio','In uso'].includes(dispo(m).label)).length;
+    return `<tr><td><b>${esc(l.nome)}</b></td><td>${esc(addr(l))}</td><td>${esc(l.orari)}</td>
+    <td>${l.centroCosto?esc(cdcNome(l.centroCosto)):'<span class="muted">–</span>'}</td>
+    <td class="num">${S.mezzi.filter(m=>m.localita===l.nome&&!ARCH(m)).length}</td>
+    <td class="num">${fermi||'<span class="muted">–</span>'}</td>
+    <td><div class="rowacts"><button class="btn ghost" data-e="${l.id}">Modifica</button><button class="btn ghost danger" data-d="${l.id}">Elimina</button></div></td></tr>`;}).join('')
+    :`<tr><td colspan="7" class="empty">Nessuna località.</td></tr>`;
   $('#tTip').innerHTML=S.tip.map((t,i)=>`<div class="tagrow"><input class="input" data-ti="${i}" value="${esc(t)}"><button class="btn ghost danger" data-tr="${i}">Rimuovi</button></div>`).join('');
   $('#aLoc').onclick=()=>openLoc(null);
   $('#tLoc').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const l=S.loc.find(x=>x.id===(b.dataset.e||b.dataset.d));if(!l)return;
@@ -7493,7 +7611,10 @@ function openLoc(l){
     {title:'Punto di ritiro e riconsegna',fields:[
       {k:'nome',label:'Nome località',req:true,span:'s6'},
       {k:'indirizzo',label:'Indirizzo',req:true,span:'s6'},{k:'cap',label:'CAP',span:'s2'},{k:'citta',label:'Città',req:true,span:'s2'},{k:'prov',label:'Provincia',span:'s2',upper:true},
-      {k:'orari',label:'Orari ritiro e riconsegna',span:'s6'},{k:'referente',label:'Referente'},{k:'tel',label:'Telefono'}]}],
+      {k:'orari',label:'Orari ritiro e riconsegna',span:'s6'},{k:'referente',label:'Referente'},{k:'tel',label:'Telefono'},
+      {k:'centroCosto',label:'Centro di costo della sosta',type:'select',span:'s3',
+       options:(REF.cdc?REF.cdc.opts():[]),
+       hint:'I mezzi fermi qui maturano il costo su questo centro'}]}],
     onSave:(x,errs)=>{
       if(S.loc.some(o=>o.nome.toLowerCase()===x.nome.toLowerCase()&&o!==l))errs.nome='Località già presente';
       if(Object.keys(errs).length)return;
@@ -7668,6 +7789,160 @@ function renderParam(){
   if(st)leggiPosta().then(l=>{st.textContent=l.length?`${l.length} in attesa di essere raccolte`:'niente in attesa';})
     .catch(()=>{st.textContent='cartella App non raggiungibile';});
   if(ruolo()==='master'){m.insertAdjacentHTML('beforeend',pannelloAccesso());bindAccesso();}
+}
+
+
+/* =====================================================================
+   DOCUMENTI — consultazione dalla piattaforma
+   Niente cartelle da aprire sul server: l'elenco sta qui, e i file si
+   aprono dagli allegati, che il registro stia in una cartella
+   sincronizzata o su SharePoint.
+   ===================================================================== */
+const DOC_MOD_LABEL={mezzi:'Mezzi',soc:'Clienti e fornitori',dip:'Dipendenti',
+  noleggi:'Contratti di noleggio',fat:'Proforma',man:'Manutenzioni',sin:'Sinistri',
+  vrb:'Verbali',gio:'Giornaliere',cp:'Contratti fornitori',disp:'Telepass e carte',
+  dot:'Dotazioni',cap:'Capacità finanziaria',ass:'Assegnazioni',app:'Appuntamenti',
+  scad:'Scadenze',mov:'Movimenti',dota:'Consegne dotazioni',righe:'Righe proforma'};
+const docNav=a=>a.modulo==='noleggi'?{mod:'rows',id:a.riferimento}:{mod:a.modulo,id:a.riferimento};
+/* A chi si riferisce un allegato, detto come lo direbbe una persona. */
+function docChi(a){
+  if(a.modulo==='noleggi'){const r=S.rows.find(x=>x.numero===a.riferimento);
+    return r?`${a.riferimento}${r.locataria?' – '+r.locataria:''}`:a.riferimento;}
+  const m=MODS[a.modulo];if(!m||!S[m.store])return a.riferimento;
+  const r=S[m.store].find(x=>recRef(a.modulo,x)===a.riferimento);
+  if(!r)return a.riferimento;
+  return r.ragione||(r.cognome?dipName(r):'')||r.targa||r.cliente||r.codice||a.riferimento;
+}
+
+/* Che cosa ci si aspetta di trovare. Una riga per tipo di documento: la
+   lista dei record che dovrebbero averlo, e come si chiamano a video. */
+const DOC_ATTESI=[
+  {mod:'mezzi',tipo:'Carta di circolazione',cosa:'Libretto di circolazione',
+   lista:()=>S.mezzi.filter(m=>!ARCH(m)&&!FUORI_FLOTTA(m.stato)),
+   nome:m=>`${m.targa} – ${mezzoName(m)}`},
+  {mod:'mezzi',tipo:'Polizza assicurativa',cosa:'Polizza RCA',
+   lista:()=>S.mezzi.filter(m=>!ARCH(m)&&!FUORI_FLOTTA(m.stato)&&(m.polizza||m.compagnia)),
+   nome:m=>`${m.targa} – ${[m.compagnia,m.polizza].filter(Boolean).join(' ')}`},
+  {mod:'noleggi',tipo:'Contratto',cosa:'Contratto di noleggio firmato',
+   lista:()=>S.rows.filter(r=>r.numero&&r.fine&&r.fine>=todayISO()),
+   nome:r=>`${r.numero}${r.locataria?' – '+r.locataria:''}`},
+  {mod:'fat',tipo:'Proforma',cosa:'Copia della proforma',
+   lista:()=>S.fat.filter(f=>f.stato!=='Annullata'),
+   nome:f=>`${f.codice} – ${f.cliente}`},
+  {mod:'dip',tipo:'Patente',cosa:'Patente di guida',
+   lista:()=>S.dip.filter(d=>d.stato==='Attivo'&&/autista/i.test(d.mansione||'')),
+   nome:d=>dipName(d)},
+  {mod:'dip',tipo:'CQC',cosa:'Carta di qualificazione del conducente',
+   lista:()=>S.dip.filter(d=>d.stato==='Attivo'&&d.cqcNumero),
+   nome:d=>dipName(d)},
+  {mod:'dip',tipo:'Carta tachigrafica',cosa:'Carta tachigrafica',
+   lista:()=>S.dip.filter(d=>d.stato==='Attivo'&&d.tachNumero),
+   nome:d=>dipName(d)},
+  {mod:'sin',tipo:'Modulo CAI',cosa:'Constatazione amichevole',
+   lista:()=>S.sin.filter(s=>s.data),
+   nome:s=>`${s.codice}${s.targa?' – '+s.targa:''} del ${fmtD(s.data)}`},
+  {mod:'vrb',tipo:'Verbale',cosa:'Copia del verbale',
+   lista:()=>S.vrb.filter(v=>v.numeroVerbale),
+   nome:v=>`${v.numeroVerbale}${v.targa?' – '+v.targa:''}`},
+  {mod:'soc',tipo:'Visura camerale',cosa:'Visura camerale',
+   lista:()=>S.soc.filter(socOk.cli),
+   nome:x=>x.ragione},
+];
+function docMancanti(){
+  const out=[];
+  for(const r of DOC_ATTESI){
+    let lista=[];try{lista=r.lista()||[];}catch(e){continue;}
+    const senza=lista.filter(x=>{
+      const rif=r.mod==='noleggi'?x.numero:recRef(r.mod,x);
+      if(!rif)return false;
+      if(!navInScope({mod:r.mod==='noleggi'?'rows':r.mod,id:rif}))return false;
+      return !S.all.some(a=>a.modulo===r.mod&&a.riferimento===rif&&a.tipo===r.tipo);
+    });
+    out.push({...r,senza,attesi:lista.length});
+  }
+  return out;
+}
+
+function renderDocsHub(){
+  const u=ui('docsTab');const tab=u.tab||'c';
+  const f=ui('docsF');f.mod=f.mod||'';f.tipo=f.tipo||'';f.q=f.q||'';
+  const tabs=`<div class="subtabs">
+    <button class="${tab==='c'?'on':''}" data-sub="docsTab:c">Documenti creati</button>
+    <button class="${tab==='m'?'on':''}" data-sub="docsTab:m">Documenti mancanti</button></div>`;
+  const tutti=S.all.filter(a=>navInScope(docNav(a)));
+  const oggi=todayISO();
+  if(tab==='c'){
+    const q=f.q.toLowerCase();
+    const l=tutti.filter(a=>(!f.mod||a.modulo===f.mod)&&(!f.tipo||a.tipo===f.tipo)
+      &&(!q||[a.file,a.tipo,a.descrizione,a.riferimento,docChi(a)].join(' ').toLowerCase().includes(q)))
+      .sort((a,b)=>(b.caricatoIl||'')<(a.caricatoIl||'')?-1:1);
+    const scaduti=tutti.filter(a=>a.scadenza&&a.scadenza<oggi).length;
+    const inScad=tutti.filter(a=>a.scadenza&&a.scadenza>=oggi&&a.scadenza<=addDays(oggi,30)).length;
+    const nelBrowser=tutti.filter(a=>a.archivio==='browser').length;
+    $('#main').innerHTML=`${pageHead('Documenti','Tutto quello che il gestionale ha prodotto o che è stato caricato, consultabile da qui senza aprire le cartelle sul server.',
+      `<button class="btn" data-docexp>Esporta l’elenco</button>`)}${tabs}
+     <div class="ledger card">
+       <div><b>${tutti.length}</b><small>documenti archiviati</small></div>
+       <div><b class="${scaduti?'late':''}">${scaduti}</b><small>scaduti</small></div>
+       <div><b class="${inScad?'warnc':''}">${inScad}</b><small>in scadenza entro 30 giorni</small></div>
+       <div><b>${nelBrowser}</b><small>solo in questa postazione</small></div>
+     </div>
+     <div class="toolbar">
+      <div class="field" style="flex:2 1 240px"><label>Cerca</label><input class="input" data-docq value="${esc(f.q)}" placeholder="Nome file, tipo, targa, cliente"></div>
+      <div class="field"><label>Sezione</label><select class="input" data-docmod><option value="">Tutte</option>${
+        [...new Set(tutti.map(a=>a.modulo))].sort().map(m=>`<option value="${esc(m)}" ${m===f.mod?'selected':''}>${esc(DOC_MOD_LABEL[m]||m)}</option>`).join('')}</select></div>
+      <div class="field"><label>Tipo</label><select class="input" data-doctipo><option value="">Tutti</option>${
+        [...new Set(tutti.map(a=>a.tipo).filter(Boolean))].sort().map(t=>`<option ${t===f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
+     </div>
+     ${nelBrowser?`<p class="muted" style="margin:-4px 0 10px;font-size:13px">${nelBrowser} ${nelBrowser===1?'documento è archiviato':'documenti sono archiviati'} solo nel browser di questa postazione: da un altro computer non si ${nelBrowser===1?'apre':'aprono'}. Si spostano nella cartella di lavoro da Parametri.</p>`:''}
+     <div class="tablewrap"><table class="grid"><thead><tr>
+       <th>Documento</th><th>Tipo</th><th>Sezione</th><th>Riferito a</th><th>Caricato</th><th>Scadenza</th><th></th>
+     </tr></thead><tbody>${l.length?l.map((a,i)=>`<tr>
+       <td><b>${esc(a.file)}</b>${a.descrizione?`<span class="sub">${esc(a.descrizione)}</span>`:''}</td>
+       <td>${esc(a.tipo||'–')}</td>
+       <td>${esc(DOC_MOD_LABEL[a.modulo]||a.modulo)}</td>
+       <td>${esc(docChi(a))}</td>
+       <td>${a.caricatoIl?fmtD(a.caricatoIl):'<span class="muted">–</span>'}${a.archivio==='browser'?'<span class="sub warnc">solo in questa postazione</span>':''}</td>
+       <td>${a.scadenza?dueCell(a.scadenza):'<span class="muted">–</span>'}</td>
+       <td><div class="rowacts"><button class="btn ghost" data-docopen="${i}">Apri</button><button class="btn ghost" data-docgo="${i}">Vai al record</button></div></td>
+     </tr>`).join(''):`<tr><td colspan="7" class="empty">Nessun documento con questi filtri.</td></tr>`}</tbody></table></div>`;
+    const m=$('#main');
+    const qi=m.querySelector('[data-docq]');
+    if(qi)qi.oninput=()=>{f.q=qi.value;clearTimeout(u._t);u._t=setTimeout(()=>renderDocsHub(),250);};
+    const sm=m.querySelector('[data-docmod]');if(sm)sm.onchange=()=>{f.mod=sm.value;renderDocsHub();};
+    const st=m.querySelector('[data-doctipo]');if(st)st.onchange=()=>{f.tipo=st.value;renderDocsHub();};
+    m.querySelectorAll('[data-docopen]').forEach(b=>b.onclick=()=>openAttachment(l[+b.dataset.docopen]));
+    m.querySelectorAll('[data-docgo]').forEach(b=>b.onclick=()=>openNav(docNav(l[+b.dataset.docgo])));
+    const ex=m.querySelector('[data-docexp]');if(ex)ex.onclick=()=>docExport(l);
+    return;
+  }
+  // ---- documenti mancanti ----
+  const gruppi=docMancanti();
+  const tot=gruppi.reduce((a,g)=>a+g.senza.length,0);
+  $('#main').innerHTML=`${pageHead('Documenti','Quello che ci si aspetta di trovare in archivio e non c’è. Da qui si apre il record e si carica.')}${tabs}
+   ${tot?`<div class="ledger card">${gruppi.filter(g=>g.senza.length).slice(0,5).map(g=>
+     `<div><b class="${g.senza.length?'warnc':''}">${g.senza.length}</b><small>${esc(g.cosa.toLowerCase())}</small></div>`).join('')}</div>`:''}
+   ${tot?gruppi.filter(g=>g.senza.length).map(g=>`<div class="panel" style="margin-bottom:12px">
+     <div class="sechead"><h3>${esc(g.cosa)}</h3><span class="muted">${g.senza.length} ${g.senza.length===1?'mancante':'mancanti'} su ${g.attesi} · ${esc(DOC_MOD_LABEL[g.mod]||g.mod)}</span></div>
+     <div style="overflow-x:auto"><table class="grid mini" style="min-width:340px"><tbody>${g.senza.slice(0,40).map(x=>{
+       const rif=g.mod==='noleggi'?x.numero:recRef(g.mod,x);
+       return `<tr><td>${esc(g.nome(x))}</td><td style="width:1%"><button class="btn ghost" data-docrec="${esc(g.mod)}|${esc(rif)}">Apri e carica</button></td></tr>`;}).join('')}</tbody></table></div>
+     ${g.senza.length>40?`<p class="muted" style="margin:8px 0 0;font-size:12px">…e altri ${g.senza.length-40}. Usa «Esporta l’elenco» nei documenti creati per avere tutto in Excel.</p>`:''}
+   </div>`).join('')
+   :'<div class="panel empty">Non manca niente fra i documenti attesi. </div>'}`;
+  $('#main').querySelectorAll('[data-docrec]').forEach(b=>b.onclick=()=>{
+    const [mod,id]=b.dataset.docrec.split('|');
+    openNav({mod:mod==='noleggi'?'rows':mod,id});});
+}
+
+async function docExport(l){
+  const wb=new ExcelJS.Workbook();const ws=wb.addWorksheet('Documenti');
+  ws.addRow(['File','Tipo','Sezione','Riferito a','Caricato il','Scadenza','Dove è archiviato','Percorso']);
+  ws.getRow(1).font={bold:true};
+  for(const a of l)ws.addRow([a.file,a.tipo||'',DOC_MOD_LABEL[a.modulo]||a.modulo,docChi(a),
+    a.caricatoIl||'',a.scadenza||'',a.archivio==='browser'?'solo in questa postazione':'cartella di lavoro',a.percorso||'']);
+  ws.columns.forEach(c=>{c.width=Math.min(52,Math.max(14,...c.values.slice(1).map(v=>String(v||'').length+2)));});
+  await saveFile(`Documenti_${stampNow()}.xlsx`,new Blob([await wb.xlsx.writeBuffer()],{type:XLSX_MIME}));
 }
 
 /* ---------- integrazione con il registro ---------- */
