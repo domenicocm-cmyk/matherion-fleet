@@ -2,27 +2,8 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#8A6B10">
-<meta name="color-scheme" content="light">
-<meta name="description" content="Gestione della flotta: mezzi, noleggi, giornaliere, manutenzioni, sinistri e scadenze.">
-<link rel="manifest" href="/manifest-burago.webmanifest">
-<link rel="icon" href="/icons/favicon-burago.ico" sizes="48x48 32x32 16x16">
-<link rel="icon" type="image/png" href="/icons/favicon-32-burago.png" sizes="32x32">
-<link rel="icon" type="image/png" href="/icons/favicon-16-burago.png" sizes="16x16">
-<link rel="icon" type="image/png" href="/icons/icon-192-burago.png" sizes="192x192">
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon-burago.png">
-<link rel="apple-touch-icon" sizes="152x152" href="/icons/apple-touch-icon-152-burago.png">
-<link rel="apple-touch-icon" sizes="167x167" href="/icons/apple-touch-icon-167-burago.png">
-<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon-burago.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Burago">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="application-name" content="Burago">
-<meta name="msapplication-TileColor" content="#8A6B10">
-<meta name="msapplication-TileImage" content="/icons/icon-192-burago.png">
-<title>Gestionale flotta – filiale Amazon Burago</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestionale flotta e noleggi</title>
 <script>/* exceljs.min.js */
 /*! ExcelJS 19-10-2023 */
 
@@ -1466,38 +1447,7 @@ async function afterOpen(msg){
   if(S._fix){toast(`Allineati ${S._fix} riferimenti a società (nomi e società titolari): salva per aggiornare il file.`);markDirty();S._fix=0;}
   afterOpenExtras();
 }
-
-/* ---------- app installabile (solo quando è pubblicata su web) ---------- */
-const WEB=location.protocol==='https:'||location.protocol==='http:';
-function avvisoAggiornamento(reg){
-  const d=document.createElement('div');d.className='modal';
-  d.innerHTML=`<div class="box" role="dialog" aria-modal="true"><h3>C’è una versione nuova</h3>
-    <div class="muted">È stato pubblicato un aggiornamento del gestionale. Ricarica per usarlo: i dati sono nel registro, non si perde nulla.${S.dirty?'<br><br><b>Hai modifiche non salvate:</b> salva prima di ricaricare.':''}</div>
-    <div class="acts"><button class="btn" data-a="0">Più tardi</button><button class="btn primary" data-a="1">Ricarica ora</button></div></div>`;
-  d.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==d)return;
-    const ok=a&&a.dataset.a==='1';d.remove();
-    if(ok){try{reg.waiting&&reg.waiting.postMessage('aggiorna');}catch(err){}setTimeout(()=>location.reload(),300);}});
-  document.body.appendChild(d);
-}
-if(WEB&&'serviceWorker' in navigator){
-  window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/sw.js').then(reg=>{
-      if(reg.waiting&&navigator.serviceWorker.controller)avvisoAggiornamento(reg);
-      reg.addEventListener('updatefound',()=>{
-        const w=reg.installing;if(!w)return;
-        w.addEventListener('statechange',()=>{
-          if(w.state==='installed'&&navigator.serviceWorker.controller)avvisoAggiornamento(reg);
-        });
-      });
-      setInterval(()=>reg.update().catch(()=>{}),30*60*1000);
-    }).catch(()=>{});
-  });
-}
-try{const v=new URLSearchParams(location.search).get('vai');if(v)sessionStorage.setItem('vai',v);}catch(e){}
 function afterOpenExtras(){
-  try{const v=sessionStorage.getItem('vai');if(v){sessionStorage.removeItem('vai');
-    if(VIEWS[v]&&(!filiale()||FILIALE_TABS.includes(v))){S.tab=v;render();}}}catch(e){}
-  if(!operatore())setTimeout(chiediOperatore,600);
   if(SESSIONE)timbraAccesso();
   if(S.mode==='folder'&&S.dir&&!S.readonly){
     setTimeout(()=>{importaDaApp(true).then(()=>pubblicaIndice(true));},1500);
@@ -2509,17 +2459,6 @@ async function apriSharePoint(){
   await openFolder(dir);
   if(S.wb)try{await IDB.set('last',{kind:'sp',name:dir.name});}catch(e){}
 }
-function chiediOperatore(){
-  const m=document.createElement('div');m.className='modal';
-  m.innerHTML=`<div class="box" role="dialog" aria-modal="true"><h3>Chi lavora su questa postazione?</h3>
-    <div class="muted">Serve solo a segnalare agli altri chi ha il registro aperto. Resta su questo computer.</div>
-    <div class="field" style="margin:12px 0"><label for="opNome">Nome e cognome</label><input class="input" id="opNome" placeholder="Es. Mario Rossi"></div>
-    <div class="acts"><button class="btn" data-a="0">Più tardi</button><button class="btn primary" data-a="1">Salva</button></div></div>`;
-  m.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
-    if(a&&a.dataset.a==='1'){const v=m.querySelector('#opNome').value.trim();if(v){setOperatore(v);writeLock();toast('Postazione: '+v);}}
-    m.remove();});
-  document.body.appendChild(m);m.querySelector('#opNome').focus();
-}
 /* ---------- postazione, blocco e conflitti ---------- */
 const LOCK_FILE='Registro.lock.json';
 function operatore(){try{return localStorage.getItem('operatore')||'';}catch(e){return '';}}
@@ -2693,6 +2632,7 @@ $('#bEsci').onclick=()=>msEsci();
 $('#sideTab').onclick=toggleSide;
 document.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'&&S.wb){e.preventDefault();toggleSide();}
+  if((e.ctrlKey||e.metaKey)&&e.altKey&&e.key.toLowerCase()==='f'&&S.wb){e.preventDefault();scegliFiliale();}
 });
 $('#bSave').onclick=()=>S.readonly?exportCopy():persist({manual:true,force:true});
 $('#bExport').onclick=exportCopy;
@@ -7650,17 +7590,13 @@ function gioRiep(seg){
    FILIALE – vista ristretta a un centro di costo
    ===================================================================== */
 const FILIALE_TABS=['cruscotto','calendario','mezzi','gio','man','sin','disp','dot','dip'];
-const FILIALE_FISSA="Amazon Burago";
 function filiale(){
   if(typeof inProva==='function'&&inProva())return S.comeRuolo==='filiale'?(S.comeCdc||''):'';
   const u=utenteCorrente();
-  if(u&&ruoloKey(u.ruolo)==='filiale')return u.centroCosto||'';   /* se c'e' un accesso, decide l'account */
-  if(!S.cdc||!S.cdc.length)return FILIALE_FISSA;
-  const n=FILIALE_FISSA.toLowerCase();
-  const c=S.cdc.find(x=>String(x.nome||'').toLowerCase()===n);
-  return c?(c.etichetta||cdcLabel(c)):FILIALE_FISSA;
+  if(u&&ruoloKey(u.ruolo)==='filiale')return u.centroCosto||'';   /* deciso dall'account */
+  try{return localStorage.getItem('filiale')||'';}catch(e){return '';}
 }
-function setFiliale(){}
+function setFiliale(v){try{if(v)localStorage.setItem('filiale',v);else localStorage.removeItem('filiale');}catch(e){}}
 let _sc=null,_scV=-1,_scF='';
 function scopeData(){
   const f=filiale();if(!f)return null;

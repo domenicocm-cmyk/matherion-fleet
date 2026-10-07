@@ -1151,7 +1151,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.07';
+const APP_VERSION='2026.10.07b';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -5498,6 +5498,93 @@ Object.assign(MODS.cp,{
       <div><small>Targhe non in anagrafica</small><b class="${miss.length?'late':''}">${miss.length?esc(miss.join(', ')):'nessuna'}</b></div>
       <div><small>Termine per la disdetta</small><b>${x.fine&&x.preavvisoDisdetta!==''?fmtD(addDays(x.fine,-x.preavvisoDisdetta)):'–'}</b></div>`;},
 });
+/* ---------- duplicazione dei contratti passivi ----------
+   Quello che si ricopia sono le condizioni: fornitore, tipo, canone, servizi,
+   franchigie, durata. Quello che non si ricopia è ciò che identifica il
+   singolo contratto — il numero — e, se non lo si chiede, le targhe: due
+   contratti non coprono gli stessi veicoli. */
+const CP_NON_COPIARE=['numero','codice','id'];
+
+function cpNumeroLibero(base,usati){
+  const b=String(base||'').trim();
+  if(!b)return '';
+  for(let i=2;i<400;i++){
+    const n=`${b}-${i}`;
+    if(!usati.has(n.toUpperCase()))return n;
+  }
+  return '';
+}
+function boxCopieCp(c){
+  return new Promise(res=>{
+    const m=document.createElement('div');m.className='modal';
+    const targhe=cpTarghe(c);
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true">
+      <h3>Duplica il contratto ${esc(c.numero||'')}</h3>
+      <div class="muted" style="margin-bottom:12px">Vengono ricopiati fornitore, tipo, date, canone, servizi e franchigie.
+      Il numero del contratto resta da mettere: è quello che lo distingue.</div>
+      <div class="fgrid">
+        <div class="field s3"><label for="cpQ">Quante copie</label>
+          <input class="input" type="number" id="cpQ" min="1" max="50" step="1" value="1"></div>
+      </div>
+      ${targhe.length?`<label class="check" style="margin-top:10px"><input type="checkbox" id="cpT">
+        Copia anche le ${targhe.length} targhe coperte</label>
+        <div class="muted" style="font-size:12px;margin:4px 0 0 24px">Di solito no: ogni contratto copre veicoli suoi.</div>`:''}
+      <div class="muted" id="cpAnt" style="margin-top:12px;font-size:12.5px"></div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button>
+        <button class="btn primary" data-a="1">Duplica</button></div></div>`;
+    document.body.appendChild(m);
+    const q=m.querySelector('#cpQ'),ant=m.querySelector('#cpAnt');
+    const usati=new Set(S.cp.map(x=>String(x.numero||'').toUpperCase()));
+    const agg=()=>{
+      const n=Math.max(1,Math.min(50,+q.value||1));
+      if(n===1)ant.textContent='Si apre la scheda della copia: compili il numero e salvi.';
+      else{
+        const es=[];const presi=new Set(usati);
+        for(let i=0;i<Math.min(n,3);i++){const v=cpNumeroLibero(c.numero,presi);if(v){es.push(v);presi.add(v.toUpperCase());}}
+        ant.textContent=es.length
+          ? `Vengono creati ${n} contratti numerati ${es.join(', ')}${n>3?'…':''}: correggi i numeri con quelli veri del fornitore.`
+          : `Vengono creati ${n} contratti senza numero: mettilo tu prima di salvare il registro.`;
+      }
+    };
+    q.oninput=agg;agg();
+    m.addEventListener('click',e=>{
+      const a=e.target.closest('[data-a]');
+      if(!a&&e.target!==m)return;
+      const ok=a&&a.dataset.a==='1';
+      const out=ok?{quante:Math.max(1,Math.min(50,+q.value||1)),
+                    targhe:!!(m.querySelector('#cpT')&&m.querySelector('#cpT').checked)}:null;
+      m.remove();res(out);
+    });
+    q.focus();q.select();
+  });
+}
+async function duplicaCp(c){
+  if(soloLettura()||!puoScrivere('cp'))return toast('Il tuo ruolo non può modificare i contratti.',true);
+  const scelta=await boxCopieCp(c);
+  if(!scelta)return;
+  const base={};
+  for(const f of MODS.cp.fields)if(!CP_NON_COPIARE.includes(f.k))base[f.k]=c[f.k];
+  if(!scelta.targhe)base.targhe='';
+  base.numero='';
+
+  if(scelta.quante===1){
+    openRecord('cp',null,{preset:base,onSaved:renderCp});
+    toast('Copia pronta: metti il numero del contratto e salva.');
+    return;
+  }
+  const usati=new Set(S.cp.map(x=>String(x.numero||'').toUpperCase()));
+  const creati=[];
+  for(let i=0;i<scelta.quante;i++){
+    const r={id:uid(),codice:nextCode(MODS.cp)};
+    for(const f of MODS.cp.fields)r[f.k]=base[f.k]!==undefined?base[f.k]:(f.def??'');
+    const n=cpNumeroLibero(c.numero,usati);
+    r.numero=n;if(n)usati.add(n.toUpperCase());
+    S.cp.push(r);creati.push(r);
+  }
+  markDirty();renderCp();
+  toast(`${creati.length} contratti creati da ${c.numero||'quello scelto'}: controlla numeri e targhe prima di salvare.`);
+}
+
 function renderCp(){
   genericList('cp',{sub:'Archivio dei contratti passivi con le società di leasing e noleggio: condizioni, servizi inclusi, franchigie e veicoli coperti.',
     newLabel:'Nuovo contratto',searchPh:'Numero, fornitore, targa',search:['numero','fornitore','targhe','codice','contraente','utilizzatore'],
@@ -5514,6 +5601,7 @@ function renderCp(){
       {l:'Servizi',v:r=>esc(['srvManutenzione','srvPneumatici','srvRca','srvKasko','srvFurto','srvAssistenza','srvSostitutivo'].filter(k=>r[k]==='Sì').map(k=>MODS.cp.fmap[k].label).join(', '))},
       {l:'Stato',v:r=>pillS(r.stato,r.stato==='Attivo'?'run':'end')},
     ],
+    rowActions:[{l:'Duplica',fn:duplicaCp}],
   });
 }
 

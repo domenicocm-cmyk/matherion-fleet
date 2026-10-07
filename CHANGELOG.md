@@ -32,3 +32,7 @@
   a mano quando la lettura ottica non la trova; il libretto si legge dalla
   scheda di un mezzo preciso; gli allegati si vedono nell’elenco mezzi; nei
   documenti mancanti c’è «Gestita».
+- **2026.10.07b** — pubblicata il 07/10/2026 — i contratti di leasing e
+  noleggio si duplicano: «Duplica» ricopia fornitore, date, canone, servizi e
+  franchigie e lascia vuoto il numero. Si fa una copia sola, e si apre subito
+  la scheda, oppure più copie in un colpo, numerate di seguito.
