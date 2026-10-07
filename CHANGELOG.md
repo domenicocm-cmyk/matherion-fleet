@@ -25,3 +25,10 @@
 - **2026.10.05h** — pubblicata il 05/10/2026 — il registro si aggiorna da solo
   quando salva un'altra postazione, senza chiudere la sessione; gerarchie di
   accesso con le protezioni contro il restare chiusi fuori.
+- **2026.10.06** — pubblicata il 06/10/2026 — il contratto generato resta
+  allegato alla riga del noleggio, dalla stampa massiva o dal pulsante sulla
+  singola riga; la copia generata resta distinta da quella firmata.
+- **2026.10.07** — pubblicata il 07/10/2026 — la targa del libretto si scrive
+  a mano quando la lettura ottica non la trova; il libretto si legge dalla
+  scheda di un mezzo preciso; gli allegati si vedono nell’elenco mezzi; nei
+  documenti mancanti c’è «Gestita».

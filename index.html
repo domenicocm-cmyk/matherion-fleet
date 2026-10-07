@@ -1151,7 +1151,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.05h';
+const APP_VERSION='2026.10.07';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -2741,6 +2741,8 @@ function renderContratti(){
     if(b.dataset.act==='edit')openContract(o);
     if(b.dataset.act==='att')return openNolAttach(o);
     if(b.dataset.act==='cfr')return confrontaNoleggio(o);
+    if(b.dataset.act==='gen')return generaContrattoRiga(o);
+    if(b.dataset.act==='doc'){const a=contrattoGenerato(o);return a?openAttachment(a):toast('La copia non è più fra gli allegati.',true);}
     if(b.dataset.act==='dup'){const c={...o,id:uid(),numero:'',targa:'',inizio:'',fine:'',quadro:''};openContract(c,true);}
     if(b.dataset.act==='del'&&await confirmBox('Eliminare il contratto?',`Il contratto ${esc(o.numero||'')} per la targa ${esc(o.targa)} verrà rimosso dal registro.`,'Elimina',true)){
       S.rows=S.rows.filter(r=>r!==o);S.sel.delete(o.id);markDirty();fillContratti();toast('Contratto eliminato.');}
@@ -2762,7 +2764,8 @@ function fillContratti(){
     <td class="num">${eur(o.canone)}</td><td class="num">${c.giorni}</td>
     <td class="num"><b>${eur(c.importo)}</b><span class="sub">${c.totale!==''?eur(c.totale)+' con IVA':''}</span></td>
     <td>${pill(c.stato)}</td>
-    <td><div class="rowacts"><button class="btn ghost" data-act="edit" data-id="${o.id}">Modifica</button><button class="btn ghost" data-act="att" data-id="${o.id}">Allegati${attachFor('noleggi',o.numero).length?' ('+attachFor('noleggi',o.numero).length+')':''}</button>${confrontabile(o)?`<button class="btn ghost" data-act="cfr" data-id="${o.id}">Confronta foto</button>`:''}<button class="btn ghost" data-act="dup" data-id="${o.id}">Duplica</button><button class="btn ghost danger" data-act="del" data-id="${o.id}" aria-label="Elimina">Elimina</button></div></td>
+    <td><div class="rowacts"><button class="btn ghost" data-act="edit" data-id="${o.id}">Modifica</button><button class="btn ghost" data-act="att" data-id="${o.id}">Allegati${attachFor('noleggi',o.numero).length?' ('+attachFor('noleggi',o.numero).length+')':''}</button>${contrattoGenerato(o)?`<button class="btn ghost" data-act="doc" data-id="${o.id}">Contratto</button>`
+   :`<button class="btn ghost" data-act="gen" data-id="${o.id}">Genera contratto</button>`}${confrontabile(o)?`<button class="btn ghost" data-act="cfr" data-id="${o.id}">Confronta foto</button>`:''}<button class="btn ghost" data-act="dup" data-id="${o.id}">Duplica</button><button class="btn ghost danger" data-act="del" data-id="${o.id}" aria-label="Elimina">Elimina</button></div></td>
   </tr>`;}).join(''):`<tr><td colspan="10" class="empty">${S.rows.length?'Nessun contratto corrisponde ai filtri.':'Il registro è vuoto. Aggiungi il primo contratto con “Nuovo contratto”.'}</td></tr>`;
 }
 
@@ -4904,6 +4907,13 @@ function openLibretto(files,opt={}){
     try{
       const r=await libExtract(f,m=>{const p=d.querySelector('[data-prog]');if(p)p.textContent=m;},forceOcr);
       cur={file:f,...r,parsed:parseLibretto(r.text)};
+      /* lettura aperta dalla scheda di un mezzo: la targa buona è la sua */
+      if(opt.mezzo){
+        const letta=normTarga(cur.parsed.values.targa||''),sua=normTarga(opt.mezzo.targa||'');
+        cur.targaLetta=cur.parsed.values.targa||'';
+        cur.targaDiversa=!!(letta&&sua&&letta!==sua);
+        if(!letta&&sua)cur.parsed.values.targa=opt.mezzo.targa;
+      }
       busy=false;draw();
     }catch(e){
       busy=false;
@@ -4916,7 +4926,9 @@ function openLibretto(files,opt={}){
 
   function draw(){
     const P=cur.parsed,V=P.values;
-    const rows=LIB_ORDER.filter(k=>V[k]!==undefined&&V[k]!==''&&MODS.mezzi.fmap[k]);
+    /* la targa resta sempre in tabella: se la lettura ottica non l'ha trovata,
+       è proprio quella la casella che serve per scriverla a mano */
+    const rows=LIB_ORDER.filter(k=>k==='targa'||(V[k]!==undefined&&V[k]!==''&&MODS.mezzi.fmap[k]));
     const ex=targetFor(V.targa);
     const inte=V.intestatario||'';
     const socM=libSocMatch(inte);
@@ -4925,6 +4937,16 @@ function openLibretto(files,opt={}){
       const attuale=ex?(ex[k]??''):'';
       const diverso=ex&&String(attuale)!==''&&String(attuale)!==String(letto);
       const fisso=k==='targa';
+      if(k==='targa'){
+        const opz=S.mezzi.filter(m=>!ARCH(m)).map(m=>`<option value="${esc(m.targa)}">${esc(mezzoName(m))}</option>`).join('');
+        return `<tr class="${letto?'':'rowwarn'}">
+          <td><input type="checkbox" data-k="targa" checked disabled></td>
+          <td>${esc(f.label)}${letto?'':'<span class="sub late">non letta: scrivila</span>'}</td>
+          <td><input class="input upc" data-v="targa" list="libTarghe" value="${esc(letto)}" placeholder="AB123CD" autocomplete="off">
+              <datalist id="libTarghe">${opz}</datalist></td>
+          <td>${ex?esc(mezzoName(ex)||'')||'<span class="muted">in anagrafica</span>':'<span class="muted">–</span>'}</td>
+          <td class="muted">${esc(P.sources[k]||'')}</td></tr>`;
+      }
       let inp;
       if(f.t==='sel'&&f.opts&&f.opts.length)
         inp=`<select class="input" data-v="${k}">${f.opts.map(o=>`<option ${String(o)===String(letto)?'selected':''}>${esc(o)}</option>`).join('')}${f.opts.some(o=>String(o)===String(letto))?'':`<option selected>${esc(letto)}</option>`}</select>`;
@@ -4948,8 +4970,19 @@ function openLibretto(files,opt={}){
     const stato=V.targa
       ? (ex?`<div class="alert ok"><b>Aggiorno il mezzo ${esc(V.targa)}</b>, già in anagrafica (${esc(mezzoName(ex)||'—')}). Vengono scritti solo i campi spuntati.</div>`
             :`<div class="alert warn"><b>Creo il nuovo mezzo ${esc(V.targa)}</b>: non è ancora in anagrafica.</div>`)
-      : `<div class="alert bad">Non ho trovato la targa: correggila nella tabella prima di applicare.</div>`;
-    shell(`${head}${stato}
+      : `<div class="alert bad"><b>La targa non è stata letta.</b> Scrivila qui: tutto il resto è già pronto.
+          <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input class="input upc" data-targaman list="libTargheTop" placeholder="AB123CD" style="max-width:220px" autocomplete="off">
+            <datalist id="libTargheTop">${S.mezzi.filter(m=>!ARCH(m)).map(m=>`<option value="${esc(m.targa)}">${esc(mezzoName(m))}</option>`).join('')}</datalist>
+            <span class="muted" style="font-size:12.5px">Se il mezzo è già in anagrafica puoi sceglierlo dall’elenco; altrimenti verrà creato.</span>
+          </div></div>`;
+    const avvDiversa=cur.targaDiversa?`<div class="alert warn"><b>Attenzione: il libretto non sembra di questo mezzo.</b>
+        Stai leggendo dalla scheda di <b>${esc(opt.mezzo.targa)}</b>, ma sul documento c'è <b>${esc(cur.targaLetta||'')}</b>.
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" data-usasua>Scrivi sul mezzo ${esc(opt.mezzo.targa)}</button>
+          <button class="btn" data-usaletta>Usa ${esc(cur.targaLetta||'')}, come dice il libretto</button>
+        </div></div>`:'';
+    shell(`${head}${avvDiversa}${stato}
       <div class="libwrap">
         <div>${cur.thumb?`<img class="libthumb" src="${cur.thumb}" alt="Anteprima del libretto">`:'<div class="panel card muted">nessuna anteprima</div>'}
           ${altri.length?`<div class="panel card" style="margin-top:10px"><b style="font-size:13px">Altri dati sul documento</b>
@@ -4984,6 +5017,11 @@ function openLibretto(files,opt={}){
       const c=d.querySelector(`[data-k="${k}"]`);if(c&&!c.disabled)c.checked=true;
       if(k==='targa'){clearTimeout(d._t);d._t=setTimeout(draw,350);}
     });
+    const tm=q('[data-targaman]');
+    if(tm)tm.oninput=()=>{V.targa=normTarga(tm.value);clearTimeout(d._t);d._t=setTimeout(()=>{draw();
+      const el=d.querySelector('[data-targaman]');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},450);};
+    const us=q('[data-usasua]');if(us)us.onclick=()=>{V.targa=opt.mezzo.targa;cur.targaDiversa=false;draw();};
+    const ul=q('[data-usaletta]');if(ul)ul.onclick=()=>{V.targa=cur.targaLetta;cur.targaDiversa=false;draw();};
     const rp=q('[data-reparse]');if(rp)rp.onclick=()=>{cur.text=q('[data-raw]').value;cur.parsed=parseLibretto(cur.text);cur.errore=null;cur.mode='testo corretto a mano';draw();};
     const oc=q('[data-ocr]');if(oc)oc.onclick=()=>run(true);
     const sk=q('[data-skip]');if(sk)sk.onclick=()=>{idx++;run();};
@@ -5176,6 +5214,11 @@ function renderMezzi(){
       {k:'centroCosto',label:'Centro di costo',opts:()=>[...new Set(S.mezzi.map(m=>m.centroCosto).filter(Boolean))].sort(),all:'Tutti'},
       {k:'__ubic',label:'Dove si trova',all:'Tutte',opts:()=>[...new Set(S.mezzi.filter(m=>!ARCH(m)).map(ubicazioneDi).filter(Boolean))].sort(),
         test:(r,v)=>ubicazioneDi(r)===v},
+      {k:'__all',label:'Allegati',all:'Tutti',opts:()=>['Con allegati','Senza allegati','Senza libretto'],
+        test:(r,v)=>{const l=attachFor('mezzi',r.targa);
+          if(v==='Con allegati')return l.length>0;
+          if(v==='Senza allegati')return l.length===0;
+          return !l.some(a=>a.tipo==='Carta di circolazione');}},
       {k:'formaDisp',label:'Disponibilità giuridica',opts:()=>MODS.mezzi.fmap.formaDisp.opts,all:'Tutte'},
       {k:'__scad',label:'Scadenze',opts:()=>['Scadute o entro 30 giorni'],all:'Tutte',test:r=>['revisione','bollo','rcaScad','tachigrafo','atp'].some(k=>r[k]&&r[k]<=addDays(todayISO(),30))},
       {k:'__rev',label:'Controllo revisione',all:'Tutti',opts:()=>['Tutti i problemi',...Object.values(REV_LIV).map(x=>x.l)],
@@ -5188,7 +5231,9 @@ function renderMezzi(){
       return `${t(l.length,'mezzi','')}${t(d,'disponibili oggi','Disponibile')}${t(n,'a noleggio oggi','A noleggio')}${t(iu,'in uso (Fast Rent e dipendenti)','In uso')}${t(fe,'fermi','Fermo tecnico',fe?'warnc':'')}${iv?t(iv,'in vendita','In vendita'):''}${t(ve,'venduti','Venduto')}${t(di,'dismessi','Dismesso')}${t(sc,'con scadenze entro 30 giorni','',sc?'late':'')}`;},
     rowClass:r=>{const c=revisioneCheck(r);return c?(REV_LIV[c.liv].c==='bad'?'rowerr':'rowwarn'):'';},
     cols:[
-      {l:'Targa',v:r=>plate(r.targa)},
+      {l:'Targa',v:r=>{const n=attachFor('mezzi',r.targa).length;
+        return plate(r.targa)+(n?`<span class="sub"><b>${n}</b> ${n===1?'allegato':'allegati'}</span>`
+                                :'<span class="sub muted">nessun allegato</span>');}},
       {l:'Veicolo',v:r=>`${esc(mezzoName(r))}<span class="sub">${esc([r.tipologia,r.categoria,r.alimentazione].filter(Boolean).join(', '))}</span>`},
       {l:'Proprietario → contraente → utilizzatore',v:r=>`${esc(r.proprietaria||'–')}<span class="sub">${esc((r.contraente||'–')+' → '+(r.utilizzatore||'–'))}</span>`},
       {l:'Massa e telaio',v:r=>`${r.massa!==''?numF.format(r.massa)+' kg':'–'}<span class="sub">${esc(r.telaio||'')}</span>`},
@@ -5203,7 +5248,7 @@ function renderMezzi(){
       {l:'Giornaliere',show:r=>S.gio.some(g=>normTarga(g.targa)===normTarga(r.targa)),
         fn:r=>{const u=ui('gio'),ul=ui('gioL');ul.f={targa:r.targa};ul.q='';u.vista='elenco';S.tab='gio';render();}},
       {l:'Archivia',show:r=>FUORI_FLOTTA(r.stato),fn:r=>openArchivia([r],()=>renderMezzi())},
-      {l:'Leggi il libretto',fn:r=>libFilePick({single:true,refresh:()=>renderMezzi()})},
+      {l:'Leggi il libretto',fn:r=>libFilePick({single:true,mezzo:r,refresh:()=>renderMezzi()})},
       {l:'Noleggia',show:r=>dispo(r).label==='Disponibile',fn:r=>openMulti([r.id])},
       {l:'Assegna',show:r=>!FUORI_FLOTTA(dispo(r).label),fn:r=>openRecord('ass',null,{preset:{targa:r.targa,dal:todayISO(),kmConsegna:r.km},onSaved:()=>renderMezzi()})},
       {l:'Manutenzione',fn:r=>openRecord('man',null,{preset:{targa:r.targa,dataSegnalazione:todayISO(),km:r.km},onSaved:()=>renderMezzi()})},
@@ -7985,7 +8030,9 @@ const DOC_ATTESI=[
    nome:m=>`${m.targa} – ${[m.compagnia,m.polizza].filter(Boolean).join(' ')}`},
   {mod:'noleggi',tipo:'Contratto',cosa:'Contratto di noleggio firmato',
    lista:()=>S.rows.filter(r=>r.numero&&r.fine&&r.fine>=todayISO()),
-   nome:r=>`${r.numero}${r.locataria?' – '+r.locataria:''}`},
+   /* la copia generata dal gestionale non conta: qui si chiede il firmato */
+   presente:r=>!!contrattoFirmato(r),
+   nome:r=>`${r.numero}${r.locataria?' – '+r.locataria:''}${contrattoGenerato(r)?' · copia generata, manca la firmata':''}`},
   {mod:'fat',tipo:'Proforma',cosa:'Copia della proforma',
    lista:()=>S.fat.filter(f=>f.stato!=='Annullata'),
    nome:f=>`${f.codice} – ${f.cliente}`},
@@ -8008,19 +8055,50 @@ const DOC_ATTESI=[
    lista:()=>S.soc.filter(socOk.cli),
    nome:x=>x.ragione},
 ];
-function docMancanti(){
-  const out=[];
+function docMancanti(conGestiti){
+  const gestiti=docGestiti();const out=[];
   for(const r of DOC_ATTESI){
     let lista=[];try{lista=r.lista()||[];}catch(e){continue;}
+    let nascosti=0;
     const senza=lista.filter(x=>{
       const rif=r.mod==='noleggi'?x.numero:recRef(r.mod,x);
       if(!rif)return false;
       if(!navInScope({mod:r.mod==='noleggi'?'rows':r.mod,id:rif}))return false;
-      return !S.all.some(a=>a.modulo===r.mod&&a.riferimento===rif&&a.tipo===r.tipo);
+      const manca=r.presente?!r.presente(x)
+        :!S.all.some(a=>a.modulo===r.mod&&a.riferimento===rif&&a.tipo===r.tipo);
+      if(!manca)return false;
+      if(gestiti.has(docKey(r.mod,rif,r.tipo))){nascosti++;return !!conGestiti;}
+      return true;
     });
-    out.push({...r,senza,attesi:lista.length});
+    out.push({...r,senza,attesi:lista.length,nascosti,gestiti});
   }
   return out;
+}
+
+/* ---------- documenti mancanti dichiarati «gestiti» ----------
+   Non tutto quello che l'elenco si aspetta serve davvero: un mezzo venduto
+   domani, un cliente occasionale senza visura. Marcarlo come gestito lo toglie
+   dall'elenco senza fingere che il documento ci sia. Il segno vive nel foglio
+   Scadenze, con lo stesso meccanismo delle scadenze già gestite, così resta
+   nel registro ed è uguale per tutte le postazioni. */
+const docKey=(mod,rif,tipo)=>`docmanc|${mod}|${rif}|${tipo}`;
+const docGestiti=()=>new Set((S.scad||[])
+  .filter(s=>s.stato==='Gestita'&&String(s.chiave||'').indexOf('docmanc|')===0)
+  .map(s=>s.chiave));
+function segnaDocGestito(mod,rif,tipo,titolo){
+  const k=docKey(mod,rif,tipo);
+  if((S.scad||[]).some(s=>s.chiave===k))return false;
+  S.scad.push({id:uid(),codice:nextCode(MODS.scad),
+    titolo:titolo||`${tipo} – ${rif}`,categoria:'Altro',data:todayISO(),
+    preavviso:'',ricorrenza:'Nessuna',stato:'Gestita',
+    targa:'',dipendente:'',soggetto:'',gestitaIl:todayISO(),chiave:k,
+    note:'Documento tolto dall’elenco dei mancanti: dichiarato non necessario'});
+  markDirty();return true;
+}
+function rimettiDocInElenco(k){
+  const n=(S.scad||[]).length;
+  S.scad=(S.scad||[]).filter(s=>s.chiave!==k);
+  if(S.scad.length!==n)markDirty();
 }
 
 function renderDocsHub(){
@@ -8077,22 +8155,43 @@ function renderDocsHub(){
     return;
   }
   // ---- documenti mancanti ----
-  const gruppi=docMancanti();
+  const vediGestiti=!!f.gestiti;
+  const gruppi=docMancanti(vediGestiti);
   const tot=gruppi.reduce((a,g)=>a+g.senza.length,0);
+  const totNascosti=gruppi.reduce((a,g)=>a+g.nascosti,0);
   $('#main').innerHTML=`${pageHead('Documenti','Quello che ci si aspetta di trovare in archivio e non c’è. Da qui si apre il record e si carica.')}${tabs}
    ${tot?`<div class="ledger card">${gruppi.filter(g=>g.senza.length).slice(0,5).map(g=>
      `<div><b class="${g.senza.length?'warnc':''}">${g.senza.length}</b><small>${esc(g.cosa.toLowerCase())}</small></div>`).join('')}</div>`:''}
+   ${totNascosti||vediGestiti?`<p class="muted" style="margin:0 0 12px;font-size:13px">
+     ${totNascosti} ${totNascosti===1?'documento è stato dichiarato non necessario':'documenti sono stati dichiarati non necessari'} e ${totNascosti===1?'non compare':'non compaiono'} nell’elenco.
+     <button class="btn ghost" data-docvedig>${vediGestiti?'Nascondi i gestiti':'Mostra anche i gestiti'}</button></p>`:''}
    ${tot?gruppi.filter(g=>g.senza.length).map(g=>`<div class="panel" style="margin-bottom:12px">
      <div class="sechead"><h3>${esc(g.cosa)}</h3><span class="muted">${g.senza.length} ${g.senza.length===1?'mancante':'mancanti'} su ${g.attesi} · ${esc(DOC_MOD_LABEL[g.mod]||g.mod)}</span></div>
      <div style="overflow-x:auto"><table class="grid mini" style="min-width:340px"><tbody>${g.senza.slice(0,40).map(x=>{
        const rif=g.mod==='noleggi'?x.numero:recRef(g.mod,x);
-       return `<tr><td>${esc(g.nome(x))}</td><td style="width:1%"><button class="btn ghost" data-docrec="${esc(g.mod)}|${esc(rif)}">Apri e carica</button></td></tr>`;}).join('')}</tbody></table></div>
+       const k=docKey(g.mod,rif,g.tipo);const gest=g.gestiti.has(k);
+       return `<tr class="${gest?'rowwarn':''}"><td>${esc(g.nome(x))}${gest?'<span class="sub">dichiarato non necessario</span>':''}</td>
+         <td style="width:1%"><div class="rowacts">
+           <button class="btn ghost" data-docrec="${esc(g.mod)}|${esc(rif)}">Apri e carica</button>
+           ${gest?`<button class="btn ghost" data-docrim="${esc(k)}">Rimetti in elenco</button>`
+                 :`<button class="btn ghost" data-docgest="${esc(g.mod)}|${esc(rif)}|${esc(g.tipo)}|${esc(g.cosa)}">Gestita</button>`}
+         </div></td></tr>`;}).join('')}</tbody></table></div>
      ${g.senza.length>40?`<p class="muted" style="margin:8px 0 0;font-size:12px">…e altri ${g.senza.length-40}. Usa «Esporta l’elenco» nei documenti creati per avere tutto in Excel.</p>`:''}
    </div>`).join('')
    :'<div class="panel empty">Non manca niente fra i documenti attesi. </div>'}`;
   $('#main').querySelectorAll('[data-docrec]').forEach(b=>b.onclick=()=>{
     const [mod,id]=b.dataset.docrec.split('|');
     openNav({mod:mod==='noleggi'?'rows':mod,id});});
+  $('#main').querySelectorAll('[data-docgest]').forEach(b=>b.onclick=()=>{
+    const [mod,rif,tipo,cosa]=b.dataset.docgest.split('|');
+    if(soloLettura())return toast('Il tuo ruolo è di sola consultazione.',true);
+    segnaDocGestito(mod,rif,tipo,`${cosa} – ${rif}`);
+    toast('Tolto dall’elenco. Lo rimetti con «Mostra anche i gestiti».');
+    renderDocsHub();});
+  $('#main').querySelectorAll('[data-docrim]').forEach(b=>b.onclick=()=>{
+    rimettiDocInElenco(b.dataset.docrim);toast('Rimesso fra i documenti attesi.');renderDocsHub();});
+  const vg=$('#main').querySelector('[data-docvedig]');
+  if(vg)vg.onclick=()=>{f.gestiti=!f.gestiti;renderDocsHub();};
 }
 
 async function docExport(l){
@@ -8868,6 +8967,58 @@ function groupData(rows,isLast){
     periodo_dal:dates.length?fmtD(dates[0]):'________',periodo_al:ends.length?fmtD(ends[ends.length-1]):'________',
     elenco_localita:locs.length?locs.join('; '):'________',note:[...new Set(rows.map(o=>o.note).filter(Boolean))].join(' ')||'nessuna',veicoli};
 }
+/* ---------- il contratto generato torna sulla riga del noleggio ----------
+   La copia che esce dal gestionale non è il contratto firmato: è il documento
+   da far firmare. Resta marcata (note='generato') perché l'elenco dei
+   documenti mancanti possa continuare a chiedere la copia controfirmata senza
+   accontentarsi di questa. */
+const contrattoGenerato=o=>o&&o.numero
+  ?S.all.find(a=>a.modulo==='noleggi'&&a.riferimento===o.numero&&a.tipo==='Contratto'&&a.note==='generato'):null;
+const contrattoFirmato=o=>o&&o.numero
+  ?S.all.find(a=>a.modulo==='noleggi'&&a.riferimento===o.numero&&a.tipo==='Contratto'&&a.note!=='generato'):null;
+
+async function allegaContratto(o,nome,dati){
+  if(!o||!o.numero)return false;
+  try{
+    const vecchia=contrattoGenerato(o);
+    if(vecchia)await removeAttachment(vecchia,true);   /* una sola copia generata per contratto */
+    const blob=dati instanceof Blob?dati:new Blob([dati],{type:DOCX_MIME});
+    const path=`Allegati/noleggi/${safe(o.numero)}/${safe(nome)}`;
+    const arch=await putBlob(path,blob);
+    S.all.push({id:uid(),codice:nextCode(MODS.all),modulo:'noleggi',riferimento:o.numero,
+      tipo:'Contratto',descrizione:'Generato dal gestionale, da far firmare',
+      file:nome,percorso:path,archivio:arch,dataDocumento:S.dataContratto||todayISO(),
+      scadenza:'',caricatoIl:todayISO(),note:'generato'});
+    markDirty();return true;
+  }catch(e){toast('Copia del contratto non allegata: '+e.message,true);return false;}
+}
+
+/* Genera il contratto di una riga sola e glielo attacca: è il giro corto,
+   senza passare da «Stampa contratti». */
+async function generaContrattoRiga(o){
+  if(soloLettura()||!puoScrivere('noleggi'))return toast('Il tuo ruolo non può modificare i noleggi.',true);
+  if(!o.targa||!o.inizio||!o.fine)return toast('Servono targa, data di inizio e data di fine prima di generare il contratto.',true);
+  if(!o.numero){o.numero=nextNumero(o.inizio);markDirty();toast(`Assegnato il numero ${o.numero}.`);}
+  busy(true,'Generazione del contratto');
+  try{
+    const tpl=S.tpl||b64ToBuf(DOCX_B64);
+    const d=contractData(o,true);
+    const z=renderDocx(tpl,{...d,contratti:[d]});
+    const nome=`Contratto_${safe(o.numero)}_${safe(o.targa)}.docx`;
+    const data=z.generate({type:'uint8array',compression:'DEFLATE'});
+    await saveOutput(nome,new Blob([data],{type:DOCX_MIME}));
+    const ok=await allegaContratto(o,nome,data);
+    busy(false);
+    if(ok)toast('Contratto generato e allegato alla riga: lo riapri da qui o da Documenti.');
+    fillContratti();
+  }catch(e){
+    busy(false);
+    const det=e.properties&&e.properties.errors
+      ?e.properties.errors.map(x=>(x.properties&&x.properties.explanation)||x.message).slice(0,3).join(' | '):e.message;
+    toast('Contratto non generato. '+det,true);
+  }
+}
+
 async function generate(){
   const sel=S.rows.filter(o=>S.sel.has(o.id));if(!sel.length)return;
   const multi=S.docType==='multiplo';
@@ -8906,6 +9057,17 @@ async function generate(){
         await saveFile(`${label}_${stamp}_${units.length}.zip`,out.generate({type:'blob',mimeType:'application/zip'}));
       }
     }
+    /* La copia va anche sulla riga del noleggio. In modalità «un file solo»
+       il documento stampato è cumulativo, quindi per allegare si rigenera il
+       singolo: è l'unico modo perché ogni riga abbia il suo. */
+    let allegati=0;
+    for(const u of units){
+      const d=dataOf(u,true);
+      const z=renderDocx(tpl,{...d,contratti:[d]});
+      const data=z.generate({type:'uint8array',compression:'DEFLATE'});
+      for(const r of u.rows)if(await allegaContratto(r,u.name,data))allegati++;
+    }
+    if(allegati)toast(`${allegati} ${allegati===1?'contratto allegato alla sua riga':'contratti allegati alle rispettive righe'}: li riapri dalla lista noleggi o da Documenti.`);
   }catch(e){
     const det=e.properties&&e.properties.errors?e.properties.errors.map(x=>x.properties&&x.properties.explanation||x.message).slice(0,3).join(' | '):e.message;
     toast('Generazione non riuscita. '+det,true);
