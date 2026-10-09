@@ -1162,7 +1162,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.09b';
+const APP_VERSION='2026.10.10';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -1296,6 +1296,12 @@ function renderUtenti(){
         :'<span class="muted">tutta la struttura</span>'},
       {l:'Stato',v:u=>u.attivo==='No'?pillS('disattivato','bad'):pillS('attivo','ok')},
       {l:'Ultimo accesso',v:u=>esc(u.ultimoAccesso||'–')},
+      {l:'Permessi',v:u=>typeof permRiassunto==='function'?permRiassunto(u):''},
+    ],
+    rowActions:[
+      {l:'Permessi',show:()=>ruoloReale()==='master',fn:u=>openPermessi(u)},
+      {l:'Guarda come lui',show:u=>ruoloReale()==='master'&&ruoloKey(u.ruolo)&&ruoloKey(u.ruolo)!=='master',
+       fn:u=>provaComeUtente(u.email)},
     ],
     after:`${ruoloReale()==='master'?`<div class="panel" style="margin-top:14px">
       <h3>Prova un ruolo prima di assegnarlo</h3>
@@ -3643,10 +3649,12 @@ function azioniRegistroHtml(){
 }
 function menuPerRuolo(){
   const t=tabsConsentite();
-  const vis=k=>(t?t.includes(k):true)&&(k!=='utenti'||ruolo()==='master')
-             &&(!filiale()||FILIALE_TABS.includes(k))
-             &&!(typeof AMM_TABS!=='undefined'&&AMM_TABS.includes(k)&&!puoAmm());
-  if(!t&&!filiale()&&ruolo()==='master'&&puoAmm())return MENU;
+  /* tabOk tiene già conto del ruolo, dei permessi per modulo e
+     dell'amministrazione; qui resta solo l'ambito della filiale */
+  const vis=k=>tabOk(k)&&(k!=='utenti'||ruolo()==='master')
+             &&(!filiale()||FILIALE_TABS.includes(k));
+  const nessunaEccezione=typeof permessiCorrenti!=='function'||!Object.keys(permessiCorrenti()).length;
+  if(!t&&!filiale()&&ruolo()==='master'&&puoAmm()&&nessunaEccezione)return MENU;
   return MENU.map(g=>({g:g.g,items:g.items.filter(([k])=>vis(k))})).filter(g=>g.items.length);
 }
 function renderSide(){
@@ -6888,17 +6896,24 @@ function tabsConsentite(){
   return r.tabs;                       // null = tutte
 }
 function tabOk(k){
+  /* il permesso per modulo, quando c'è, decide prima del ruolo */
+  if(typeof tabOkPerm==='function'){const p=tabOkPerm(k);if(p!==null)return p;}
   /* i moduli dell'amministrazione non si vedono per esclusione: serve un
      ruolo che li abbia espressamente (amm:true) */
   if(typeof AMM_TABS!=='undefined'&&AMM_TABS.includes(k)&&!puoAmm())return false;
   const t=tabsConsentite();return t?t.includes(k):true;}
 function puoScrivere(key){
   if(S.readonly)return false;
+  if(typeof scrivePerm==='function'){const p=scrivePerm(key);if(p!==null)return p;}
   const r=ruoloDef();if(!r)return false;
   if(r.scrivi===null)return true;
   return r.scrivi.includes(key);
 }
-const soloLettura=()=>{const r=ruoloDef();return !r||(Array.isArray(r.scrivi)&&!r.scrivi.length);};
+/* chi ha anche un solo permesso di scrittura non è in sola lettura, anche
+   se il suo ruolo di partenza lo sarebbe */
+const soloLettura=()=>{
+  if(typeof qualcheScrittura==='function'&&qualcheScrittura())return false;
+  const r=ruoloDef();return !r||(Array.isArray(r.scrivi)&&!r.scrivi.length);};
 function chiSono(){
   const u=utenteCorrente();
   return u?(u.nome||u.email):(SESSIONE?SESSIONE.nome||SESSIONE.email:operatore());
@@ -9206,6 +9221,257 @@ async function generate(){
 
 
 /* =====================================================================
+   RUOLI E PERMESSI PER MODULO
+   ---------------------------------------------------------------------
+   Due livelli. Il **ruolo** dà il profilo di partenza — Master, Ufficio
+   flotta, Operativo, Amministrazione, Filiale, Officina, Sola lettura. I
+   **permessi per modulo** sono le eccezioni a quel profilo, persona per
+   persona: a questo dell'ufficio flotta do anche i margini, a quello
+   dell'amministrazione tolgo le anagrafiche.
+
+   Si salvano solo le eccezioni, così il ruolo resta leggibile e un
+   cambiamento al profilo vale per tutti quelli che non hanno eccezioni.
+
+   Utenti e Parametri restano fuori dalla griglia, di proposito: sono le
+   due chiavi che permettono di rimettere a posto gli accessi, e devono
+   restare dove sono, in mano al Master. Non si concedono e non si tolgono
+   per sbaglio.
+   ===================================================================== */
+
+/* ---------- i ruoli nuovi ---------- */
+if(!RUOLI.flotta)RUOLI.flotta={l:'Ufficio flotta',
+  d:'Tutta la flotta e i noleggi ai clienti: mezzi, contratti, manutenzioni, sinistri, verbali, dotazioni, dispositivi, dipendenti e anagrafiche. Non vede l’amministrazione.',
+  tabs:['cruscotto','calendario','contratti','stampa','mezzi','gio','cp','man','sin','vrb',
+        'rinotifiche','disp','dot','dip','archivio','soc','anag','cdc','capfin','docs'],
+  scrivi:['mezzi','gio','cp','man','sin','vrb','disp','mov','dot','dota','dip','ass',
+          'all','scad','app','soc','cap','cdc','rows','righe']};
+if(!RUOLI.operativo)RUOLI.operativo={l:'Operativo',
+  d:'Il giorno per giorno: giornaliere, assegnazioni, consegne e riconsegne, segnalazione guasti e dotazioni. Vede i mezzi, non li modifica.',
+  tabs:['cruscotto','calendario','mezzi','gio','dip','man','dot','docs'],
+  scrivi:['gio','ass','man','dot','dota','all','app']};
+RUOLO_L[RUOLI.flotta.l.toLowerCase()]='flotta';
+RUOLO_L[RUOLI.operativo.l.toLowerCase()]='operativo';
+try{
+  const o=MODS.utenti.fmap.ruolo.opts;
+  for(const [k,l] of [['flotta','Ufficio flotta'],['operativo','Operativo']])
+    if(o&&!o.includes(l))o.splice(Math.max(0,o.length-1),0,l);
+}catch(e){}
+
+/* ---------- le aree su cui si danno i permessi ----------
+   Un'area è quello che una persona riconosce come «una parte del
+   gestionale»: raccoglie le sue schede di menu e i suoi archivi. */
+const AREE=[
+ {k:'noleggi',     l:'Noleggi ai clienti',        tabs:['contratti','stampa'],              store:['rows','righe']},
+ {k:'fatturazione',l:'Fatturazione e proforma',   tabs:['fatturazione'],                    store:['fat','righe']},
+ {k:'mezzi',       l:'Mezzi e archivio',          tabs:['mezzi','archivio'],                store:['mezzi']},
+ {k:'gio',         l:'Giornaliere',               tabs:['gio'],                             store:['gio']},
+ {k:'cp',          l:'Contratti leasing e noleggio',tabs:['cp'],                            store:['cp']},
+ {k:'man',         l:'Manutenzioni',              tabs:['man'],                             store:['man']},
+ {k:'sin',         l:'Sinistri',                  tabs:['sin'],                             store:['sin']},
+ {k:'vrb',         l:'Verbali e rinotifiche',     tabs:['vrb','rinotifiche'],               store:['vrb']},
+ {k:'disp',        l:'Telepass e carte carburante',tabs:['disp'],                           store:['disp','mov']},
+ {k:'dot',         l:'Dotazioni e attrezzature',  tabs:['dot'],                             store:['dot','dota']},
+ {k:'dip',         l:'Dipendenti e assegnazioni', tabs:['dip'],                             store:['dip','ass']},
+ {k:'anagrafiche', l:'Anagrafiche e centri di costo',tabs:['soc','anag','cdc','capfin'],    store:['soc','cdc','cap']},
+ {k:'calendario',  l:'Calendario e appuntamenti', tabs:['calendario'],                      store:['app']},
+ {k:'docs',        l:'Documenti e allegati',      tabs:['docs'],                            store:['all']},
+ {k:'amm',         l:'Amministrazione',           tabs:['fp','fa','pn','bolli','iva','f24','f24p'],
+  store:['fp','fpr','fpl','fa','far','fal','pn','bolli','iva','f24','f24r']},
+ {k:'margini',     l:'Margini e scheda economica',tabs:['margini'],                         store:[]},
+];
+const AREA_DI_TAB=(()=>{const m={};for(const a of AREE)for(const t of a.tabs)m[t]=a.k;return m;})();
+const AREE_DI_STORE=(()=>{const m={};for(const a of AREE)for(const s of a.store)(m[s]=m[s]||[]).push(a.k);return m;})();
+const PERM_L={n:'Nessuno',v:'Vede',w:'Vede e modifica'};
+
+/* ---------- lettura e scrittura della riga utente ---------- */
+function permessiDi(u){
+  const out={};
+  if(!u||!u.permessi)return out;
+  for(const p of String(u.permessi).split(/[,;]+/)){
+    const [k,v]=p.split(':').map(x=>String(x||'').trim());
+    if(!k||!v)continue;
+    const liv=v.toLowerCase()[0];
+    if(AREE.some(a=>a.k===k)&&['n','v','w'].includes(liv))out[k]=liv;
+  }
+  return out;
+}
+const permessiTesto=o=>AREE.filter(a=>o[a.k]).map(a=>`${a.k}:${o[a.k]}`).join(',');
+
+/* I permessi di chi sta usando il gestionale adesso. In prova valgono
+   quelli della persona che si sta simulando, se è stata scelta; con la
+   sola prova di un ruolo, nessuna eccezione: si guarda il profilo puro. */
+function permessiCorrenti(){
+  if(typeof inProva==='function'&&inProva()){
+    if(S.comeUtente){
+      const u=(S.utenti||[]).find(x=>emailEq(x.email,S.comeUtente));
+      return u?permessiDi(u):{};
+    }
+    return {};
+  }
+  if(!SESSIONE||!S.wb)return {};
+  const u=typeof utenteCorrente==='function'?utenteCorrente():null;
+  return u?permessiDi(u):{};
+}
+const permessoArea=k=>permessiCorrenti()[k]||'';
+const qualcheScrittura=()=>Object.values(permessiCorrenti()).some(v=>v==='w');
+
+/* null = non c'è un'eccezione, decide il ruolo */
+function tabOkPerm(k){
+  const a=AREA_DI_TAB[k];
+  if(!a)return null;
+  const p=permessoArea(a);
+  if(p==='n')return false;
+  if(p==='v'||p==='w')return true;
+  return null;
+}
+function scrivePerm(store){
+  const aree=AREE_DI_STORE[store];
+  if(!aree)return null;
+  const liv=aree.map(k=>permessoArea(k)).filter(Boolean);
+  if(!liv.length)return null;
+  return liv.includes('w');
+}
+
+/* ---------- la griglia ---------- */
+function permRiassunto(u){
+  const p=permessiDi(u);
+  const n=Object.keys(p).length;
+  if(!n)return '<span class="muted">come il ruolo</span>';
+  const tolti=AREE.filter(a=>p[a.k]==='n');
+  const dati=AREE.filter(a=>p[a.k]==='v'||p[a.k]==='w');
+  return `${n} ${n===1?'eccezione':'eccezioni'}`
+    +`${tolti.length?`<span class="sub">tolte: ${esc(tolti.map(a=>a.l).join(', '))}</span>`:''}`
+    +`${dati.length?`<span class="sub">date: ${esc(dati.map(a=>a.l).join(', '))}</span>`:''}`;
+}
+/* Che cosa vedrebbe quella persona, area per area, con ruolo ed
+   eccezioni messi insieme: è la riga che conta davvero. */
+function permEffettivo(u,areaK){
+  const a=AREE.find(x=>x.k===areaK);
+  const p=permessiDi(u)[areaK];
+  if(p)return p;
+  const r=RUOLI[ruoloKey(u.ruolo)];
+  if(!r)return 'n';
+  const vedeTab=a.tabs.some(t=>r.tabs?r.tabs.includes(t):true);
+  if(!vedeTab)return 'n';
+  if(areaK==='amm'&&!r.amm)return 'n';
+  if(areaK==='margini'&&!r.amm)return 'n';
+  const scrive=r.scrivi===null?a.store.length>0
+    :a.store.some(s=>r.scrivi.includes(s));
+  return scrive?'w':'v';
+}
+
+function openPermessi(u){
+  if(ruoloReale()!=='master')return toast('Solo un Master può cambiare i permessi.',true);
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  let lavoro=permessiDi(u);
+  const paint=()=>{
+    const rk=ruoloKey(u.ruolo);
+    const r=RUOLI[rk];
+    const riga=a=>{
+      const scelto=lavoro[a.k]||'';
+      const dalRuolo=permEffettivo({...u,permessi:''},a.k);
+      const eff=scelto||dalRuolo;
+      return `<tr>
+        <td><b>${esc(a.l)}</b><span class="sub">${esc(a.tabs.join(', '))}</span></td>
+        <td><span class="sub">${esc(PERM_L[dalRuolo])}</span></td>
+        ${['','n','v','w'].map(v=>`<td class="num"><label class="check" style="justify-content:center">
+          <input type="radio" name="pa_${a.k}" value="${v}" ${scelto===v?'checked':''}></label></td>`).join('')}
+        <td>${scelto&&scelto!==dalRuolo
+          ?`<span class="pill ${scelto==='n'?'bad':'run'}">${esc(PERM_L[eff])}</span>`
+          :`<span class="muted">${esc(PERM_L[eff])}</span>`}</td></tr>`;
+    };
+    const ecc=Object.keys(lavoro).length;
+    d.innerHTML=`<header><h2>Permessi di ${esc(u.nome||u.email||'questo utente')}</h2>
+      <button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <p class="muted" style="margin-top:0">Ruolo <b>${esc(r?r.l:'non riconosciuto')}</b>${SONO_IO(u)?' · <b>sei tu</b>':''}.
+      ${r?esc(r.d):''}</p>
+      <p class="muted">Il ruolo dà il profilo di partenza. Qui si scrivono solo le <b>eccezioni</b>: lascia «Come il ruolo» dove va bene così,
+      e le modifiche future al profilo varranno anche per questa persona.</p>
+      ${SONO_IO(u)?'<div class="alert">Stai cambiando i permessi del tuo stesso account. Un Master può sempre rimetterli a posto, ma controlla quello che togli.</div>':''}
+      <div class="tablewrap"><table class="grid mini"><thead><tr>
+        <th>Area</th><th>Dal ruolo</th><th class="num">Come il ruolo</th><th class="num">Nessuno</th>
+        <th class="num">Vede</th><th class="num">Vede e modifica</th><th>Risultato</th></tr></thead>
+      <tbody>${AREE.map(riga).join('')}</tbody></table></div>
+      <div class="acts" style="justify-content:flex-start;margin-top:10px">
+        <button class="btn" data-reset>Riporta tutto al ruolo</button>
+        <span class="muted">${ecc?`${ecc} ${ecc===1?'eccezione':'eccezioni'} da salvare`:'nessuna eccezione'}</span>
+      </div>
+      <div class="panel" style="margin-top:14px"><h3>Due cose che restano fuori</h3>
+        <p class="muted"><b>Utenti</b> e <b>Parametri</b> non sono in questa griglia e restano del solo Master.
+        Sono le due chiavi con cui si rimettono a posto gli accessi: se si potessero dare o togliere da qui,
+        basterebbe una distrazione per chiudere fuori tutti.</p>
+        <p class="muted">E il confine vero resta SharePoint: il ruolo decide che cosa si vede dentro il gestionale,
+        non chi può aprire il file.</p>
+      </div>
+    </div>
+    <footer><button class="btn" data-x>Annulla</button>
+      <button class="btn" data-prova>Guarda il gestionale come lui</button>
+      <button class="btn primary" data-salva>Salva i permessi</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+    d.querySelectorAll('input[type=radio]').forEach(i=>i.onchange=()=>{
+      const k=i.name.slice(3);
+      if(i.value)lavoro[k]=i.value;else delete lavoro[k];
+      paint();});
+    d.querySelector('[data-reset]').onclick=()=>{lavoro={};paint();};
+    d.querySelector('[data-salva]').onclick=()=>{
+      u.permessi=permessiTesto(lavoro);
+      markDirty();close();renderUtenti();
+      const n=Object.keys(lavoro).length;
+      toast(n?`Permessi di ${u.nome||u.email}: ${n} ${n===1?'eccezione':'eccezioni'} al ruolo.`
+             :`${u.nome||u.email} torna ad avere i permessi del suo ruolo.`);
+    };
+    d.querySelector('[data-prova]').onclick=()=>{
+      u.permessi=permessiTesto(lavoro);markDirty();close();provaComeUtente(u.email);
+    };
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);
+  sc.onclick=close;document.body.append(sc,d);paint();
+}
+
+/* ---------- provare un utente, non solo un ruolo ---------- */
+function provaComeUtente(email){
+  if(ruoloReale()!=='master')return toast('Solo un Master può provare gli accessi altrui.',true);
+  const u=(S.utenti||[]).find(x=>emailEq(x.email,email));
+  if(!u)return toast('Utente non trovato.',true);
+  const k=ruoloKey(u.ruolo);
+  if(!k)return toast('Questo utente non ha un ruolo riconosciuto.',true);
+  if(k==='master')return toast('Un Master vede tutto: non c’è niente da provare.',true);
+  S.comeUtente=u.email;S.comeRuolo=k;S.comeCdc=k==='filiale'?(u.centroCosto||''):'';
+  S.tab='cruscotto';render();renderSide();strisciaProva();
+  toast(`Stai vedendo il gestionale come ${u.nome||u.email}.`);
+}
+
+/* la striscia della prova dice anche di chi sono i permessi in uso */
+const permStriscia0=strisciaProva;
+strisciaProva=function(){
+  permStriscia0();
+  if(!S.comeUtente)return;
+  const b=document.getElementById('provaBanner');if(!b)return;
+  const sp=b.querySelector('span');
+  const u=(S.utenti||[]).find(x=>emailEq(x.email,S.comeUtente));
+  if(sp&&u)sp.innerHTML=`Stai guardando come <b>${esc(u.nome||u.email)}</b> — ruolo ${esc(RUOLI[S.comeRuolo].l)}`
+    +`${Object.keys(permessiDi(u)).length?', con i suoi permessi':''} — è una prova, i tuoi poteri sono intatti.`;
+};
+const permProvaRuolo0=provaRuolo;
+provaRuolo=function(k,cdc){S.comeUtente='';return permProvaRuolo0(k,cdc);};
+
+/* ---------- il campo sulla riga utente ---------- */
+(()=>{
+  const g=MODS.utenti.groups[0];
+  if(!MODS.utenti.fmap.permessi){
+    g.f.push(fd('permessi','Permessi per modulo','text',{span:'s6',
+      hint:'Solo le eccezioni al ruolo, es. «amm:n,margini:v». Si scrivono col pulsante «Permessi» nell’elenco.'}));
+    MODS.utenti.fields=MODS.utenti.groups.flatMap(x=>x.f);
+    MODS.utenti.fmap=Object.fromEntries(MODS.utenti.fields.map(f=>[f.k,f]));
+  }
+})();
+
+
+/* =====================================================================
    AMMINISTRAZIONE — archivi, menu e accessi
    ---------------------------------------------------------------------
    Sei archivi nuovi: fatture passive (con il riepilogo IVA per aliquota),
@@ -9599,7 +9865,16 @@ try{
   const o=MODS.utenti.fmap.ruolo.opts;
   if(o&&!o.includes(RUOLI.amministrazione.l))o.splice(o.length-1,0,RUOLI.amministrazione.l);
 }catch(e){}
-const puoAmm=()=>{const r=RUOLI[ruolo()];return !!(r&&r.amm);};
+/* Il permesso per modulo, se c'è, viene prima del ruolo: il Master può
+   dare l'amministrazione a chi non l'avrebbe, o toglierla a chi l'avrebbe. */
+const puoAmm=()=>{
+  if(typeof permessoArea==='function'){
+    const p=permessoArea('amm');
+    if(p==='n')return false;
+    if(p==='v'||p==='w')return true;
+  }
+  const r=RUOLI[ruolo()];return !!(r&&r.amm);
+};
 
 /* le viste */
 VIEWS.fp=()=>renderFp();

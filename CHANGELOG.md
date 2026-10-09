@@ -52,3 +52,11 @@
   lista mezzi e dal cruscotto: costi, ricavi e margine di una targa, con la
   fonte di ogni numero e le fonti che rischiano il doppio conteggio spente
   e dichiarate.
+- **2026.10.10** — pubblicata il 09/10/2026 — due nuovi ruoli, **Ufficio flotta**
+  (tutta la parte operativa, senza amministrazione né margini) e **Operativo**
+  (giornaliere, assegnazioni, manutenzioni, dotazioni); in **Utenti e accessi**
+  il pulsante **Permessi** assegna a ogni persona, area per area, nessun
+  accesso, sola lettura o modifica, come eccezione al ruolo; **Guarda come lui**
+  mostra il gestionale com'è per quella persona. Utenti e Parametri restano
+  solo del Master e l'ultimo Master non si può togliere. Vedi ACCESSI.md.
+- **2026.10.10** — pubblicata il 09/10/2026

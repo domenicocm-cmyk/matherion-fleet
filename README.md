@@ -19,6 +19,7 @@ l'applicazione, non i dati.
 | `app/` | l'app dei telefoni per autisti e responsabili → indirizzo `/app` |
 | `APP.md` | come funziona l'app, chi vede che cosa, che cosa fare una volta sola |
 | `TURNI.md` | il collegamento con la piattaforma dei turni: i due file di scambio, campo per campo |
+| `AMMINISTRAZIONE.md` | fatture passive, prima nota, bolli, IVA e F24: come entrano i dati, come si calcola e che cosa va confermato col commercialista |
 | `vercel.json` | indirizzi puliti, cache e intestazioni di sicurezza |
 | `robots.txt` | tiene il sito fuori dai motori di ricerca |
 

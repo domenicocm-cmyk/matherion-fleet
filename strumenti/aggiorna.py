@@ -106,6 +106,7 @@ try{const v=new URLSearchParams(location.search).get('vai');if(v)sessionStorage.
 def versione_filiale(s, nome):
     s = sost(s,
              """function filiale(){
+  if(typeof inProva==='function'&&inProva())return S.comeRuolo==='filiale'?(S.comeCdc||''):'';
   const u=utenteCorrente();
   if(u&&ruoloKey(u.ruolo)==='filiale')return u.centroCosto||'';   /* deciso dall'account */
   try{return localStorage.getItem('filiale')||'';}catch(e){return '';}
@@ -113,6 +114,7 @@ def versione_filiale(s, nome):
 function setFiliale(v){try{if(v)localStorage.setItem('filiale',v);else localStorage.removeItem('filiale');}catch(e){}}""",
              """const FILIALE_FISSA=%s;
 function filiale(){
+  if(typeof inProva==='function'&&inProva())return S.comeRuolo==='filiale'?(S.comeCdc||''):'';
   const u=utenteCorrente();
   if(u&&ruoloKey(u.ruolo)==='filiale')return u.centroCosto||'';   /* se c'e' un accesso, decide l'account */
   if(!S.cdc||!S.cdc.length)return FILIALE_FISSA;

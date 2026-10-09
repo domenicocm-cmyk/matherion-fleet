@@ -93,9 +93,11 @@ del registro, quindi si può leggere e correggere anche da Excel.
 | Ruolo | Vede | Modifica |
 |---|---|---|
 | **Master** | tutto | tutto, compresi utenti e parametri |
+| **Amministrazione** | fatture passive e attive, prima nota, bolli, IVA, F24, margini per veicolo, più fatturazione, documenti e calendario; mezzi, contratti e anagrafiche in sola lettura | le sezioni dell'amministrazione, le proforma, gli allegati |
+| **Ufficio flotta** | tutta la parte operativa: mezzi, contratti leasing e noleggio, giornaliere, manutenzioni, sinistri, verbali, telepass e carte, dotazioni, dipendenti, anagrafiche, centri di costo, documenti, calendario, contratti ai clienti (stampa) | la parte operativa; **non** l'amministrazione e non i margini |
+| **Operativo** | cruscotto, calendario, mezzi, giornaliere, dipendenti, manutenzioni, dotazioni, documenti | giornaliere, assegnazioni, manutenzioni, dotazioni, appuntamenti, allegati |
 | **Filiale** | solo il proprio centro di costo: mezzi, giornaliere, manutenzioni, sinistri, carte, dotazioni, dipendenti | quello che vede |
 | **Officina** | mezzi, giornaliere, manutenzioni, dotazioni, su tutta la flotta | manutenzioni, giornaliere, dotazioni, allegati |
-| **Amministrazione** | fatture passive e attive, prima nota, bolli, IVA, F24, margini per veicolo, più fatturazione, documenti e calendario; mezzi, contratti e anagrafiche in sola lettura | le sezioni dell'amministrazione, le proforma, gli allegati |
 | **Sola lettura** | tutto il registro **tranne l'amministrazione** | niente |
 
 **L'amministrazione è a parte.** Le otto sezioni del gruppo *Amministrazione*
@@ -107,8 +109,35 @@ cruscotto: chi non ha il permesso non li vede comparire. Filiale, Officina e Sol
 aprirle, neanche la sola lettura che vede tutto il resto. Anche le scadenze
 fiscali del cruscotto seguono la stessa regola. Vedi AMMINISTRAZIONE.md.
 
-> Il permesso **per singolo utente e per singolo modulo** — più fine del ruolo —
-> è il passo successivo, ancora da fare.
+## Permessi per singola persona
+
+Il ruolo dà il profilo di partenza; sopra si possono mettere **eccezioni per
+persona**. In **Parametri → Utenti e accessi**, sulla riga della persona,
+il pulsante **Permessi** apre una griglia con le sedici aree (noleggi,
+fatturazione, mezzi, giornaliere, leasing e noleggio, manutenzioni, sinistri,
+verbali, telepass e carte, dotazioni, dipendenti, anagrafiche, calendario,
+documenti, amministrazione, margini). Per ogni area si sceglie:
+
+- **Come il ruolo** (nessuna eccezione);
+- **Nessuno**: l'area sparisce dal menu e non si apre neanche dall'indirizzo;
+- **Vede**: sola lettura;
+- **Vede e modifica**.
+
+Esempio: un Operativo che deve anche vedere i margini → *margini: Vede*.
+Un Ufficio flotta che non deve toccare i sinistri → *sinistri: Nessuno*.
+
+La colonna **Risultato** della griglia mostra che cosa la persona avrà davvero,
+area per area. Le eccezioni sono scritte nella colonna *Permessi* del foglio
+`Utenti` (per esempio `amm:n,margini:v`), quindi si leggono anche da Excel.
+
+**Guarda come lui** apre il gestionale così come lo vedrebbe quella persona,
+con una striscia in alto per tornare indietro: serve a controllare prima di
+dare l'accesso, senza chiedere la password a nessuno.
+
+**Utenti e Parametri restano fuori dalla griglia, per scelta**: solo il Master
+li apre, e nessuna eccezione può cambiarlo. Il gestionale rifiuta inoltre di
+togliere l'ultimo Master. Così nessuna combinazione di permessi può lasciarti
+chiuso fuori.
 
 Chi accede con un account che non è in elenco, o che è stato disattivato, vede
 *«Questo account non è abilitato»* e nient'altro.

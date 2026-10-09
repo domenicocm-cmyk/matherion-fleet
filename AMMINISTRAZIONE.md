@@ -24,22 +24,23 @@ a parte.
 ## Chi ci può entrare
 
 Il modulo **non si vede per esclusione ma per permesso**: serve un ruolo che lo
-abbia espressamente. Oggi ce l'hanno due ruoli:
+abbia espressamente. Di partenza ce l'hanno due ruoli:
 
 - **Master** — vede e fa tutto, come sempre.
 - **Amministrazione** — il ruolo nuovo. Vede e modifica le sei sezioni, più
   fatturazione e proforma, documenti e calendario; vede senza modificare mezzi,
   contratti e anagrafiche; **non** entra in Parametri né in Utenti.
 
-**Filiale**, **Officina** e **Sola lettura** non vedono il gruppo nel menu e non
+**Ufficio flotta**, **Operativo**, **Filiale**, **Officina** e **Sola lettura** non vedono il gruppo nel menu e non
 possono aprirne le pagine neanche conoscendone l'indirizzo. La sola lettura, che
 vede tutto il resto del registro, qui si ferma. Le scadenze fiscali nel cruscotto
 seguono la stessa regola: una filiale non le vede.
 
 Si assegna il ruolo in **Anagrafiche → Utenti e accessi**, campo *Ruolo*.
 
-> Il passo successivo, che resta da fare, è il permesso **per singolo utente e
-> per singolo modulo**: oggi la grana è il ruolo, non la persona.
+Oltre al ruolo, il Master può dare o togliere l'area *Amministrazione* (e quella
+dei *Margini*) a una singola persona: vedi ACCESSI.md, «Permessi per singola
+persona». Ufficio flotta e Operativo non hanno l'amministrazione di partenza.
 
 ---
 
