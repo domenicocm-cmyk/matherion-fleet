@@ -42,3 +42,13 @@
   dello SDI (anche firmati .p7m) o da Excel e il file resta allegato alla
   riga; escono in Excel, XML e PDF. Il modulo si vede solo con ruolo Master
   o con il nuovo ruolo **Amministrazione**. Vedi AMMINISTRAZIONE.md.
+- **2026.10.09b** — pubblicata il 09/10/2026 — dalla fattura passiva si
+  leggono anche causale, contratto di locazione, targa, canone e periodo di
+  riferimento, presi dai campi del tracciato o, se il fornitore non li
+  compila, dalla descrizione; le righe della fattura vengono conservate, così
+  una fattura di leasing su dieci veicoli attribuisce il costo a ciascuno.
+  Nuova sezione **Fatture attive**, gemella delle passive. Nuova vista
+  **Margini per veicolo** e **scheda economica** del singolo mezzo, dalla
+  lista mezzi e dal cruscotto: costi, ricavi e margine di una targa, con la
+  fonte di ogni numero e le fonti che rischiano il doppio conteggio spente
+  e dichiarate.

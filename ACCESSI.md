@@ -95,13 +95,15 @@ del registro, quindi si può leggere e correggere anche da Excel.
 | **Master** | tutto | tutto, compresi utenti e parametri |
 | **Filiale** | solo il proprio centro di costo: mezzi, giornaliere, manutenzioni, sinistri, carte, dotazioni, dipendenti | quello che vede |
 | **Officina** | mezzi, giornaliere, manutenzioni, dotazioni, su tutta la flotta | manutenzioni, giornaliere, dotazioni, allegati |
-| **Amministrazione** | fatture passive, prima nota, bolli, IVA, F24, più fatturazione, documenti e calendario; mezzi, contratti e anagrafiche in sola lettura | le sei sezioni dell'amministrazione, le proforma, gli allegati |
+| **Amministrazione** | fatture passive e attive, prima nota, bolli, IVA, F24, margini per veicolo, più fatturazione, documenti e calendario; mezzi, contratti e anagrafiche in sola lettura | le sezioni dell'amministrazione, le proforma, gli allegati |
 | **Sola lettura** | tutto il registro **tranne l'amministrazione** | niente |
 
-**L'amministrazione è a parte.** Le sei sezioni del gruppo *Amministrazione*
-(fatture passive, prima nota, bolli, liquidazione IVA, F24, previsionale) non si
-vedono per esclusione ma **per permesso esplicito**: solo Master e Amministrazione
-le hanno. Filiale, Officina e Sola lettura non le trovano nel menu e non possono
+**L'amministrazione è a parte.** Le otto sezioni del gruppo *Amministrazione*
+(fatture passive, fatture attive, prima nota, bolli, liquidazione IVA, F24,
+previsionale, margini per veicolo) non si vedono per esclusione ma **per
+permesso esplicito**: solo Master e Amministrazione le hanno. Vale anche per la
+**scheda economica** nella lista mezzi e per il riquadro dei margini nel
+cruscotto: chi non ha il permesso non li vede comparire. Filiale, Officina e Sola lettura non le trovano nel menu e non possono
 aprirle, neanche la sola lettura che vede tutto il resto. Anche le scadenze
 fiscali del cruscotto seguono la stessa regola. Vedi AMMINISTRAZIONE.md.
 

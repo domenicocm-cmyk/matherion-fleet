@@ -4,16 +4,20 @@ Sei sottosezioni, nel gruppo **Amministrazione** del menu:
 
 | Sezione | A cosa serve |
 |---|---|
-| Fatture passive | Le fatture ricevute dai fornitori, con il riepilogo IVA per aliquota |
+| Fatture passive | Le fatture ricevute dai fornitori, con riepilogo IVA e righe |
+| Fatture attive | Le fatture emesse ai clienti, lette dallo stesso tracciato |
 | Prima nota | Le scritture contabili, che nascono dalle fatture |
 | Bolli e tasse | Le tasse automobilistiche, veicolo per veicolo |
 | Liquidazione IVA | Il saldo IVA di ogni periodo |
 | F24 | I modelli da versare, con i tributi riga per riga |
 | Previsionale F24 | Che cosa si pagherà nel mese e da dove viene ogni importo |
+| Margini per veicolo | Costi, ricavi e margine di ogni mezzo |
 
-Tutto finisce nei fogli del registro Excel come gli altri moduli: sette fogli
-nuovi (`Fatture passive`, `Fatture passive IVA`, `Prima nota`, `Bolli`,
-`Liquidazione IVA`, `F24`, `F24 tributi`). Non c'è niente da salvare a parte.
+Tutto finisce nei fogli del registro Excel come gli altri moduli: undici fogli
+nuovi (`Fatture passive`, `Fatture passive IVA`, `Fatture passive righe`,
+`Fatture attive`, `Fatture attive IVA`, `Fatture attive righe`, `Prima nota`,
+`Bolli`, `Liquidazione IVA`, `F24`, `F24 tributi`). Non c'è niente da salvare
+a parte.
 
 ---
 
@@ -59,14 +63,43 @@ fiscale, la tua società intestataria, imponibile e IVA per aliquota e natura,
 totale documento, bollo, ritenuta d'acconto con la causale, modalità e scadenza
 di pagamento, IBAN.
 
+Vengono inoltre letti, quando ci sono, **causale**, **contratto di locazione**,
+**canone** e **periodo di riferimento**. Il tracciato ha i campi apposta
+(`DatiContratto`, `DataInizioPeriodo`, `DataFinePeriodo`, `Causale`) ma molti
+fornitori non li compilano e scrivono tutto nella descrizione: allora il
+gestionale legge la descrizione e riconosce
+
+- `dal 01/03/2026 al 31/03/2026`, `01/03/26 - 31/03/26`
+- `marzo 2026`, `periodo: 03/2026`, `2° trimestre 2026`
+- `contratto n. MAN/2026/77`, `rif. contratto di locazione: NLT-2025-0001`
+
+Quello che viene dalla descrizione e non dai campi è segnato nelle note della
+fattura, perché è una lettura, non un dato certificato. Una data o un importo
+non vengono mai scambiati per un numero di contratto.
+
 Viene **proposto** (controllalo):
 
-- la **categoria di costo**, dedotta dalle descrizioni delle righe;
-- la **targa**, solo se in fattura compare una targa già in anagrafica — così non
-  si inventano accostamenti;
+- la **categoria di costo**, decisa dalla riga che pesa di più — non dalla prima
+  parola che combacia, se no una fattura di noleggio da 2.000 € con 120 € di km
+  eccedenti finirebbe classificata «km eccedenti»;
+- la **targa**: prima quelle già in anagrafica, che sono certe; poi, se non ce
+  ne sono, quelle col formato di una targa italiana, segnalate come da
+  verificare;
 - il **conto di costo**, dalla categoria;
 - la **detraibilità IVA al 100%**: giusta per i veicoli strumentali e per quelli
   dati a noleggio. Sulle autovetture a uso promiscuo va messa al **40%**.
+
+### Le righe della fattura
+
+Una fattura di leasing copre dieci veicoli con dieci righe. Le righe vengono
+conservate, e il pulsante **«Righe»** le apre: targa, contratto, periodo,
+canone, imponibile e categoria, riga per riga, correggibili. C'è anche
+«assegna una targa a tutte le righe» per le fatture a veicolo unico.
+
+È da qui che la **scheda economica del mezzo** prende i costi: senza le righe,
+una fattura su dieci veicoli non si saprebbe come ripartire. **Una riga senza
+targa resta un costo della flotta, non del veicolo**: il gestionale non inventa
+una ripartizione.
 
 I fornitori che non sono in anagrafica vengono creati con denominazione e partita
 IVA presi dalla fattura (si può disattivare), da completare poi.
@@ -100,6 +133,30 @@ I file finiscono in `Amministrazione/Estrazioni` nella cartella del registro.
 - **Inversione contabile**: le righe a natura N6 vengono marcate, e l'IVA si
   ricava dall'imponibile per l'aliquota. In liquidazione va sia a debito sia a
   credito.
+
+---
+
+## Fatture attive
+
+Le fatture emesse ai clienti, lette dallo **stesso tracciato FatturaPA**: qui il
+cedente sei tu e il cessionario è il cliente. Entrano da XML (anche `.p7m`) o da
+Excel, portano riepilogo IVA e righe come le passive, e il file resta allegato.
+
+Se il cedente di un file non è una tua società, il gestionale lo dice: è
+probabilmente una fattura ricevuta, che va fra le passive.
+
+Riconosce la **scissione dei pagamenti** (esigibilità `S`): l'IVA la versa il
+cliente, e non entra fra l'IVA a debito della liquidazione.
+
+**Le proforma restano dove sono.** «Fatturazione e proforma» serve a preparare
+la fatturazione; qui ci sono le fatture vere. Quando il numero di una fattura
+importata coincide con il «numero fattura SDI» di una proforma, le due cose si
+collegano da sole. In liquidazione IVA vale la fattura: una proforma viene
+contata solo se non esiste la fattura corrispondente, così lo stesso ricavo non
+finisce due volte nel calcolo.
+
+«Porta in prima nota» scrive credito verso il cliente in dare, ricavo e IVA in
+avere. «Incassata» registra l'incasso: banca in dare, credito in avere.
 
 ---
 
@@ -230,6 +287,53 @@ finita in un F24, vale la riga dell'F24 — è quella che si versa.
 
 ---
 
+## Margini per veicolo
+
+La domanda è semplice — questo mezzo rende o no — e la risposta richiede di
+mettere insieme cose che stanno in sei archivi diversi.
+
+**Dalla lista mezzi**, l'azione «Scheda economica» su una riga. **Dal
+cruscotto**, il riquadro «Margini per veicolo» con i cinque migliori, i cinque
+peggiori e il selettore della targa. **Dalla sezione «Margini per veicolo»**,
+tutta la flotta in una tabella ordinabile, con l'export in PDF e in Excel.
+
+La scheda mostra, per il periodo scelto: ricavi e costi voce per voce **con la
+fonte di ciascuno**, il margine in euro e in percentuale, i giorni in cui il
+mezzo è stato a noleggio, e il costo al giorno.
+
+### Il doppio conteggio, e come viene evitato
+
+Il canone di un contratto di leasing e la fattura che lo addebita sono **lo
+stesso costo visto da due parti**. Lo stesso vale per il consuntivo di una
+manutenzione e la fattura dell'officina, o per il canone di un contratto di
+noleggio e la fattura emessa al cliente.
+
+Perciò le fonti sono separate e si accendono una per una:
+
+| Fonte | Lato | Accesa di default |
+|---|---|---|
+| Fatture passive (righe intestate al veicolo) | costo | sì |
+| Carburante e pedaggi (movimenti carte e Telepass) | costo | sì |
+| Bolli e tasse | costo | sì |
+| Verbali a nostro carico | costo | sì |
+| Canoni di contratto (dai contratti fornitori) | costo | **no** |
+| Manutenzioni a consuntivo | costo | **no** |
+| Franchigie sinistri | costo | **no** |
+| Fatture attive (righe intestate al veicolo) | ricavo | sì |
+| Proforma non ancora fatturate | ricavo | sì |
+| Riaddebiti ai clienti | ricavo | sì |
+| Canoni di noleggio dal registro | ricavo | **no** |
+
+Accese di default sono le **fonti documentali**: i soldi davvero usciti ed
+entrati. Le fonti del **registro operativo** sono spente, e in fondo alla pagina
+c'è scritto quali: servono a chi non registra le fatture dei fornitori, e
+accenderle insieme alle fatture conterebbe lo stesso euro due volte.
+
+Ogni voce della scheda dice da dove viene, e il PDF riporta in testata quali
+fonti erano spente: un numero senza la sua provenienza non serve a decidere.
+
+---
+
 ## Parametri nuovi
 
 In **Parametri**, righe 31–34 del foglio:
@@ -256,4 +360,10 @@ Vale la pena dirlo chiaramente:
   commercialista;
 - **non produce il modello F24 ministeriale**: produce un riepilogo leggibile;
 - **non è una contabilità generale**: è una prima nota che quadra e un registro
-  acquisti, pensati per essere passati a chi tiene la contabilità.
+  acquisti e vendite, pensati per essere passati a chi tiene la contabilità;
+- **non ripartisce da solo i costi di una fattura su più veicoli**: attribuisce
+  quello che le righe dicono, e quello che le righe non dicono resta un costo
+  della flotta. Se una fattura cumulativa va divisa, la divisione si fa a mano
+  nelle righe;
+- **non indovina sempre il periodo o il contratto**: quando li ricava dalla
+  descrizione invece che dai campi del tracciato, lo scrive nelle note.

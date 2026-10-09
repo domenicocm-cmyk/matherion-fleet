@@ -857,6 +857,11 @@ details.ammdet>summary,.body details>summary{cursor:pointer;padding:6px 0;color:
 .body details>summary:hover{color:var(--gold-ink,var(--ink))}
 .grid tfoot th{background:var(--surface-2);font-weight:800;padding:8px 10px;border-top:2px solid var(--line)}
 .grid tfoot th.num{text-align:right}
+/* la scheda economica: due colonne vere, non quelle della stampa */
+.ecodue{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.ecodue>div{min-width:0}
+.ecodue .tablewrap{overflow-x:auto}
+@media(max-width:900px){.ecodue{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -1138,7 +1143,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.09';
+const APP_VERSION='2026.10.09b';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -5213,6 +5218,7 @@ function renderMezzi(){
       {l:'Giornaliere',show:r=>S.gio.some(g=>normTarga(g.targa)===normTarga(r.targa)),
         fn:r=>{const u=ui('gio'),ul=ui('gioL');ul.f={targa:r.targa};ul.q='';u.vista='elenco';S.tab='gio';render();}},
       {l:'Archivia',show:r=>FUORI_FLOTTA(r.stato),fn:r=>openArchivia([r],()=>renderMezzi())},
+      {l:'Scheda economica',show:()=>typeof puoAmm==='function'&&puoAmm(),fn:r=>apriSchedaMezzo(r.targa)},
       {l:'Leggi il libretto',fn:r=>libFilePick({single:true,mezzo:r,refresh:()=>renderMezzi()})},
       {l:'Noleggia',show:r=>dispo(r).label==='Disponibile',fn:r=>openMulti([r.id])},
       {l:'Assegna',show:r=>!FUORI_FLOTTA(dispo(r).label),fn:r=>openRecord('ass',null,{preset:{targa:r.targa,dal:todayISO(),kmConsegna:r.km},onSaved:()=>renderMezzi()})},
@@ -7776,7 +7782,9 @@ function renderCruscotto(){
     await saveFile(`Scadenziario_${stampNow()}.xlsx`,new Blob([await wb.xlsx.writeBuffer()],{type:XLSX_MIME}));};
   fill();
   const mh=m.querySelector('[data-man]');
-  mh.innerHTML=`<div class="panel"><h3>Veicoli fermi</h3>${fermi.length?`<table class="grid mini"><tbody>${fermi.map(r=>{const f=fermoCalc(r);return `<tr><td>${plate(r.targa)}</td><td>${esc(r.tipo)}<span class="sub">${esc(r.officina||r.fornitoreContratto||'')}</span></td><td class="num">${f?f.giorni+' gg':''}</td><td>${pillS(r.stato,'rent')}</td></tr>`;}).join('')}</tbody></table>`:'<p class="muted">Nessun veicolo fermo.</p>'}</div>`;
+  mh.innerHTML=`<div class="panel"><h3>Veicoli fermi</h3>${fermi.length?`<table class="grid mini"><tbody>${fermi.map(r=>{const f=fermoCalc(r);return `<tr><td>${plate(r.targa)}</td><td>${esc(r.tipo)}<span class="sub">${esc(r.officina||r.fornitoreContratto||'')}</span></td><td class="num">${f?f.giorni+' gg':''}</td><td>${pillS(r.stato,'rent')}</td></tr>`;}).join('')}</tbody></table>`:'<p class="muted">Nessun veicolo fermo.</p>'}</div>`
+    +(typeof ecoPannelloCruscotto==='function'?ecoPannelloCruscotto():'');
+  if(typeof ecoLegaCruscotto==='function')ecoLegaCruscotto();
   genericList('scad',{target:m.querySelector('[data-scadman]'),noHead:true,noImport:false,refresh:renderCruscotto,newLabel:'Nuova scadenza',rowFilter:r=>!r.chiave,search:['titolo','targa','note'],
     cols:[{l:'Scadenza manuale',v:r=>`${esc(r.titolo)}<span class="sub">${esc(r.categoria)}${r.ricorrenza&&r.ricorrenza!=='Nessuna'?' · '+esc(r.ricorrenza):''}</span>`},{l:'Data',v:r=>dueCell(r.data,+r.preavviso||30)},{l:'Stato',v:r=>pillS(r.stato,r.stato==='Aperta'?'fut':'end')}],
     filters:[{k:'stato',label:'Stato',opts:()=>['Aperta','Gestita']}]});
@@ -9197,11 +9205,21 @@ const AMM_PDC_COSTO={'Carburanti':'Carburanti e lubrificanti','Pedaggi e transit
  'Ricambi e accessori':'Ricambi e accessori','Lavaggi e rimessaggio':'Lavaggi e rimessaggio',
  'Utenze':'Utenze','Consulenze e prestazioni professionali':'Consulenze e prestazioni professionali',
  'Provvigioni':'Provvigioni passive','Servizi vari':'Servizi vari','Altri costi':'Costi diversi di gestione'};
+const AMM_RICAVI=['Canoni di noleggio','Noleggio a breve termine','Km eccedenti','Riaddebito carburante',
+ 'Riaddebito pedaggi','Riaddebito verbali','Riaddebito danni e franchigie','Penali e indennizzi',
+ 'Vendita veicoli','Servizi accessori','Consulenze','Altri ricavi'];
+const AMM_PDC_RICAVO={'Canoni di noleggio':'Ricavi da noleggio','Noleggio a breve termine':'Ricavi da noleggio',
+ 'Km eccedenti':'Ricavi da km eccedenti','Riaddebito carburante':'Riaddebiti a clienti',
+ 'Riaddebito pedaggi':'Riaddebiti a clienti','Riaddebito verbali':'Riaddebiti a clienti',
+ 'Riaddebito danni e franchigie':'Riaddebiti a clienti','Penali e indennizzi':'Penali e indennizzi attivi',
+ 'Vendita veicoli':'Plusvalenze da cessione automezzi','Servizi accessori':'Ricavi per servizi',
+ 'Consulenze':'Ricavi per consulenze','Altri ricavi':'Altri ricavi'};
 const AMM_PDC_FISSI=['IVA a credito','IVA a debito','IVA indetraibile','Debiti verso fornitori',
  'Crediti verso clienti','Banca c/c','Cassa','Erario c/ritenute','Erario c/IVA','INPS c/contributi',
- 'Erario c/imposte','Ricavi da noleggio','Arrotondamenti passivi','Arrotondamenti attivi'];
-const ammPdc=()=>[...new Set([...Object.values(AMM_PDC_COSTO),...AMM_PDC_FISSI,
-  ...S.pn.map(r=>r.conto).filter(Boolean),...S.fp.map(r=>r.conto).filter(Boolean)])].sort();
+ 'Erario c/imposte','Imposta di bollo','Arrotondamenti passivi','Arrotondamenti attivi'];
+const ammPdc=()=>[...new Set([...Object.values(AMM_PDC_COSTO),...Object.values(AMM_PDC_RICAVO),
+  ...AMM_PDC_FISSI,...S.pn.map(r=>r.conto).filter(Boolean),
+  ...S.fp.map(r=>r.conto).filter(Boolean),...(S.fa||[]).map(r=>r.conto).filter(Boolean)])].sort();
 
 /* ---------- codici tributo che usiamo davvero ----------
    Solo quelli di cui siamo certi. Il campo resta libero: qualunque altro
@@ -9283,6 +9301,15 @@ MODS.fp={sheet:'Fatture passive',store:'fp',title:'Fatture passive',code:'FP',ye
    fd('periodoIva','Periodo IVA','text',{span:'s2',hint:'Es. 2026-03 oppure 2026-T1'}),
    fd('esclusaLiquidazione','Fuori liquidazione IVA','bool',{def:'No',span:'s2',
       hint:'Per i documenti da non portare in liquidazione'})]},
+  {t:'Oggetto della fattura',f:[
+   fd('causale','Causale','text',{span:'s6',
+      hint:'La causale del documento, o la descrizione delle righe se la causale non c’è'}),
+   fd('contrattoLocazione','Contratto di locazione','text',{span:'s3',
+      hint:'Letto dai dati contratto della fattura o dalla descrizione'}),
+   fd('canone','Canone di locazione (€)','eur',{span:'s2',
+      hint:'Il canone del periodo, per veicolo'}),
+   fd('periodoDa','Periodo dal','date'),fd('periodoA','Periodo al','date'),
+   fd('numeroVeicoli','Veicoli in fattura','int',{span:'s2',hint:'Quante righe hanno una targa'})]},
   {t:'Classificazione',f:[
    fd('categoria','Categoria di costo','sel',{span:'s3',opts:AMM_CATEGORIE}),
    fd('conto','Conto di costo','text',{span:'s3',listOf:ammPdc}),
@@ -9312,6 +9339,27 @@ MODS.fpr={sheet:'Fatture passive IVA',store:'fpr',title:'Riepilogo IVA delle fat
    fd('imponibile','Imponibile (€)','eur'),fd('imposta','Imposta (€)','eur'),
    fd('esigibilita','Esigibilità IVA','sel',{span:'s2',opts:['','I Immediata','D Differita','S Scissione dei pagamenti']}),
    fd('riferimentoNormativo','Riferimento normativo','text',{span:'s6'})]}]};
+
+/* ---------- righe delle fatture passive ----------
+   Una fattura di leasing copre dieci veicoli con dieci righe: senza le
+   righe il costo non si può attribuire al singolo mezzo, e la scheda
+   economica del veicolo non sta in piedi. */
+MODS.fpl={sheet:'Fatture passive righe',store:'fpl',title:'Righe delle fatture passive',code:'FL',
+ groups:[{t:'Riga',f:[
+   fd('fattura','Fattura passiva','text',{req:true,span:'s3'}),
+   fd('numeroLinea','N. riga','int',{span:'s2'}),
+   fd('descrizione','Descrizione','area',{span:'s6',req:true}),
+   fd('targa','Targa','ref',{ref:'mezzo',span:'s2'}),
+   fd('contrattoLocazione','Contratto di locazione','text',{span:'s3'}),
+   fd('quantita','Quantità','num',{span:'s2'}),
+   fd('prezzo','Prezzo unitario (€)','eur'),
+   fd('imponibile','Imponibile (€)','eur'),
+   fd('aliquota','Aliquota IVA (%)','num',{span:'s2'}),
+   fd('natura','Natura','sel',{span:'s2',opts:['',...Object.keys(AMM_NATURA)]}),
+   fd('canone','Canone (€)','eur',{span:'s2'}),
+   fd('periodoDa','Periodo dal','date'),fd('periodoA','Periodo al','date'),
+   fd('categoria','Categoria di costo','sel',{span:'s3',opts:AMM_CATEGORIE}),
+   cdcField()]}]};
 
 /* ---------- prima nota ---------- */
 MODS.pn={sheet:'Prima nota',store:'pn',title:'Prima nota',code:'PN',yearly:true,attach:true,wide:true,
@@ -9451,7 +9499,7 @@ MODS.f24r={sheet:'F24 tributi',store:'f24r',title:'Tributi dell’F24',code:'FT'
 /* =====================================================================
    REGISTRAZIONE: fogli, stati, menu, viste, accessi
    ===================================================================== */
-const AMM_MODULI=['fp','fpr','pn','bolli','iva','f24','f24r'];
+const AMM_MODULI=['fp','fpr','fpl','pn','bolli','iva','f24','f24r'];
 const AMM_TABS=['fp','pn','bolli','iva','f24','f24p'];
 
 /* I nuovi moduli vanno normalizzati come gli altri: il ciclo che lo fa
@@ -9479,8 +9527,8 @@ if(!MENU.some(g=>g.g==='Amministrazione')){
 RUOLI.master.amm=true;
 if(!RUOLI.amministrazione)RUOLI.amministrazione={l:'Amministrazione',
   d:'Fatture passive, prima nota, bolli, IVA e F24. Vede mezzi, contratti e anagrafiche senza modificarli.',
-  tabs:['cruscotto','calendario','fp','pn','bolli','iva','f24','f24p','docs','fatturazione','mezzi','cp','soc','disp','cdc'],
-  scrivi:['fp','fpr','pn','bolli','iva','f24','f24r','all','scad','fat','righe'],
+  tabs:['cruscotto','calendario','fp','fa','pn','bolli','iva','f24','f24p','docs','fatturazione','mezzi','cp','soc','disp','cdc','margini'],
+  scrivi:['fp','fpr','fpl','fa','far','fal','pn','bolli','iva','f24','f24r','all','scad','fat','righe'],
   amm:true};
 RUOLO_L['amministrazione']='amministrazione';
 try{
@@ -9769,6 +9817,102 @@ const AMM_INDIZI=[
  [/energia|\bluce\b|\bgas\b|telefon|internet|utenz/i,'Utenze'],
 ];
 const ammCategoriaDa=t=>{for(const[re,c] of AMM_INDIZI)if(re.test(t||''))return c;return '';};
+/* Gli stessi indizi, letti dal lato del ricavo: «riaddebito carburante»
+   su una fattura emessa è un ricavo, non un costo. */
+const AMM_INDIZI_RIC=[
+ [/km\s*ecced|chilometri\s*ecced|extra\s*km/i,'Km eccedenti'],
+ [/riaddeb.*(carburant|gasolio|benzina)|carburante\s*riaddeb/i,'Riaddebito carburante'],
+ [/riaddeb.*(pedagg|telepass|autostrad)|pedagg.*riaddeb/i,'Riaddebito pedaggi'],
+ [/verbale|multa|sanzion|contravvenzion/i,'Riaddebito verbali'],
+ [/franchigi|danni|ripristino|riparazione a carico/i,'Riaddebito danni e franchigie'],
+ [/penale|indennizz|mancato preavviso/i,'Penali e indennizzi'],
+ [/vendita|cessione|alienazion/i,'Vendita veicoli'],
+ [/breve termine|\bnbt\b|a giornata|giornalier/i,'Noleggio a breve termine'],
+ [/canone|noleggi|locazion|\bnlt\b/i,'Canoni di noleggio'],
+ [/consulenz|parcella|onorari/i,'Consulenze'],
+ [/servizi|assistenza|gestione/i,'Servizi accessori'],
+];
+const ammCategoriaRicavo=t=>{for(const[re,c] of AMM_INDIZI_RIC)if(re.test(t||''))return c;return '';};
+/* La categoria della fattura è quella della riga che pesa di più, non la
+   prima parola che combacia nel testo di tutte le righe messe insieme:
+   su una fattura di noleggio con una riga di km eccedenti, il noleggio
+   vale 2.000 euro e i km 120. */
+function ammCategoriaPrevalente(linee,classifica){
+  const peso=new Map();
+  for(const l of linee){
+    const c=classifica(`${l.descrizione} ${l.riferimento||''}`);
+    if(!c)continue;
+    peso.set(c,r2((peso.get(c)||0)+Math.abs(+l.totale||+l.prezzo||0)));
+  }
+  if(!peso.size)return '';
+  return [...peso.entries()].sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+/* ---------- quello che sta scritto nella descrizione ----------
+   Il tracciato ha i campi giusti (DatiContratto, DataInizioPeriodo), ma
+   molti fornitori non li compilano e scrivono tutto nella descrizione.
+   Si prova prima il campo, poi il testo, e quello che si ricava dal testo
+   resta una proposta. */
+const AMM_MESI_RE='gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre';
+function ammDataIt(g,a,m,d){
+  const gg=String(d).padStart(2,'0'),mm=String(m).padStart(2,'0');
+  let aa=String(a);
+  if(aa.length===2)aa=(+aa>70?'19':'20')+aa;
+  const iso=`${aa}-${mm}-${gg}`;
+  return /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(iso)?iso:'';
+}
+const ammUltimoDelMese=(a,m)=>{const d=new Date(Date.UTC(+a,+m,0));return toISO(d);};
+/* Riconosce «dal 01/03/2026 al 31/03/2026», «01/03/26 - 31/03/26»,
+   «periodo 03/2026», «canone marzo 2026», «competenza 1° trimestre 2026». */
+function ammPeriodoDaTesto(t){
+  const s=String(t||'');
+  let m=s.match(/(?:dal|periodo|competenza|dal\s*giorno)?\s*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})\s*(?:[-–—]|al|\/)\s*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/i);
+  if(m){const da=ammDataIt(0,m[3],m[2],m[1]),a=ammDataIt(0,m[6],m[5],m[4]);
+    if(da&&a&&da<=a)return {da,a};}
+  m=s.match(new RegExp(`\\b(${AMM_MESI_RE})\\s+(\\d{4})\\b`,'i'));
+  if(m){const i=AMM_MESE_L.indexOf(m[1].toLowerCase())+1;
+    if(i)return {da:`${m[2]}-${String(i).padStart(2,'0')}-01`,a:ammUltimoDelMese(m[2],i)};}
+  m=s.match(/\b(?:periodo|competenza|mese)\s*:?\s*(0[1-9]|1[0-2])[\/.-](\d{4})\b/i);
+  if(m)return {da:`${m[2]}-${m[1]}-01`,a:ammUltimoDelMese(m[2],+m[1])};
+  m=s.match(/\b([1-4])[°ºo]?\s*trimestre\s*(\d{4})\b/i);
+  if(m){const q=+m[1],ia=(q-1)*3+1;
+    return {da:`${m[2]}-${String(ia).padStart(2,'0')}-01`,a:ammUltimoDelMese(m[2],ia+2)};}
+  return null;
+}
+/* «contratto n. 12345», «contr. NLT-2025-0001», «rif. contratto ABC/123».
+   Si scarta quello che è solo una data o un importo. */
+function ammContrattoDaTesto(t){
+  const s=String(t||'');
+  const re=/\b(?:contratt[oi]|contr\.?|locazione|noleggio|leasing|pratica)\s*(?:di\s+locazione\s*)?(?:n(?:um(?:ero)?)?\.?|nr\.?|#)?\s*[:\s]\s*([A-Z0-9][A-Z0-9._\/-]{3,24})/i;
+  const m=s.match(re);
+  if(!m)return '';
+  const v=m[1].replace(/[.,;:]+$/,'');
+  if(/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(v))return '';   /* è una data */
+  if(/^\d{1,3}[.,]\d{2}$/.test(v))return '';                     /* è un importo */
+  if(!/\d/.test(v))return '';                                    /* serve almeno una cifra */
+  return v.toUpperCase();
+}
+/* La targa: prima quelle in anagrafica (certe), poi il formato italiano
+   (proposte, perché una sigla qualunque può somigliare a una targa). */
+const AMM_TARGA_RE=/\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{2}\s?\d{5}|[A-Z]{2}\s?\d{4}\s?[A-Z]{1,2})\b/g;
+function ammTargaRiga(testo){
+  const note=ammTargheCitate(testo);
+  if(note.length)return {targa:note[0],certa:true,tutte:note};
+  const s=String(testo||'').toUpperCase();
+  const fuori=[...new Set((s.match(AMM_TARGA_RE)||[]).map(x=>x.replace(/\s+/g,'')))]
+    .filter(x=>!/^(IVA|SDI|PEC|CIG|CUP|IBAN)/.test(x));
+  return fuori.length?{targa:fuori[0],certa:false,tutte:fuori}:{targa:'',certa:false,tutte:[]};
+}
+/* Il canone: se la riga è un canone di locazione, il prezzo unitario è il
+   canone del periodo. Su una riga sola con quantità 1 vale il totale. */
+const AMM_CANONE_RE=/canone|noleggi|locazion|leasing|rata\b|fee\b/i;
+function ammCanoneRiga(l){
+  if(!AMM_CANONE_RE.test(l.descrizione||''))return '';
+  const q=+l.quantita||0,p=+l.prezzo||0,tot=+l.totale||0;
+  if(p>0)return r2(p);
+  if(tot>0&&q>0)return r2(tot/q);
+  return tot>0?r2(tot):'';
+}
 
 /* ---------- da XML a record ---------- */
 function ammLeggiFatturaPA(testo,nomeFile){
@@ -9806,20 +9950,55 @@ function ammLeggiFatturaPA(testo,nomeFile){
       aliquota:ammN(r,'AliquotaIVA'),natura:ammNat(ammT(r,'Natura')),
       imponibile:ammN(r,'ImponibileImporto'),imposta:ammN(r,'Imposta'),
       esigibilita:ammT(r,'EsigibilitaIVA'),riferimentoNormativo:ammT(r,'RiferimentoNormativo')}));
-    const linee=ammFigli(bs,'DettaglioLinee').map(l=>({
-      n:ammT(l,'NumeroLinea'),descrizione:ammT(l,'Descrizione'),
-      quantita:ammN(l,'Quantita'),prezzo:ammN(l,'PrezzoUnitario'),
-      totale:ammN(l,'PrezzoTotale'),aliquota:ammN(l,'AliquotaIVA'),
-      natura:ammNat(ammT(l,'Natura')),riferimento:ammT(l,'RiferimentoAmministrazione')}));
+    const linee=ammFigli(bs,'DettaglioLinee').map(l=>{
+      const r={
+        n:ammT(l,'NumeroLinea'),descrizione:ammT(l,'Descrizione'),
+        quantita:ammN(l,'Quantita'),prezzo:ammN(l,'PrezzoUnitario'),
+        totale:ammN(l,'PrezzoTotale'),aliquota:ammN(l,'AliquotaIVA'),
+        natura:ammNat(ammT(l,'Natura')),riferimento:ammT(l,'RiferimentoAmministrazione'),
+        /* il tracciato prevede il periodo sulla riga: quando c'è, è questo
+           e non quello indovinato dalla descrizione */
+        periodoDa:ammT(l,'DataInizioPeriodo').slice(0,10),
+        periodoA:ammT(l,'DataFinePeriodo').slice(0,10)};
+      const testo=`${r.descrizione} ${r.riferimento}`;
+      if(!r.periodoDa||!r.periodoA){
+        const p=ammPeriodoDaTesto(testo);
+        if(p){r.periodoDa=r.periodoDa||p.da;r.periodoA=r.periodoA||p.a;r.periodoDaTesto=true;}
+      }
+      const t=ammTargaRiga(testo);
+      r.targa=t.targa;r.targaCerta=t.certa;
+      r.contratto=ammContrattoDaTesto(testo);
+      r.canone=ammCanoneRiga(r);
+      r.categoria=ammCategoriaDa(testo);
+      return r;});
     const pag=ammGiu(body,'DatiPagamento');
     const dett=ammFigli(pag,'DettaglioPagamento')[0]||null;
     const rit=ammFigli(dg,'DatiRitenuta')[0]||null;
     const bollo=ammFiglio(dg,'DatiBollo');
     const testoLinee=linee.map(l=>`${l.descrizione} ${l.riferimento}`).join(' | ');
+    /* la causale sta nel suo campo, ripetibile; se manca, vale la
+       descrizione delle righe */
+    const causali=ammFigli(dg,'Causale').map(c=>String(c.textContent||'').trim()).filter(Boolean);
+    const causale=causali.join(' ').slice(0,500)||testoLinee.slice(0,500);
+    /* il contratto: prima i dati contratto del tracciato, poi il testo */
+    const dcon=ammGiu(body,'DatiGenerali/DatiContratto');
+    const contratto=ammT(dcon,'IdDocumento')
+      ||linee.map(l=>l.contratto).find(Boolean)
+      ||ammContrattoDaTesto(causale)||'';
+    /* il periodo della fattura: il più ampio fra quelli delle righe */
+    const pDa=linee.map(l=>l.periodoDa).filter(Boolean).sort()[0]
+      ||(ammPeriodoDaTesto(causale)||{}).da||'';
+    const pA=linee.map(l=>l.periodoA).filter(Boolean).sort().slice(-1)[0]
+      ||(ammPeriodoDaTesto(causale)||{}).a||'';
+    /* il canone: uguale su tutte le righe che ne hanno uno, altrimenti non
+       si sintetizza in testata e resta solo sulle righe */
+    const canoni=[...new Set(linee.map(l=>l.canone).filter(v=>v!==''&&v>0))];
+    const canone=canoni.length===1?canoni[0]:'';
+    const targheRiga=[...new Set(linee.map(l=>l.targa).filter(Boolean))];
     const imponibile=r2(riepiloghi.reduce((a,r)=>a+(+r.imponibile||0),0));
     const imposta=r2(riepiloghi.reduce((a,r)=>a+(+r.imposta||0),0));
     const nonImp=r2(riepiloghi.filter(r=>r.natura).reduce((a,r)=>a+(+r.imponibile||0),0));
-    const causale=(()=>{const c=ammT(rit,'CausalePagamento');
+    const causaleRit=(()=>{const c=ammT(rit,'CausalePagamento');
       if(/^A$|lavoro autonomo/i.test(c))return '1040 Lavoro autonomo';
       const t=ammT(rit,'TipoRitenuta');
       if(/RT02/.test(t))return '1040 Lavoro autonomo';
@@ -9837,16 +10016,19 @@ function ammLeggiFatturaPA(testo,nomeFile){
       arrotondamento:ammN(dg,'Arrotondamento'),
       bollo:bollo?(ammN(bollo,'ImportoBollo')||''):'',
       ritenuta:rit?(ammN(rit,'ImportoRitenuta')||''):'',
-      causaleRitenuta:causale,
+      causaleRitenuta:causaleRit,
       nonImponibile:nonImp||'',
       reverseCharge:riepiloghi.some(r=>ammRevCharge(r.natura))?'Sì':'No',
       modalita:(ammT(dett,'ModalitaPagamento')||'').toUpperCase(),
       scadenza:ammT(dett,'DataScadenzaPagamento').slice(0,10),
       iban:ammT(dett,'IBAN'),
-      categoria:ammCategoriaDa(testoLinee),
+      categoria:ammCategoriaPrevalente(linee,ammCategoriaDa)||ammCategoriaDa(causale),
+      categoriaRicavo:ammCategoriaPrevalente(linee,ammCategoriaRicavo)||ammCategoriaRicavo(causale),
       targhe:ammTargheCitate(testoLinee),
+      targheRiga,
+      causale,contratto,periodoDa:pDa,periodoA:pA,canone,
       descrizioneLinee:testoLinee.slice(0,900),
-      riepiloghi,nomeFile:nomeFile||''});
+      linee,riepiloghi,nomeFile:nomeFile||''});
   }
   if(!out.length)throw new Error('nessun corpo fattura nel file');
   return out;
@@ -9935,6 +10117,18 @@ const ammSocietaDa=(nome,piva)=>{
       ||S.soc.find(s=>s.titolare==='Sì'&&nome&&normSoc(s.ragione)===normSoc(nome))||null;
 };
 
+/* Le note dicono quello che è stato dedotto e che va controllato: targhe
+   non in anagrafica, veicoli multipli, periodo ricavato dal testo. */
+function ammNoteImport(d){
+  const n=[];
+  if(d.targheRiga.length>1)n.push(`Fattura su ${d.targheRiga.length} veicoli: il costo per mezzo sta sulle righe`);
+  else if(d.targhe.length>1)n.push(`Targhe citate: ${d.targhe.join(', ')}`);
+  const ignote=[...new Set(d.linee.filter(l=>l.targa&&!l.targaCerta).map(l=>l.targa))];
+  if(ignote.length)n.push(`Targhe non in anagrafica, da verificare: ${ignote.join(', ')}`);
+  if(d.linee.some(l=>l.periodoDaTesto))n.push('Periodo ricavato dalla descrizione, non dai campi della fattura');
+  return n.join('. ');
+}
+
 /* Un record per ogni corpo fattura, le righe del riepilogo IVA, e il file
    che l'ha portata dentro allegato alla riga. */
 async function ammImportaUna(dati,file,creaFornitori){
@@ -9959,11 +10153,32 @@ async function ammImportaUna(dati,file,creaFornitori){
     arrotondamento:dati.arrotondamento,nonImponibile:dati.nonImponibile,
     reverseCharge:dati.reverseCharge,detraibilita:100,
     categoria:dati.categoria,conto:AMM_PDC_COSTO[dati.categoria]||'',
-    targa:dati.targhe[0]||'',modalita:AMM_PAG[dati.modalita]?dati.modalita:'',
+    causale:dati.causale,contrattoLocazione:dati.contratto,
+    canone:dati.canone,periodoDa:dati.periodoDa,periodoA:dati.periodoA,
+    numeroVeicoli:dati.targheRiga.length||dati.targhe.length||'',
+    /* la targa in testata si mette solo se il veicolo è uno: su una
+       fattura che ne copre dieci il costo sta sulle righe */
+    targa:(dati.targheRiga.length===1?dati.targheRiga[0]:(dati.targhe.length===1?dati.targhe[0]:'')),
+    modalita:AMM_PAG[dati.modalita]?dati.modalita:'',
     scadenza:dati.scadenza,iban:dati.iban,statoPagamento:'Da pagare',
     registrata:'No',fonte:dati.nomeFile?`XML ${dati.nomeFile}`:'XML',
-    note:dati.targhe.length>1?`Targhe citate in fattura: ${dati.targhe.join(', ')}`:''});
+    note:ammNoteImport(dati)});
   S.fp.push(r);
+  /* il contratto fornitore già censito, se il numero coincide */
+  if(dati.contratto){
+    const cp=S.cp.find(c=>String(c.numero||'').toUpperCase()===dati.contratto.toUpperCase());
+    if(cp)r.contrattoFornitore=cp.codice;
+  }
+  /* le righe: servono ad attribuire il costo al singolo mezzo */
+  for(const l of dati.linee){
+    S.fpl.push({id:uid(),codice:nextCode(MODS.fpl),fattura:r.codice,
+      numeroLinea:+l.n||'',descrizione:String(l.descrizione||'').slice(0,900),
+      targa:l.targa||'',contrattoLocazione:l.contratto||dati.contratto||'',
+      quantita:l.quantita,prezzo:l.prezzo,imponibile:l.totale,
+      aliquota:l.aliquota,natura:l.natura,canone:l.canone,
+      periodoDa:l.periodoDa||dati.periodoDa||'',periodoA:l.periodoA||dati.periodoA||'',
+      categoria:l.categoria||dati.categoria||'',centroCosto:''});
+  }
   for(const q of dati.riepiloghi){
     S.fpr.push({id:uid(),codice:nextCode(MODS.fpr),fattura:r.codice,
       aliquota:q.aliquota,natura:q.natura,imponibile:q.imponibile,imposta:q.imposta,
@@ -10233,15 +10448,16 @@ function ammFpPdf(list){
 
 /* Un pulsante solo e la scelta del formato: tre pulsanti «Estrai …» in
    testata schiacciavano il titolo della pagina. */
-function ammBoxEstrai(list){
+function ammBoxEstrai(list,lato){
+  const mod=lato==='attive'?'fa':'fp';
   return new Promise(res=>{
-    const conAll=list.filter(f=>attachFor('fp',f.codice).length).length;
+    const conAll=list.filter(f=>attachFor(mod,f.codice).length).length;
     const m=document.createElement('div');m.className='modal';
     m.innerHTML=`<div class="box" role="dialog" aria-modal="true">
       <h3>Estrai ${list.length===1?'la fattura':list.length+' fatture'}</h3>
       <div class="muted" style="margin-bottom:12px">Il file finisce nella cartella del registro, in «Amministrazione».</div>
       <label class="radio"><input type="radio" name="estrfmt" value="xlsx" checked><span><b>Excel</b><small>Una riga per fattura, da aprire e rielaborare</small></span></label>
-      <label class="radio"><input type="radio" name="estrfmt" value="xml"><span><b>XML</b><small>Registro acquisti con il riepilogo IVA per aliquota, per il programma di contabilità</small></span></label>
+      <label class="radio"><input type="radio" name="estrfmt" value="xml"><span><b>XML</b><small>Registro ${lato==='attive'?'vendite':'acquisti'} con il riepilogo IVA per aliquota, per il programma di contabilità</small></span></label>
       <label class="radio"><input type="radio" name="estrfmt" value="pdf"><span><b>PDF</b><small>Il registro stampabile, con i totali in fondo</small></span></label>
       <label class="radio"><input type="radio" name="estrfmt" value="originali"><span><b>I file originali</b><small>${conAll} ${conAll===1?'fattura ha':'fatture hanno'} l’XML o il PDF ricevuto fra gli allegati</small></span></label>
       <div class="acts"><button class="btn" data-a="0">Annulla</button>
@@ -10301,7 +10517,8 @@ function renderFp(){
   genericList('fp',{
     sub:'Le fatture ricevute dai fornitori: entrano da XML o da Excel, il file resta allegato alla riga, e da qui nascono la prima nota e la liquidazione IVA.',
     newLabel:'Nuova fattura',searchPh:'Numero, fornitore, targa, categoria',
-    search:['numero','fornitore','codice','targa','categoria','pivaFornitore','conto','protocollo'],
+    search:['numero','fornitore','codice','targa','categoria','pivaFornitore','conto','protocollo',
+            'causale','contrattoLocazione'],
     noImport:true,
     noExport:true,
     buttons:[
@@ -10314,6 +10531,9 @@ function renderFp(){
       {k:'statoPagamento',label:'Pagamento',opts:()=>MODS.fp.fmap.statoPagamento.opts},
       {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
       {k:'__per',label:'Periodo IVA',opts:ammPeriodiFp,test:(r,v)=>(r.periodoIva||fpPeriodo(r))===v},
+      {k:'__vei',label:'Veicolo',all:'Tutti i mezzi',
+       opts:()=>[...new Set([...S.fp.map(f=>f.targa),...S.fpl.map(l=>l.targa)].filter(Boolean))].sort(),
+       test:(r,v)=>normTarga(r.targa)===normTarga(v)||fplTarghe(r).includes(normTarga(v))},
     ],
     ledger:l=>{
       /* i totali di periodo tengono conto del segno: una nota di credito
@@ -10335,7 +10555,14 @@ function renderFp(){
       {l:'Fattura',v:r=>`<b>${esc(r.numero)}</b><span class="sub">${esc(r.codice)} · ${fmtD(r.data)}${r.tipoDoc&&r.tipoDoc!=='TD01'?' · '+esc(r.tipoDoc):''}</span>`,
        s:r=>r.data+r.codice},
       {l:'Fornitore',v:r=>`${esc(r.fornitore)}<span class="sub">${esc(r.societa||'società da indicare')}</span>`},
-      {l:'Costo',v:r=>`${esc(r.categoria||'da classificare')}<span class="sub">${r.targa?plate(r.targa):''}${r.centroCosto?' '+esc(r.centroCosto):''}</span>`},
+      {l:'Oggetto',v:r=>{
+        const n=fpLinee(r).length,tg=fplTarghe(r);
+        const veic=tg.length>1?`${tg.length} veicoli`:(r.targa?plate(r.targa):(tg[0]?plate(tg[0]):''));
+        const per=r.periodoDa?`${fmtD(r.periodoDa)}${r.periodoA?' – '+fmtD(r.periodoA):''}`:'';
+        return `${esc(r.categoria||'da classificare')}<span class="sub">${veic}${r.centroCosto?' · '+esc(r.centroCosto):''}</span>`
+          +`${r.contrattoLocazione?`<span class="sub">contratto ${esc(r.contrattoLocazione)}</span>`:''}`
+          +`${per||r.canone?`<span class="sub">${esc(per)}${+r.canone?` · canone ${eur(r.canone)}`:''}</span>`:''}`
+          +`${n?`<span class="sub">${n} ${n===1?'riga':'righe'}${fplSenzaTarga(r).length?` · ${fplSenzaTarga(r).length} senza targa`:''}</span>`:''}`;}},
       {l:'Imponibile',cls:'num',v:r=>eur(fpImponibile(r)),s:r=>fpImponibile(r)},
       {l:'IVA',cls:'num',v:r=>{const i=fpImposta(r),d=fpIvaDetraibile(r);
         return `${eur(i)}${i&&r2(i-d)?`<span class="sub">detraibile ${eur(d)}</span>`:''}${r.reverseCharge==='Sì'?'<span class="sub">inversione contabile</span>':''}`;},s:r=>fpImposta(r)},
@@ -10349,6 +10576,7 @@ function renderFp(){
         return n?`<span class="sub">${n} ${n===1?'allegato':'allegati'}</span>`:'<span class="muted">nessuno</span>';}},
     ],
     rowActions:[
+      {l:'Righe',show:r=>fpLinee(r).length>0||puoScrivere('fpl'),fn:openFpLinee},
       {l:'Riepilogo IVA',fn:openFpRiepilogo},
       {l:'Porta in prima nota',show:r=>r.registrata!=='Sì',fn:r=>ammInPrimaNota([r])},
       {l:'Pagata',show:r=>['Da pagare','Insoluta','Pagata in parte'].includes(r.statoPagamento),
@@ -10488,14 +10716,15 @@ async function ammSegnaPagata(list){
   markDirty();renderFp();
   toast(`${n} ${n===1?'fattura segnata pagata':'fatture segnate pagate'}${p?`, ${p} ${p===1?'pagamento registrato':'pagamenti registrati'} in prima nota`:''}.`);
 }
-function ammBoxPagamento(quante,tot,rit,inPn){
+function ammBoxPagamento(quante,tot,rit,inPn,modo){
+  const inc=modo==='incasso';
   return new Promise(res=>{
     const m=document.createElement('div');m.className='modal';
     m.innerHTML=`<div class="box" role="dialog" aria-modal="true">
-      <h3>Segna ${quante===1?'la fattura':quante+' fatture'} come pagate</h3>
-      <div class="muted" style="margin-bottom:12px">Residuo da pagare: <b>${eur(tot)}</b>${rit?`, di cui <b>${eur(rit)}</b> di ritenuta d’acconto da versare all’erario`:''}.</div>
+      <h3>Segna ${quante===1?'la fattura':quante+' fatture'} come ${inc?'incassate':'pagate'}</h3>
+      <div class="muted" style="margin-bottom:12px">Residuo da ${inc?'incassare':'pagare'}: <b>${eur(tot)}</b>${rit?`, di cui <b>${eur(rit)}</b> di ritenuta d’acconto da versare all’erario`:''}.</div>
       <div class="fgrid">
-        <div class="field s3"><label for="pgData">Data del pagamento</label>
+        <div class="field s3"><label for="pgData">Data dell’${inc?'incasso':'operazione'}</label>
           <input class="input" type="date" id="pgData" value="${todayISO()}"></div>
         <div class="field s3"><label for="pgMezzo">Mezzo</label>
           <select class="input" id="pgMezzo">${['Bonifico','Banca','RID/SDD','Carta','Cassa','Assegno','Compensazione'].map(x=>`<option>${x}</option>`).join('')}</select></div>
@@ -10503,11 +10732,11 @@ function ammBoxPagamento(quante,tot,rit,inPn){
           <input class="input" id="pgBanca" value="${esc(S.par.contoBanca||'Banca c/c')}"></div>
       </div>
       ${inPn?`<label class="check" style="margin-top:10px"><input type="checkbox" id="pgPn" checked>
-        Registra il pagamento anche in prima nota</label>
-        <div class="muted" style="font-size:12px;margin:4px 0 0 24px">Debito verso il fornitore in dare, banca in avere${rit?', ritenuta su Erario c/ritenute':''}. Vale per le ${inPn} fatture già registrate.</div>`
-       :'<p class="muted" style="margin-top:10px">Nessuna di queste fatture è in prima nota: il pagamento non viene registrato.</p>'}
+        Registra ${inc?'l’incasso':'il pagamento'} anche in prima nota</label>
+        <div class="muted" style="font-size:12px;margin:4px 0 0 24px">${inc?'Banca in dare, credito verso il cliente in avere':`Debito verso il fornitore in dare, banca in avere${rit?', ritenuta su Erario c/ritenute':''}`}. Vale per le ${inPn} fatture già registrate.</div>`
+       :`<p class="muted" style="margin-top:10px">Nessuna di queste fatture è in prima nota: ${inc?'l’incasso':'il pagamento'} non viene registrato.</p>`}
       <div class="acts"><button class="btn" data-a="0">Annulla</button>
-        <button class="btn primary" data-a="1">Segna pagate</button></div></div>`;
+        <button class="btn primary" data-a="1">Segna ${inc?'incassate':'pagate'}</button></div></div>`;
     document.body.appendChild(m);
     m.addEventListener('click',e=>{
       const a=e.target.closest('[data-a]');
@@ -10790,13 +11019,24 @@ function ivaFattureDi(societa,anno,periodo,periodicita){
     return fpPeriodo(f,periodicita)===atteso;
   });
 }
+/* L'IVA a debito viene dalle fatture attive registrate. Le proforma
+   valgono solo per quelle che non hanno una fattura corrispondente: sono
+   la preparazione, non il documento. */
 function ivaVenditeDi(societa,anno,periodo,periodicita){
+  const atteso=`${anno}-${periodo}`;
   const dentro=d=>{
     if(!d||d.slice(0,4)!==String(anno))return false;
     return /^T/.test(periodo)?ammTrimDi(d)===periodo:d.slice(5,7)===periodo;
   };
-  return S.fat.filter(f=>['Fattura emessa SDI','Pagata'].includes(f.stato)
-    &&(!societa||f.emittente===societa)&&dentro(f.dataFattura||f.data));
+  const fatture=(S.fa||[]).filter(f=>f.esclusaLiquidazione!=='Sì'
+    &&(!societa||f.societa===societa)&&faPeriodo(f,periodicita)===atteso);
+  const numeri=new Set(fatture.map(f=>String(f.numero||'').trim().toLowerCase()).filter(Boolean));
+  const codici=new Set(fatture.map(f=>f.proforma).filter(Boolean));
+  const proforma=S.fat.filter(f=>['Fattura emessa SDI','Pagata'].includes(f.stato)
+    &&(!societa||f.emittente===societa)&&dentro(f.dataFattura||f.data)
+    &&!codici.has(f.codice)
+    &&!numeri.has(String(f.numeroFattura||'').trim().toLowerCase()));
+  return {fatture,proforma};
 }
 
 /* ---------- il calcolo ----------
@@ -10816,14 +11056,20 @@ function ivaCalcola(societa,anno,periodo,periodicita){
     indetraibile=r2(indetraibile+s*(fpIvaIndetraibile(f)+r2(rev*(1-fpQuota(f)))));
     reverse=r2(reverse+s*rev);
   }
-  const vendite=r2(vend.reduce((a,f)=>a+(+f.iva||0),0));
-  return {fatture:fatt,vendite:vend,
+  const daFatture=r2(vend.fatture.reduce((a,f)=>a+faSegno(f)*faIvaDebito(f),0));
+  const daProforma=r2(vend.proforma.reduce((a,f)=>a+(+f.iva||0),0));
+  const vendite=r2(daFatture+daProforma);
+  const split=vend.fatture.filter(f=>f.splitPayment==='Sì');
+  const fonti=[];
+  if(vend.fatture.length)fonti.push(`${vend.fatture.length} fatture attive registrate (${eur(daFatture)})`);
+  if(vend.proforma.length)fonti.push(`${vend.proforma.length} proforma segnate come fatturate ma senza fattura in archivio (${eur(daProforma)})`);
+  if(split.length)fonti.push(`${split.length} in scissione dei pagamenti: l’IVA la versa il cliente e non entra nel calcolo`);
+  return {fatture:fatt,vendite:vend.fatture,proforma:vend.proforma,
     ivaVendite:vendite,ivaAcquisti:acquisti,ivaIndetraibile:indetraibile,ivaReverse:reverse,
     scadenza:ammScadenzaIva(anno,periodo,periodicita),
     codiceTributo:ammTributoIva(periodo,periodicita),
-    fonteVendite:vend.length
-      ? `${vend.length} fatture emesse registrate nel gestionale (${vend.map(f=>f.numeroFattura||f.codice).slice(0,6).join(', ')}${vend.length>6?'…':''})`
-      : 'Nessuna fattura emessa registrata nel gestionale per questo periodo: se ne hai emesse altrove, scrivi l’IVA sulle vendite a mano.'};
+    fonteVendite:fonti.length?fonti.join('; ')
+      :'Nessuna fattura emessa per questo periodo: se ne hai emesse altrove, scrivi l’IVA sulle vendite a mano.'};
 }
 /* Gli interessi dell'1% li devono i trimestrali, non sull'ultimo periodo. */
 function ivaInteressiProposti(r,base){
@@ -11224,7 +11470,7 @@ function ammPrevisione(societa,anno,mese){
         if(!dentroMese(sc))continue;
         if(reg.some(r=>r.periodo===per&&+r.anno===aa&&r.periodicita===pe))continue;
         const c=ivaCalcola(s,aa,per,pe);
-        if(!c.fatture.length&&!c.vendite.length)continue;
+        if(!c.fatture.length&&!c.vendite.length&&!c.proforma.length)continue;
         const base=r2(c.ivaVendite+c.ivaReverse-c.ivaAcquisti);
         const inter=ivaInteressiProposti({periodicita:pe,periodo:per},base);
         const saldo=r2(base+inter);
@@ -11405,6 +11651,9 @@ scadenzeAll=function(){
   for(const f of S.fp)if(['Da pagare','Insoluta','Pagata in parte'].includes(f.statoPagamento))
     add(f.scadenza,`Pagamento fattura ${f.numero} – ${f.fornitore} (${eur(fpResiduo(f))})`,
       {mod:'fp',id:f.codice},`fp|${f.codice}`,10);
+  for(const f of (S.fa||[]))if(['Da incassare','Insoluta','Incassata in parte'].includes(f.statoIncasso))
+    add(f.scadenza,`Incasso fattura ${f.numero} – ${f.cliente} (${eur(faResiduo(f))})`,
+      {mod:'fa',id:f.codice},`fa|${f.codice}`,7);
   for(const b of S.bolli)if(b.stato==='Da pagare')
     add(b.scadenza,`Bollo ${b.targa} ${b.anno} (${eur(bolloDovuto(b))})`,{mod:'bolli',id:b.codice},`bollo|${b.codice}`,30);
   /* una liquidazione già messa in un F24 non si annuncia due volte: la
@@ -11423,6 +11672,1189 @@ scadenzeAll=function(){
     return {...x,giorni:g,liv:g<0?'scaduta':g<=7?'imminente':g<=x.prev?'prossima':'futura'};});
   return [...out,...nuove].sort((a,b)=>a.data<b.data?-1:1);
 };
+
+
+/* =====================================================================
+   AMMINISTRAZIONE — le righe della fattura passiva
+   ---------------------------------------------------------------------
+   Una fattura di leasing copre dieci veicoli con dieci righe. Il costo
+   per mezzo si attribuisce qui: targa, canone, periodo e categoria riga
+   per riga, con la possibilità di correggere quello che la lettura
+   automatica ha solo proposto.
+   ===================================================================== */
+const fpLinee=f=>f?S.fpl.filter(r=>r.fattura===f.codice)
+  .sort((a,b)=>(+a.numeroLinea||0)-(+b.numeroLinea||0)):[];
+const fplImponibile=l=>r2(l.reduce((a,r)=>a+(+r.imponibile||0),0));
+/* Le righe senza targa non si possono attribuire: la quota del veicolo è
+   la somma delle sue righe, non una ripartizione inventata. */
+const fplSenzaTarga=f=>fpLinee(f).filter(r=>!r.targa);
+const fplTarghe=f=>[...new Set(fpLinee(f).map(r=>normTarga(r.targa)).filter(Boolean))];
+
+/* La stessa finestra serve alle passive e alle attive: cambiano solo il
+   titolo, l'archivio e l'elenco delle categorie. */
+function openLineeGeneriche(o){
+  const f=o.f;
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const ro=!o.scrivibile;
+  const CAT=o.categorie;
+  const paint=()=>{
+    const rr=o.lista();
+    const tot=fplImponibile(rr);
+    const scarto=r2(o.imponibileFattura()-tot);
+    const senza=rr.filter(r=>!r.targa);
+    const ignote=rr.filter(r=>r.targa&&!mezzoBy(normTarga(r.targa)));
+    const opt=S.mezzi.filter(m=>!ARCH(m)).map(m=>m.targa);
+    d.innerHTML=`<header><h2>${esc(o.titolo)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <div class="calcbox">
+        <div><small>Righe</small><b>${rr.length}</b></div>
+        <div><small>Imponibile delle righe</small><b>${eur(tot)}</b></div>
+        <div><small>Veicoli</small><b>${[...new Set(rr.map(r=>normTarga(r.targa)).filter(Boolean))].length}</b></div>
+        <div><small>Righe senza targa</small><b class="${senza.length?'warnc':'cfok'}">${senza.length}</b></div>
+      </div>
+      ${Math.abs(scarto)>0.02?`<div class="alert">Le righe fanno ${eur(tot)}, l’imponibile della fattura ${eur(o.imponibileFattura())}: differenza di <b>${eur(scarto)}</b>.</div>`:''}
+      ${ignote.length?`<div class="alert">${ignote.length} ${ignote.length===1?'riga ha una targa':'righe hanno targhe'} che non ${ignote.length===1?'è':'sono'} in anagrafica: ${esc([...new Set(ignote.map(r=>r.targa))].join(', '))}. Correggile o aggiungi i mezzi.</div>`:''}
+      ${ro||!rr.length?'':`<div class="acts" style="justify-content:flex-start;margin-bottom:10px">
+        <div class="field" style="max-width:260px"><label for="fplTutte">Assegna una targa a tutte le righe</label>
+          <select class="input" id="fplTutte"><option value="">–</option>${opt.map(t=>`<option>${esc(t)}</option>`).join('')}</select></div>
+        <div class="field" style="max-width:260px"><label for="fplCat">E una categoria a tutte</label>
+          <select class="input" id="fplCat"><option value="">–</option>${CAT.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div>
+      </div>`}
+      <div class="tablewrap" style="max-height:440px;overflow:auto"><table class="grid mini"><thead><tr>
+        <th>N.</th><th>Descrizione</th><th>Targa</th><th>Contratto</th><th>Periodo</th>
+        <th class="num">Canone</th><th class="num">Imponibile</th><th>Categoria</th><th></th></tr></thead><tbody>
+      ${rr.map(r=>{
+        const noto=!r.targa||!!mezzoBy(normTarga(r.targa));
+        return `<tr data-r="${r.id}" class="${r.targa?'':'rowwarn'}">
+        <td class="num">${esc(r.numeroLinea||'')}</td>
+        <td style="max-width:300px">${esc(String(r.descrizione||'').slice(0,160))}</td>
+        <td>${ro?plate(r.targa):`<input class="input upc ${noto?'':'err'}" style="width:92px" data-k="targa" value="${esc(r.targa||'')}" list="fplTarghe">`}</td>
+        <td>${ro?esc(r.contrattoLocazione||''):`<input class="input" style="width:110px" data-k="contrattoLocazione" value="${esc(r.contrattoLocazione||'')}">`}</td>
+        <td class="nowrap">${ro?`${fmtD(r.periodoDa)}${r.periodoA?' – '+fmtD(r.periodoA):''}`
+          :`<input class="input cin" style="width:120px" type="date" data-k="periodoDa" value="${esc(r.periodoDa||'')}">
+            <input class="input cin" style="width:120px" type="date" data-k="periodoA" value="${esc(r.periodoA||'')}">`}</td>
+        <td class="num">${ro?eur(r.canone):`<input class="input cin" type="number" step="0.01" data-k="canone" value="${r.canone}">`}</td>
+        <td class="num">${ro?eur(r.imponibile):`<input class="input cin" type="number" step="0.01" data-k="imponibile" value="${r.imponibile}">`}</td>
+        <td>${ro?esc(r.categoria||''):`<select class="input" data-k="categoria"><option value="">–</option>${CAT.map(c=>`<option ${c===r.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>`}</td>
+        <td>${ro?'':`<button class="btn ghost danger" data-del="${r.id}">Togli</button>`}</td></tr>`;}).join('')
+        ||'<tr><td colspan="9" class="empty">Nessuna riga: questa fattura è stata inserita a mano oppure importata da Excel.</td></tr>'}
+      </tbody></table></div>
+      <datalist id="fplTarghe">${opt.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+      ${ro?'':'<button class="btn" data-add style="margin-top:8px">Aggiungi una riga</button>'}
+      <p class="muted" style="margin-top:10px">${esc(o.nota)}</p>
+    </div>
+    <footer><button class="btn" data-edit>Scheda della fattura</button><button class="btn primary" data-x>Fatto</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+    d.querySelector('[data-edit]').onclick=()=>{close();o.apriScheda();};
+    const add=d.querySelector('[data-add]');
+    if(add)add.onclick=()=>{S[o.store].push(o.nuova());markDirty();paint();};
+    const tutte=d.querySelector('#fplTutte');
+    if(tutte)tutte.onchange=()=>{const t=normTarga(tutte.value);if(!t)return;
+      o.lista().forEach(r=>{r.targa=t;});
+      if(!f.targa)f.targa=t;
+      markDirty();paint();toast(`Targa ${t} su tutte le righe.`);};
+    const cat=d.querySelector('#fplCat');
+    if(cat)cat.onchange=()=>{const c=cat.value;if(!c)return;
+      o.lista().forEach(r=>{r.categoria=c;});markDirty();paint();toast(`Categoria «${c}» su tutte le righe.`);};
+    d.querySelectorAll('tr[data-r] input,tr[data-r] select').forEach(i=>i.onchange=()=>{
+      const r=S[o.store].find(x=>x.id===i.closest('tr').dataset.r);if(!r)return;
+      const k=i.dataset.k;
+      r[k]=['canone','imponibile','quantita','prezzo','aliquota'].includes(k)
+        ?(i.value===''?'':(parseFloat(i.value)||0)):i.value.trim();
+      if(k==='targa')r.targa=normTarga(r.targa);
+      markDirty();paint();});
+    d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+      S[o.store]=S[o.store].filter(x=>x.id!==b.dataset.del);markDirty();paint();});
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);o.chiuso();};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);
+  sc.onclick=close;document.body.append(sc,d);paint();
+}
+
+function openFpLinee(f){
+  openLineeGeneriche({
+    f,titolo:`Righe della fattura ${f.numero||f.codice}`,
+    lista:()=>fpLinee(f),store:'fpl',mod:MODS.fpl,
+    imponibileFattura:()=>fpImponibile(f),
+    categorie:AMM_CATEGORIE,
+    nuova:()=>({id:uid(),codice:nextCode(MODS.fpl),fattura:f.codice,
+      numeroLinea:fpLinee(f).length+1,descrizione:'Nuova riga',targa:f.targa||'',
+      contrattoLocazione:f.contrattoLocazione||'',quantita:1,prezzo:0,imponibile:0,
+      aliquota:'',natura:'',canone:'',periodoDa:f.periodoDa||'',periodoA:f.periodoA||'',
+      categoria:f.categoria||'',centroCosto:f.centroCosto||''}),
+    apriScheda:()=>openRecord('fp',f,{onSaved:()=>renderFp()}),
+    chiuso:()=>renderFp(),
+    scrivibile:puoScrivere('fpl'),
+    nota:'Da queste righe la scheda economica del mezzo prende i costi: una riga senza targa resta un costo della flotta, non del veicolo.',
+  });
+}
+
+/* Quando si cancella una fattura spariscono anche le sue righe e il suo
+   riepilogo IVA: altrimenti restano a gonfiare i totali di periodo. */
+MODS.fp.onDelete=f=>{
+  S.fpr=S.fpr.filter(r=>r.fattura!==f.codice);
+  S.fpl=S.fpl.filter(r=>r.fattura!==f.codice);
+};
+
+
+/* =====================================================================
+   AMMINISTRAZIONE — fatture attive
+   ---------------------------------------------------------------------
+   Le fatture emesse ai clienti, lette dallo stesso tracciato FatturaPA:
+   lì noi siamo il cedente e il cliente è il cessionario. Entrano da XML o
+   da Excel, escono in Excel, XML e PDF, e portano le righe con targa e
+   periodo, perché il ricavo del singolo veicolo si legge da lì.
+
+   Le proforma restano dove sono: servono a preparare la fatturazione.
+   Qui ci sono le fatture vere, quelle emesse. Quando il numero coincide,
+   le due cose si collegano.
+   ===================================================================== */
+
+MODS.fa={sheet:'Fatture attive',store:'fa',title:'Fatture attive',code:'FV',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'Documento',f:[
+   fd('numero','Numero fattura','text',{req:true,span:'s3'}),
+   fd('data','Data documento','date',{req:true}),
+   fd('tipoDoc','Tipo documento','sel',{span:'s3',def:'TD01',opts:Object.keys(AMM_TIPODOC)}),
+   fd('cliente','Cliente','ref',{ref:'soc',flt:'cli',req:true,span:'s4'}),
+   fd('pivaCliente','P.IVA cliente','up',{span:'s2'}),
+   fd('cfCliente','Codice fiscale cliente','up',{span:'s2'}),
+   fd('societa','Società emittente','ref',{ref:'soc',flt:'tit',req:true,span:'s4',
+      hint:'La nostra società che ha emesso: decide la liquidazione IVA'}),
+   fd('protocollo','Protocollo IVA','text',{span:'s2',hint:'Numero sul registro vendite'}),
+   fd('dataRegistrazione','Data di registrazione','date',
+      {hint:'La data che decide in quale liquidazione IVA finisce'}),
+   fd('divisa','Divisa','up',{def:'EUR',span:'s2'}),
+   fd('sdi','Identificativo SDI','text',{span:'s3'}),
+   fd('proforma','Proforma di origine','text',{span:'s3',hint:'Codice della proforma, se la fattura nasce da lì'})]},
+  {t:'Importi',f:[
+   fd('imponibile','Imponibile (€)','eur'),fd('imposta','IVA (€)','eur'),
+   fd('totale','Totale documento (€)','eur'),
+   fd('bollo','Bollo (€)','eur'),fd('ritenuta','Ritenuta d’acconto (€)','eur'),
+   fd('arrotondamento','Arrotondamento (€)','eur'),
+   fd('nonImponibile','Di cui non imponibile o esente (€)','eur',{span:'s3'})]},
+  {t:'Oggetto della fattura',f:[
+   fd('causale','Causale','text',{span:'s6'}),
+   fd('contrattoLocazione','Contratto di noleggio','text',{span:'s3'}),
+   fd('canone','Canone (€)','eur',{span:'s2'}),
+   fd('periodoDa','Periodo dal','date'),fd('periodoA','Periodo al','date'),
+   fd('numeroVeicoli','Veicoli in fattura','int',{span:'s2'})]},
+  {t:'IVA',f:[
+   fd('reverseCharge','Inversione contabile','bool',{def:'No',span:'s2'}),
+   fd('periodoIva','Periodo IVA','text',{span:'s2',hint:'Es. 2026-03 oppure 2026-T1'}),
+   fd('esclusaLiquidazione','Fuori liquidazione IVA','bool',{def:'No',span:'s2'}),
+   fd('splitPayment','Scissione dei pagamenti','bool',{def:'No',span:'s2',
+      hint:'L’IVA la versa il cliente: non entra fra l’IVA a debito'})]},
+  {t:'Classificazione',f:[
+   fd('categoria','Categoria di ricavo','sel',{span:'s3',opts:AMM_RICAVI}),
+   fd('conto','Conto di ricavo','text',{span:'s3',listOf:ammPdc}),
+   fd('targa','Targa','ref',{ref:'mezzo',span:'s2'}),
+   cdcField()]},
+  {t:'Incasso',f:[
+   fd('modalita','Modalità di incasso','sel',{span:'s3',opts:Object.keys(AMM_PAG)}),
+   fd('scadenza','Scadenza','date'),
+   fd('statoIncasso','Stato','sel',{req:true,def:'Da incassare',span:'s3',
+      opts:['Da incassare','Incassata','Incassata in parte','Insoluta','Non dovuta','Compensata']}),
+   fd('importoIncassato','Importo incassato (€)','eur'),fd('dataIncasso','Incassata il','date'),
+   fd('iban','IBAN','up',{span:'s4'})]},
+  {t:'Registrazione e note',f:[
+   fd('registrata','In prima nota','bool',{def:'No',span:'s2'}),
+   fd('fonte','Origine del dato','text',{span:'s3'}),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+
+MODS.far={sheet:'Fatture attive IVA',store:'far',title:'Riepilogo IVA delle fatture attive',code:'FI',
+ groups:[{t:'Riga di riepilogo',f:[
+   fd('fattura','Fattura attiva','text',{req:true,span:'s3'}),
+   fd('aliquota','Aliquota IVA (%)','num'),
+   fd('natura','Natura','sel',{span:'s3',opts:['',...Object.keys(AMM_NATURA)]}),
+   fd('imponibile','Imponibile (€)','eur'),fd('imposta','Imposta (€)','eur'),
+   fd('esigibilita','Esigibilità IVA','sel',{span:'s2',opts:['','I Immediata','D Differita','S Scissione dei pagamenti']}),
+   fd('riferimentoNormativo','Riferimento normativo','text',{span:'s6'})]}]};
+
+MODS.fal={sheet:'Fatture attive righe',store:'fal',title:'Righe delle fatture attive',code:'FW',
+ groups:[{t:'Riga',f:[
+   fd('fattura','Fattura attiva','text',{req:true,span:'s3'}),
+   fd('numeroLinea','N. riga','int',{span:'s2'}),
+   fd('descrizione','Descrizione','area',{span:'s6',req:true}),
+   fd('targa','Targa','ref',{ref:'mezzo',span:'s2'}),
+   fd('contrattoLocazione','Contratto di noleggio','text',{span:'s3'}),
+   fd('quantita','Quantità','num',{span:'s2'}),
+   fd('prezzo','Prezzo unitario (€)','eur'),
+   fd('imponibile','Imponibile (€)','eur'),
+   fd('aliquota','Aliquota IVA (%)','num',{span:'s2'}),
+   fd('natura','Natura','sel',{span:'s2',opts:['',...Object.keys(AMM_NATURA)]}),
+   fd('canone','Canone (€)','eur',{span:'s2'}),
+   fd('periodoDa','Periodo dal','date'),fd('periodoA','Periodo al','date'),
+   fd('categoria','Categoria di ricavo','sel',{span:'s3',opts:AMM_RICAVI}),
+   cdcField()]}]};
+
+for(const k of ['fa','far','fal']){
+  const m=MODS[k];m.id=k;
+  m.fields=m.groups.flatMap(g=>g.f);
+  m.fmap=Object.fromEntries(m.fields.map(f=>[f.k,f]));
+  if(!Array.isArray(S[m.store]))S[m.store]=[];
+  if(!SHEET_ORDER.includes(m.sheet))SHEET_ORDER.push(m.sheet);
+}
+AMM_MODULI.push('fa','far','fal');
+if(!AMM_TABS.includes('fa'))AMM_TABS.push('fa');
+
+/* la voce di menu, subito dopo le fatture passive */
+(()=>{
+  const g=MENU.find(x=>x.g==='Amministrazione');
+  if(g&&!g.items.some(([k])=>k==='fa'))
+    g.items.splice(1,0,['fa','Fatture attive']);
+})();
+VIEWS.fa=()=>renderFa();
+
+/* =====================================================================
+   CALCOLI
+   ===================================================================== */
+const faRighe=f=>f?S.far.filter(r=>r.fattura===f.codice):[];
+const faLinee=f=>f?S.fal.filter(r=>r.fattura===f.codice)
+  .sort((a,b)=>(+a.numeroLinea||0)-(+b.numeroLinea||0)):[];
+const faTarghe=f=>[...new Set(faLinee(f).map(r=>normTarga(r.targa)).filter(Boolean))];
+const faSegno=f=>f&&f.tipoDoc==='TD04'?-1:1;
+function faImposta(f){const rr=faRighe(f);
+  return rr.length?r2(rr.reduce((a,r)=>a+(+r.imposta||0),0)):(+f.imposta||0);}
+function faImponibile(f){const rr=faRighe(f);
+  return rr.length?r2(rr.reduce((a,r)=>a+(+r.imponibile||0),0)):(+f.imponibile||0);}
+/* Con la scissione dei pagamenti l'IVA la versa il cliente: non entra fra
+   l'IVA a debito della liquidazione. */
+const faIvaDebito=f=>f.splitPayment==='Sì'?0:faImposta(f);
+const faResiduo=f=>r2((+f.totale||0)-(+f.importoIncassato||0));
+function faPeriodo(f,periodicita){
+  const d=f.dataRegistrazione||f.data;if(!d)return '';
+  const p=periodicita||S.par.ivaPeriodicita||'Trimestrale';
+  return p==='Mensile'?ammMeseDi(d):`${d.slice(0,4)}-${ammTrimDi(d)}`;
+}
+function faQuadra(f){
+  const t=+f.totale||0;if(!t)return null;
+  const atteso=r2(faImponibile(f)+faImposta(f)+(+f.bollo||0)+(+f.arrotondamento||0));
+  const d=r2(t-atteso);
+  return Math.abs(d)<=0.02?null:d;
+}
+function faRicalcola(f){
+  if(!f)return f;
+  const rr=faRighe(f);
+  if(rr.length){f.imponibile=faImponibile(f);f.imposta=faImposta(f);
+    f.nonImponibile=r2(rr.filter(r=>r.natura).reduce((a,r)=>a+(+r.imponibile||0),0))||'';}
+  if(!f.periodoIva)f.periodoIva=faPeriodo(f);
+  if(!f.conto&&f.categoria)f.conto=AMM_PDC_RICAVO[f.categoria]||'';
+  return f;
+}
+MODS.fa.onDelete=f=>{
+  S.far=S.far.filter(r=>r.fattura!==f.codice);
+  S.fal=S.fal.filter(r=>r.fattura!==f.codice);
+};
+
+/* =====================================================================
+   IMPORTAZIONE
+   ===================================================================== */
+const ammClienteDa=(nome,piva,cf)=>{
+  const p=String(piva||'').replace(/\D/g,''),c=String(cf||'').toUpperCase();
+  return (p&&S.soc.find(s=>String(s.piva||'').replace(/\D/g,'')===p))
+    ||(c&&S.soc.find(s=>String(s.cf||'').toUpperCase()===c))
+    ||(nome&&S.soc.find(s=>normSoc(s.ragione)===normSoc(nome)))||null;
+};
+function ammCreaCliente(nome,piva,cf){
+  const r={id:uid(),codice:nextCode(MODS.soc)};
+  for(const f of MODS.soc.fields)r[f.k]=f.def??'';
+  Object.assign(r,{ragione:nome||('Cliente '+(piva||cf||'senza dati')),
+    piva:String(piva||'').replace(/\D/g,''),cf:String(cf||'').toUpperCase(),
+    cliente:'Sì',fornitore:'No',titolare:'No',
+    note:'Creato automaticamente dall’importazione di una fattura attiva: completare l’anagrafica.'});
+  S.soc.push(r);return r;
+}
+
+async function ammImportaUnaAttiva(dati,file,creaClienti){
+  /* qui il cedente siamo noi e il cessionario è il cliente */
+  const nostra=ammSocietaDa(dati.fornitoreNome,dati.pivaFornitore);
+  const cli=ammClienteDa(dati.cessionario,dati.pivaCessionario)
+    ||(creaClienti?ammCreaCliente(dati.cessionario,dati.pivaCessionario):null);
+  const gia=S.fa.find(f=>f.numero===dati.numero&&f.data===dati.data
+    &&String(f.pivaCliente||'')===String(dati.pivaCessionario||''));
+  if(gia)return {esito:'doppia',rec:gia};
+  const r={id:uid(),codice:nextCode(MODS.fa,dati.data)};
+  for(const f of MODS.fa.fields)r[f.k]=f.def??'';
+  const split=dati.riepiloghi.some(q=>/^S/.test(q.esigibilita||''));
+  Object.assign(r,{
+    numero:dati.numero,data:dati.data,tipoDoc:AMM_TIPODOC[dati.tipoDoc]?dati.tipoDoc:'TD01',
+    cliente:cli?cli.ragione:(dati.cessionario||''),
+    pivaCliente:dati.pivaCessionario,cfCliente:'',
+    societa:nostra?nostra.ragione:(dati.fornitoreNome||''),
+    divisa:dati.divisa,sdi:dati.sdi,dataRegistrazione:dati.data||todayISO(),
+    imponibile:dati.imponibile,imposta:dati.imposta,totale:dati.totale,
+    bollo:dati.bollo,ritenuta:dati.ritenuta,arrotondamento:dati.arrotondamento,
+    nonImponibile:dati.nonImponibile,reverseCharge:dati.reverseCharge,
+    splitPayment:split?'Sì':'No',
+    causale:dati.causale,contrattoLocazione:dati.contratto,
+    canone:dati.canone,periodoDa:dati.periodoDa,periodoA:dati.periodoA,
+    numeroVeicoli:dati.targheRiga.length||dati.targhe.length||'',
+    categoria:dati.categoriaRicavo||ammCategoriaRicavo(dati.descrizioneLinee),
+    targa:(dati.targheRiga.length===1?dati.targheRiga[0]:(dati.targhe.length===1?dati.targhe[0]:'')),
+    modalita:AMM_PAG[dati.modalita]?dati.modalita:'',
+    scadenza:dati.scadenza,iban:dati.iban,statoIncasso:'Da incassare',
+    registrata:'No',fonte:dati.nomeFile?`XML ${dati.nomeFile}`:'XML',
+    note:ammNoteImport(dati)});
+  r.conto=AMM_PDC_RICAVO[r.categoria]||'';
+  S.fa.push(r);
+  /* la proforma da cui nasce, se il numero coincide */
+  const pf=S.fat.find(x=>x.numeroFattura&&String(x.numeroFattura).trim()===String(r.numero).trim());
+  if(pf){r.proforma=pf.codice;if(!pf.dataFattura)pf.dataFattura=r.data;}
+  for(const q of dati.riepiloghi){
+    S.far.push({id:uid(),codice:nextCode(MODS.far),fattura:r.codice,
+      aliquota:q.aliquota,natura:q.natura,imponibile:q.imponibile,imposta:q.imposta,
+      esigibilita:({I:'I Immediata',D:'D Differita',S:'S Scissione dei pagamenti'})[q.esigibilita]||'',
+      riferimentoNormativo:q.riferimentoNormativo});
+  }
+  for(const l of dati.linee){
+    S.fal.push({id:uid(),codice:nextCode(MODS.fal),fattura:r.codice,
+      numeroLinea:+l.n||'',descrizione:String(l.descrizione||'').slice(0,900),
+      targa:l.targa||'',contrattoLocazione:l.contratto||dati.contratto||'',
+      quantita:l.quantita,prezzo:l.prezzo,imponibile:l.totale,
+      aliquota:l.aliquota,natura:l.natura,canone:l.canone,
+      periodoDa:l.periodoDa||dati.periodoDa||'',periodoA:l.periodoA||dati.periodoA||'',
+      categoria:ammCategoriaRicavo(`${l.descrizione} ${l.riferimento}`)||'',centroCosto:''});
+  }
+  faRicalcola(r);
+  if(file)await addAttachment(file,'fa',r.codice,'Fattura');
+  return {esito:'nuova',rec:r,targhe:dati.targheRiga};
+}
+
+async function ammImportaXmlAttive(files,creaClienti){
+  const esito={nuove:0,doppie:0,errori:[],creati:[],senzaSoc:0,firmate:0,nonNostre:[]};
+  for(const file of files){
+    try{
+      const buf=await file.arrayBuffer();
+      const x=ammEstraiXml(buf);
+      if(!x)throw new Error('non contiene una fattura elettronica');
+      if(x.firmato)esito.firmate++;
+      const lista=ammLeggiFatturaPA(x.testo,file.name);
+      for(const d of lista){
+        /* se il cedente non è una nostra società, è una fattura ricevuta:
+           meglio dirlo che registrarla come emessa */
+        if(!ammSocietaDa(d.fornitoreNome,d.pivaFornitore)){
+          esito.nonNostre.push(`${file.name}: emessa da ${d.fornitoreNome||'(senza nome)'}`);
+          esito.senzaSoc++;
+        }
+        const r=await ammImportaUnaAttiva(d,file,creaClienti);
+        if(r.esito==='doppia')esito.doppie++;
+        else{esito.nuove++;esito.creati.push(r.rec);}
+      }
+    }catch(e){esito.errori.push(`${file.name}: ${e.message}`);}
+  }
+  if(esito.nuove)markDirty();
+  return esito;
+}
+
+function ammBoxImportAttive(){
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  d.innerHTML=`<header><h2>Importa fatture attive</h2><button class="btn ghost" data-x>Chiudi</button></header>
+  <div class="body">
+    <fieldset><legend>Da XML</legend>
+      <div class="drop" data-drop>
+        <p style="margin:0 0 10px"><b>Trascina qui i file XML</b> delle fatture emesse, anche tutti insieme, oppure</p>
+        <button class="btn primary" data-xml>Scegli i file XML</button>
+        <p class="muted" style="margin:10px 0 0">Stesso tracciato delle passive: qui il cedente sei tu e il cessionario è il cliente.
+        Vanno bene i <b>.xml</b> e i firmati <b>.xml.p7m</b>. Da ogni fattura nascono il riepilogo IVA e le righe con targa e periodo,
+        e il file resta allegato alla riga.</p>
+      </div>
+      <label class="check" style="margin-top:10px"><input type="checkbox" data-crea checked>
+        Crea in anagrafica i clienti che non ci sono</label>
+    </fieldset>
+    <fieldset><legend>Da Excel o CSV</legend>
+      <p class="muted" style="margin:0 0 10px">Le colonne si abbinano a mano. Il file importato resta allegato alle righe che ha creato.</p>
+      <button class="btn" data-xls>Apri l’importazione da Excel</button>
+    </fieldset>
+    <div data-esito></div>
+  </div>
+  <footer><button class="btn primary" data-x>Chiudi</button></footer>`;
+  document.body.append(sc,d);
+  const q=s=>d.querySelector(s);
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);renderFa();};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);
+  sc.onclick=close;d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+  const mostra=r=>{
+    q('[data-esito]').innerHTML=`<fieldset><legend>Esito</legend>
+      <div class="counts">
+        <div><b>${r.nuove}</b><small>fatture importate</small></div>
+        <div><b>${r.doppie}</b><small>già presenti, saltate</small></div>
+        <div><b class="${r.errori.length?'late':''}">${r.errori.length}</b><small>file non letti</small></div>
+      </div>
+      ${r.firmate?`<p class="muted">${r.firmate} file erano firmati (.p7m): la firma non è stata verificata.</p>`:''}
+      ${r.nonNostre.length?`<div class="alert">${r.nonNostre.length} ${r.nonNostre.length===1?'fattura non risulta emessa':'fatture non risultano emesse'} da una tua società: controlla che non siano fatture ricevute, che vanno fra le passive.<br>${r.nonNostre.slice(0,5).map(esc).join('<br>')}</div>`:''}
+      ${r.errori.length?`<p style="margin-top:8px"><b>File non letti</b></p><ul class="muted">${r.errori.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`:''}
+      ${r.creati.length?`<div class="tablewrap" style="max-height:260px;overflow:auto"><table class="grid mini"><thead><tr><th>Codice</th><th>Numero</th><th>Data</th><th>Cliente</th><th class="num">Totale</th><th>Veicoli</th><th>Proforma</th></tr></thead><tbody>
+        ${r.creati.map(f=>`<tr><td>${esc(f.codice)}</td><td>${esc(f.numero)}</td><td>${fmtD(f.data)}</td><td>${esc(f.cliente)}</td><td class="num">${eur(f.totale)}</td><td>${faTarghe(f).length||'–'}</td><td>${esc(f.proforma||'–')}</td></tr>`).join('')}
+        </tbody></table></div>`:''}</fieldset>`;
+  };
+  const leggi=async files=>{
+    if(!files.length)return;
+    busy(true,`Lettura di ${files.length} file`);
+    const r=await ammImportaXmlAttive(files,q('[data-crea]').checked);
+    busy(false);mostra(r);
+    toast(r.nuove?`${r.nuove} ${r.nuove===1?'fattura importata':'fatture importate'}.`:'Nessuna fattura nuova.',!r.nuove);
+  };
+  q('[data-xml]').onclick=()=>{const i=document.createElement('input');i.type='file';i.multiple=true;
+    i.accept='.xml,.p7m,text/xml,application/xml';i.onchange=()=>leggi([...i.files]);i.click();};
+  const drop=q('[data-drop]');
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');leggi([...e.dataTransfer.files]);});
+  q('[data-xls]').onclick=()=>{close();
+    openImport('fa',{onDone:async(creati,file)=>{
+      creati.forEach(faRicalcola);
+      let n=0;
+      try{
+        if(file&&creati.length){
+          const path=`Allegati/fa/_importazioni/${stampNow(true)}_${safe(file.name)}`;
+          const arch=await putBlob(path,file);
+          for(const r of creati){
+            S.all.push({id:uid(),codice:nextCode(MODS.all),modulo:'fa',riferimento:r.codice,
+              tipo:'Fattura',descrizione:'File da cui è stata importata la fattura',
+              file:file.name,percorso:path,archivio:arch,dataDocumento:r.data||'',scadenza:'',
+              caricatoIl:todayISO(),note:'importazione'});n++;}
+          markDirty();
+        }
+      }catch(e){toast('File di origine non allegato: '+e.message,true);}
+      if(n)toast(`${n===1?'La fattura importata ha':'Le '+n+' fatture importate hanno'} il file di origine fra gli allegati.`);
+    }});};
+}
+
+/* =====================================================================
+   ESTRAZIONI
+   ===================================================================== */
+function ammFaXml(list){
+  const righe=list.map(f=>{
+    const rr=faRighe(f);
+    return `  <Fattura codice="${ammXmlEsc(f.codice)}">
+${['numero','data','tipoDoc','protocollo','dataRegistrazione','periodoIva','divisa']
+  .map(k=>'    '+ammTag(k[0].toUpperCase()+k.slice(1),f[k])).filter(s=>s.trim()).join('\n')}
+    <Cliente>
+      ${ammTag('Denominazione',f.cliente)}
+      ${ammTag('PartitaIVA',f.pivaCliente)}
+      ${ammTag('CodiceFiscale',f.cfCliente)}
+    </Cliente>
+    ${ammTag('SocietaEmittente',f.societa)}
+    <Importi>
+      ${ammTag('Imponibile',faImponibile(f))}
+      ${ammTag('Imposta',faImposta(f))}
+      ${ammTag('NonImponibile',f.nonImponibile)}
+      ${ammTag('Bollo',f.bollo)}
+      ${ammTag('Ritenuta',f.ritenuta)}
+      ${ammTag('TotaleDocumento',f.totale)}
+    </Importi>
+    <IVA inversioneContabile="${f.reverseCharge==='Sì'?'true':'false'}" scissionePagamenti="${f.splitPayment==='Sì'?'true':'false'}">
+${rr.map(r=>`      <Riepilogo aliquota="${ammXmlEsc(r.aliquota)}"${r.natura?` natura="${ammXmlEsc(ammNat(r.natura))}"`:''}>
+        ${ammTag('Imponibile',r.imponibile)}
+        ${ammTag('Imposta',r.imposta)}
+      </Riepilogo>`).join('\n')}
+    </IVA>
+    <Oggetto>
+      ${ammTag('Causale',f.causale)}
+      ${ammTag('Contratto',f.contrattoLocazione)}
+      ${ammTag('Canone',f.canone)}
+      ${ammTag('PeriodoDal',f.periodoDa)}
+      ${ammTag('PeriodoAl',f.periodoA)}
+    </Oggetto>
+    <Righe>
+${faLinee(f).map(l=>`      <Riga numero="${ammXmlEsc(l.numeroLinea)}"${l.targa?` targa="${ammXmlEsc(l.targa)}"`:''}>
+        ${ammTag('Descrizione',l.descrizione)}
+        ${ammTag('Imponibile',l.imponibile)}
+        ${ammTag('Canone',l.canone)}
+        ${ammTag('PeriodoDal',l.periodoDa)}
+        ${ammTag('PeriodoAl',l.periodoA)}
+      </Riga>`).join('\n')}
+    </Righe>
+    <Incasso>
+      ${ammTag('Scadenza',f.scadenza)}
+      ${ammTag('Stato',f.statoIncasso)}
+      ${ammTag('ImportoIncassato',f.importoIncassato)}
+      ${ammTag('DataIncasso',f.dataIncasso)}
+    </Incasso>
+  </Fattura>`;}).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<RegistroFattureAttive versione="1.0" generato="${todayISO()}" fatture="${list.length}">
+${righe}
+</RegistroFattureAttive>
+`;
+}
+function ammFaPdf(list){
+  const imp=r2(list.reduce((a,f)=>a+faSegno(f)*faImponibile(f),0));
+  const iva=r2(list.reduce((a,f)=>a+faSegno(f)*faImposta(f),0));
+  const tot=r2(list.reduce((a,f)=>a+faSegno(f)*(+f.totale||0),0));
+  const date=list.map(f=>f.data).filter(Boolean).sort();
+  return ammPdf({
+    titolo:'Registro delle fatture attive',
+    sottotitolo:date.length?`Documenti dal ${fmtD(date[0])} al ${fmtD(date[date.length-1])} · ${list.length} fatture`:`${list.length} fatture`,
+    colonne:[{l:'Codice',w:52},{l:'Numero',w:70},{l:'Data',w:48},{l:'Cliente',w:140},
+      {l:'Oggetto',w:120},{l:'Veicoli',w:44,num:true},{l:'Imponibile',w:58,num:true},
+      {l:'IVA',w:52,num:true},{l:'Totale',w:60,num:true},{l:'Incasso',w:62}],
+    righe:list.map(f=>{const s=faSegno(f);
+      return [f.codice,f.numero+(s<0?' (NC)':''),fmtD(f.data),f.cliente,
+        String(f.causale||f.categoria||'').slice(0,60),faTarghe(f).length||(f.targa?1:''),
+        ammEuroPdf(r2(s*faImponibile(f))),ammEuroPdf(r2(s*faImposta(f))),
+        ammEuroPdf(r2(s*(+f.totale||0))),f.statoIncasso||''];}),
+    piede:['','','','Totali','','',ammEuroPdf(imp),ammEuroPdf(iva),ammEuroPdf(tot),''],
+  });
+}
+async function ammEsportaFa(list,formato){
+  if(!list.length)return toast('Nessuna fattura da estrarre con questi filtri.',true);
+  if(!formato){formato=await ammBoxEstrai(list,'attive');if(!formato)return;}
+  if(formato==='xlsx')return exportRows(MODS.fa,list);
+  const stamp=stampNow();
+  if(formato==='xml')
+    return saveInFolder('Amministrazione/Estrazioni',
+      [{name:`Fatture_attive_${stamp}.xml`,data:new Blob([ammFaXml(list)],{type:'application/xml'})}])
+      .then(()=>toast(`${list.length} fatture estratte in XML.`));
+  if(formato==='pdf')
+    return saveInFolder('Amministrazione/Estrazioni',
+      [{name:`Registro_fatture_attive_${stamp}.pdf`,data:ammFaPdf(list)}])
+      .then(()=>toast(`Registro in PDF di ${list.length} fatture.`));
+  busy(true,'Recupero dei file originali');
+  const files=[];let senza=0;
+  for(const f of list){
+    const att=attachFor('fa',f.codice);
+    if(!att.length){senza++;continue;}
+    for(const a of att){
+      try{files.push({name:`${safe(f.codice)}_${safe(a.file)}`,data:await getBlob(a)});}
+      catch(e){senza++;}
+    }
+  }
+  busy(false);
+  if(!files.length)return toast('Nessun file originale fra gli allegati.',true);
+  await saveInFolder(`Amministrazione/Originali_attive_${stamp}`,files);
+  toast(`${files.length} file originali estratti${senza?`; ${senza} senza allegato`:''}.`);
+}
+
+/* ---------- incasso e prima nota ---------- */
+function pnRigheDaFatturaAttiva(f){
+  const nc=faSegno(f)<0;
+  const righe=[];
+  const add=(conto,dare,avere,descr)=>{
+    const d=r2(nc?avere:dare),a=r2(nc?dare:avere);
+    if(!d&&!a)return;
+    righe.push({conto,dare:d||'',avere:a||'',descrizione:descr});
+  };
+  const etich=`${nc?'Nota di credito':'Fattura'} ${f.numero} del ${fmtD(f.data)} – ${f.cliente}`;
+  const conto=f.conto||AMM_PDC_RICAVO[f.categoria]||'Ricavi da noleggio';
+  add('Crediti verso clienti',+f.totale||0,0,etich);
+  add(conto,0,faImponibile(f),etich);
+  if(faImposta(f))add(f.splitPayment==='Sì'?'Erario c/IVA':'IVA a debito',0,faImposta(f),`IVA ${etich}`);
+  if(+f.bollo)add('Ricavi da noleggio',0,+f.bollo,`Bollo ${etich}`);
+  const sb=r2(righe.reduce((a,r)=>a+(+r.dare||0),0)-righe.reduce((a,r)=>a+(+r.avere||0),0));
+  if(Math.abs(sb)>0.005){
+    if(sb>0)righe.push({conto:'Arrotondamenti attivi',dare:'',avere:Math.abs(sb),descrizione:`Quadratura ${etich}`});
+    else righe.push({conto:'Arrotondamenti passivi',dare:Math.abs(sb),avere:'',descrizione:`Quadratura ${etich}`});
+  }
+  return righe;
+}
+async function ammAttiveInPrimaNota(list){
+  if(soloLettura()||!puoScrivere('pn'))return toast('Il tuo ruolo non può scrivere in prima nota.',true);
+  const da=list.filter(f=>f.registrata!=='Sì');
+  if(!da.length)return toast('Queste fatture sono già in prima nota.',true);
+  const tot=r2(da.reduce((a,f)=>a+(+f.totale||0),0));
+  if(!await confirmBox('Porta in prima nota',
+    `${da.length} ${da.length===1?'fattura':'fatture'} per ${eur(tot)}: credito verso il cliente in dare, ricavo e IVA in avere.`,
+    `Registra ${da.length===1?'la fattura':'le '+da.length+' fatture'}`))return;
+  for(const f of da){
+    faRicalcola(f);
+    pnRigheDaFatturaAttiva(f).forEach((r,i)=>{
+      S.pn.push({id:uid(),codice:nextCode(MODS.pn,f.data),
+        data:f.dataRegistrazione||f.data,societa:f.societa||'',
+        tipo:faSegno(f)<0?'Rettifica':'Vendita',
+        registrazione:f.codice,riga:i+1,descrizione:r.descrizione,
+        conto:r.conto,dare:r.dare,avere:r.avere,
+        contropartita:r.conto==='Crediti verso clienti'?(f.conto||'Ricavi da noleggio'):'Crediti verso clienti',
+        mezzoPagamento:'',banca:'',documento:f.numero,riferimento:f.codice,
+        targa:f.targa||'',centroCosto:f.centroCosto||'',note:''});
+    });
+    f.registrata='Sì';
+  }
+  markDirty();renderFa();
+  toast(`${da.length} ${da.length===1?'fattura registrata':'fatture registrate'} in prima nota.`);
+}
+async function ammSegnaIncassata(list){
+  if(soloLettura()||!puoScrivere('fa'))return toast('Il tuo ruolo non può modificare le fatture.',true);
+  const da=list.filter(f=>['Da incassare','Insoluta','Incassata in parte'].includes(f.statoIncasso));
+  if(!da.length)return toast('Nessuna fattura da incassare fra quelle scelte.',true);
+  const tot=r2(da.reduce((a,f)=>a+faResiduo(f),0));
+  const inPn=da.filter(f=>f.registrata==='Sì').length;
+  const scelta=await ammBoxPagamento(da.length,tot,0,inPn,'incasso');
+  if(!scelta)return;
+  let p=0;
+  for(const f of da){
+    f.statoIncasso='Incassata';f.importoIncassato=+f.totale||0;f.dataIncasso=scelta.data;
+    if(scelta.primaNota&&f.registrata==='Sì'){
+      const reg=`${f.codice}/INC`;
+      if(!S.pn.some(r=>r.registrazione===reg)){
+        const etich=`Incasso fattura ${f.numero} – ${f.cliente}`;
+        const tt=+f.totale||0;
+        [[scelta.banca||'Banca c/c',tt,''],['Crediti verso clienti','',tt]]
+          .forEach(([c,dare,avere],i)=>S.pn.push({id:uid(),codice:nextCode(MODS.pn,scelta.data),
+            data:scelta.data,societa:f.societa||'',tipo:'Incasso',registrazione:reg,riga:i+1,
+            descrizione:etich,conto:c,dare,avere,contropartita:'',
+            mezzoPagamento:scelta.mezzo,banca:scelta.banca,documento:f.numero,
+            riferimento:f.codice,targa:f.targa||'',centroCosto:f.centroCosto||'',note:''}));
+        p++;
+      }
+    }
+  }
+  markDirty();renderFa();
+  toast(`${da.length} ${da.length===1?'fattura incassata':'fatture incassate'}${p?`, ${p} ${p===1?'incasso registrato':'incassi registrati'} in prima nota`:''}.`);
+}
+
+/* =====================================================================
+   L'ELENCO
+   ===================================================================== */
+const AMM_INCPILL={'Da incassare':'rent','Incassata':'run','Incassata in parte':'rent','Insoluta':'bad','Non dovuta':'end','Compensata':'end'};
+function renderFa(){
+  genericList('fa',{
+    sub:'Le fatture emesse ai clienti: entrano da XML o da Excel, portano le righe con targa e periodo, e da qui nascono la prima nota e l’IVA a debito.',
+    newLabel:'Nuova fattura',searchPh:'Numero, cliente, targa, contratto',
+    search:['numero','cliente','codice','targa','categoria','pivaCliente','conto','protocollo',
+            'causale','contrattoLocazione','proforma'],
+    noImport:true,noExport:true,
+    buttons:[
+      {l:'Importa fatture',primary:true,fn:()=>ammBoxImportAttive()},
+      {l:'Estrai',fn:l=>ammEsportaFa(l)},
+      {l:'Vai alle proforma',fn:()=>{S.tab='fatturazione';render();}},
+    ],
+    filters:[
+      {k:'cliente',label:'Cliente',opts:()=>[...new Set(S.fa.map(f=>f.cliente).filter(Boolean))].sort()},
+      {k:'categoria',label:'Categoria',opts:()=>AMM_RICAVI},
+      {k:'statoIncasso',label:'Incasso',opts:()=>MODS.fa.fmap.statoIncasso.opts},
+      {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
+      {k:'__per',label:'Periodo IVA',
+       opts:()=>[...new Set(S.fa.map(f=>f.periodoIva||faPeriodo(f)).filter(Boolean))].sort().reverse(),
+       test:(r,v)=>(r.periodoIva||faPeriodo(r))===v},
+      {k:'__vei',label:'Veicolo',all:'Tutti i mezzi',
+       opts:()=>[...new Set([...S.fa.map(f=>f.targa),...S.fal.map(l=>l.targa)].filter(Boolean))].sort(),
+       test:(r,v)=>normTarga(r.targa)===normTarga(v)||faTarghe(r).includes(normTarga(v))},
+    ],
+    ledger:l=>{
+      const imp=r2(l.reduce((a,f)=>a+faSegno(f)*faImponibile(f),0));
+      const iva=r2(l.reduce((a,f)=>a+faSegno(f)*faIvaDebito(f),0));
+      const dai=l.filter(f=>['Da incassare','Insoluta','Incassata in parte'].includes(f.statoIncasso));
+      const res=r2(dai.reduce((a,f)=>a+faSegno(f)*faResiduo(f),0));
+      const sca=dai.filter(f=>f.scadenza&&f.scadenza<todayISO()).length;
+      const nc=l.filter(f=>faSegno(f)<0).length;
+      return `<div><b>${l.length}</b><small>fatture${nc?` (${nc} di credito)`:''}</small></div>
+        <div><b>${eur(imp)}</b><small>imponibile</small></div>
+        <div><b>${eur(iva)}</b><small>IVA a debito</small></div>
+        <div><b>${eur(res)}</b><small>da incassare</small></div>
+        <div><b class="${sca?'late':''}">${sca}</b><small>scadute</small></div>`;
+    },
+    sort:(a,b)=>(b.data||'').localeCompare(a.data||'')||String(b.codice).localeCompare(String(a.codice)),
+    cols:[
+      {l:'Fattura',v:r=>`<b>${esc(r.numero)}</b><span class="sub">${esc(r.codice)} · ${fmtD(r.data)}${r.tipoDoc&&r.tipoDoc!=='TD01'?' · '+esc(r.tipoDoc):''}</span>`,s:r=>r.data+r.codice},
+      {l:'Cliente',v:r=>`${esc(r.cliente)}<span class="sub">${esc(r.societa||'società da indicare')}</span>`},
+      {l:'Oggetto',v:r=>{
+        const n=faLinee(r).length,tg=faTarghe(r);
+        const veic=tg.length>1?`${tg.length} veicoli`:(r.targa?plate(r.targa):(tg[0]?plate(tg[0]):''));
+        const per=r.periodoDa?`${fmtD(r.periodoDa)}${r.periodoA?' – '+fmtD(r.periodoA):''}`:'';
+        return `${esc(r.categoria||'da classificare')}<span class="sub">${veic}</span>`
+          +`${r.contrattoLocazione?`<span class="sub">contratto ${esc(r.contrattoLocazione)}</span>`:''}`
+          +`${per?`<span class="sub">${esc(per)}</span>`:''}`
+          +`${n?`<span class="sub">${n} ${n===1?'riga':'righe'}</span>`:''}`;}},
+      {l:'Imponibile',cls:'num',v:r=>eur(faImponibile(r)),s:r=>faImponibile(r)},
+      {l:'IVA',cls:'num',v:r=>`${eur(faImposta(r))}${r.splitPayment==='Sì'?'<span class="sub">scissione dei pagamenti</span>':''}`,s:r=>faImposta(r)},
+      {l:'Totale',cls:'num',v:r=>{const q=faQuadra(r);
+        return `<b>${eur(r.totale)}</b>${q!=null?`<span class="sub late">non quadra di ${eur(q)}</span>`:''}`;},s:r=>+r.totale||0},
+      {l:'Incasso',v:r=>`${pillS(r.statoIncasso,AMM_INCPILL[r.statoIncasso]||'end')}<span class="sub">${r.scadenza?dueCell(r.scadenza,10):'senza scadenza'}</span>`},
+      {l:'In prima nota',v:r=>r.registrata==='Sì'?'<span class="cfok">sì</span>':'<span class="muted">no</span>'},
+      {l:'Proforma',v:r=>r.proforma?`<span class="sub">${esc(r.proforma)}</span>`:'<span class="muted">–</span>'},
+    ],
+    rowActions:[
+      {l:'Righe',show:r=>faLinee(r).length>0||puoScrivere('fal'),fn:openFaLinee},
+      {l:'Porta in prima nota',show:r=>r.registrata!=='Sì',fn:r=>ammAttiveInPrimaNota([r])},
+      {l:'Incassata',show:r=>['Da incassare','Insoluta','Incassata in parte'].includes(r.statoIncasso),
+       fn:r=>ammSegnaIncassata([r])},
+    ],
+    selActions:[
+      {l:'Porta in prima nota',primary:true,fn:l=>ammAttiveInPrimaNota(l.filter(r=>r.registrata!=='Sì'))},
+      {l:'Segna incassate',fn:l=>ammSegnaIncassata(l)},
+      {l:'Estrai',fn:l=>ammEsportaFa(l)},
+    ],
+    empty:'Nessuna fattura attiva. Usa «Importa fatture» per caricare gli XML emessi, oppure parti dalle proforma.',
+    after:`<p class="muted" style="margin-top:12px">Le proforma restano in «Fatturazione e proforma»: servono a preparare la fatturazione. Qui ci sono le fatture emesse. Quando il numero coincide, le due cose si collegano da sole.</p>`,
+  });
+}
+
+/* le righe della fattura attiva: stessa finestra delle passive */
+function openFaLinee(f){
+  openLineeGeneriche({
+    f,titolo:`Righe della fattura ${f.numero||f.codice}`,
+    lista:()=>faLinee(f),store:'fal',mod:MODS.fal,
+    imponibileFattura:()=>faImponibile(f),
+    categorie:AMM_RICAVI,
+    nuova:()=>({id:uid(),codice:nextCode(MODS.fal),fattura:f.codice,
+      numeroLinea:faLinee(f).length+1,descrizione:'Nuova riga',targa:f.targa||'',
+      contrattoLocazione:f.contrattoLocazione||'',quantita:1,prezzo:0,imponibile:0,
+      aliquota:'',natura:'',canone:'',periodoDa:f.periodoDa||'',periodoA:f.periodoA||'',
+      categoria:f.categoria||'',centroCosto:f.centroCosto||''}),
+    apriScheda:()=>openRecord('fa',f,{onSaved:()=>renderFa()}),
+    chiuso:()=>renderFa(),
+    scrivibile:puoScrivere('fal'),
+    nota:'Da queste righe la scheda economica del mezzo prende i ricavi: una riga senza targa resta un ricavo della flotta, non del veicolo.',
+  });
+}
+
+
+/* =====================================================================
+   SCHEDA ECONOMICA DEL MEZZO
+   ---------------------------------------------------------------------
+   Costi e ricavi di un veicolo, voce per voce, con la fonte di ciascuno.
+
+   Il punto delicato è il doppio conteggio: il canone di un contratto di
+   leasing e la fattura che lo addebita sono lo stesso costo visto da due
+   parti. Qui le fonti sono separate e si accendono una per una: si parte
+   dai documenti — che sono i soldi davvero usciti ed entrati — e il
+   registro operativo (canoni di contratto, consuntivi di manutenzione,
+   franchigie) resta spento, con scritto perché.
+   ===================================================================== */
+
+/* ---------- le fonti ----------
+   doc:true  = viene da un documento contabile (acceso di default)
+   reg:true  = viene dal registro operativo (spento: rischia di duplicare) */
+const ECO_FONTI=[
+ {k:'fp',   lato:'costo',  doc:true,  l:'Fatture passive',
+  d:'Le righe di fattura intestate a questo veicolo, più le fatture a veicolo singolo.'},
+ {k:'mov',  lato:'costo',  doc:true,  l:'Carburante e pedaggi',
+  d:'I movimenti delle carte carburante e del Telepass abbinati al mezzo.'},
+ {k:'bolli',lato:'costo',  doc:true,  l:'Bolli e tasse',
+  d:'Le tasse automobilistiche dovute per il periodo.'},
+ {k:'vrb',  lato:'costo',  doc:true,  l:'Verbali',
+  d:'Le multe a carico nostro, spese di notifica comprese.'},
+ {k:'cp',   lato:'costo',  reg:true,  l:'Canoni di contratto',
+  d:'Il canone del contratto di leasing o noleggio, per i mesi del periodo. Da accendere solo se le fatture del fornitore non sono registrate, se no si conta due volte.'},
+ {k:'man',  lato:'costo',  reg:true,  l:'Manutenzioni a consuntivo',
+  d:'Il consuntivo delle manutenzioni a nostro carico. Da accendere solo se le fatture dell’officina non sono registrate.'},
+ {k:'sin',  lato:'costo',  reg:true,  l:'Franchigie sinistri',
+  d:'Le franchigie rimaste a nostro carico. Da accendere solo se non sono già arrivate in fattura.'},
+ {k:'fa',   lato:'ricavo', doc:true,  l:'Fatture attive',
+  d:'Le righe di fattura emessa intestate a questo veicolo, più le fatture a veicolo singolo.'},
+ {k:'righe',lato:'ricavo', doc:true,  l:'Proforma non ancora fatturate',
+  d:'Le righe di proforma che non hanno una fattura attiva corrispondente.'},
+ {k:'riadd',lato:'ricavo', doc:true,  l:'Riaddebiti ai clienti',
+  d:'Franchigie e movimenti segnati come da riaddebitare, quando non sono già in una fattura.'},
+ {k:'nol',  lato:'ricavo', reg:true,  l:'Canoni di noleggio dal registro',
+  d:'Il canone dei contratti di noleggio attivi, per i giorni del periodo. Da accendere solo se le fatture ai clienti non sono registrate.'},
+];
+const ECO_DEF=()=>{const o={};for(const f of ECO_FONTI)o[f.k]=!!f.doc;return o;};
+
+/* Quanta parte di un intervallo cade dentro il periodo. */
+function ecoGiorniDentro(da,a,pDa,pA){
+  const d1=da&&pDa?(da>pDa?da:pDa):(da||pDa),d2=a&&pA?(a<pA?a:pA):(a||pA);
+  if(!d1||!d2||d1>d2)return 0;
+  return daysBetween(d1,d2)+1;
+}
+const ecoDentro=(d,pDa,pA)=>!!d&&(!pDa||d>=pDa)&&(!pA||d<=pA);
+
+/* ---------- il calcolo ---------- */
+function schedaEconomica(targa,pDa,pA,fonti){
+  const t=normTarga(targa);
+  const on=fonti||ECO_DEF();
+  const costi=[],ricavi=[];
+  const add=(arr,voce,importo,n,fonte,dettaglio)=>{
+    if(!importo&&!n)return;
+    arr.push({voce,importo:r2(importo),n,fonte,dettaglio:dettaglio||''});
+  };
+
+  /* --- costi --- */
+  if(on.fp){
+    const righe=S.fpl.filter(l=>normTarga(l.targa)===t&&ecoDentro(ecoDataRiga(l),pDa,pA));
+    const perCat=new Map();
+    for(const l of righe){
+      const f=S.fp.find(x=>x.codice===l.fattura);
+      const s=f?fpSegno(f):1;
+      const c=l.categoria||(f&&f.categoria)||'Altri costi';
+      const v=perCat.get(c)||{i:0,n:0};
+      v.i=r2(v.i+s*(+l.imponibile||0));v.n++;perCat.set(c,v);
+    }
+    /* le fatture a veicolo unico senza righe dettagliate */
+    const intere=S.fp.filter(f=>normTarga(f.targa)===t&&!S.fpl.some(l=>l.fattura===f.codice)
+      &&ecoDentro(f.dataRegistrazione||f.data,pDa,pA));
+    for(const f of intere){
+      const c=f.categoria||'Altri costi';
+      const v=perCat.get(c)||{i:0,n:0};
+      v.i=r2(v.i+fpSegno(f)*fpImponibile(f));v.n++;perCat.set(c,v);
+    }
+    for(const [c,v] of perCat)add(costi,c,v.i,v.n,'Fatture passive');
+  }
+  if(on.mov){
+    const l=S.mov.filter(m=>normTarga(m.targa)===t&&ecoDentro(m.data,pDa,pA));
+    const carb=l.filter(m=>/carburant|rifornim|energia/i.test(m.tipo||'')||+m.litri>0);
+    const ped=l.filter(m=>!carb.includes(m));
+    const netto=x=>r2((+x.importo||0)-(+x.iva||0))||(+x.importo||0);
+    add(costi,'Carburante',r2(carb.reduce((a,m)=>a+netto(m),0)),carb.length,'Movimenti carte');
+    add(costi,'Pedaggi e transiti',r2(ped.reduce((a,m)=>a+netto(m),0)),ped.length,'Movimenti Telepass');
+  }
+  if(on.bolli){
+    const l=S.bolli.filter(b=>normTarga(b.targa)===t&&b.stato!=='Non dovuto'
+      &&ecoDentro(b.scadenza,pDa,pA));
+    add(costi,'Bolli e tasse',r2(l.reduce((a,b)=>a+bolloDovuto(b),0)),l.length,'Bolli');
+  }
+  if(on.vrb){
+    const l=S.vrb.filter(v=>normTarga(v.targa)===t&&ecoDentro(v.dataNotifica||v.dataInfrazione,pDa,pA)
+      &&!/Cliente/i.test(v.tipoResponsabile||''));
+    add(costi,'Verbali a nostro carico',
+      r2(l.reduce((a,v)=>a+(+v.importoRidotto||+v.importo||0)+(+v.speseNotifica||0),0)),
+      l.length,'Verbali');
+  }
+  if(on.cp){
+    const l=S.cp.filter(c=>cpTarghe(c).includes(t)&&c.stato!=='Chiuso');
+    let tot=0,n=0;
+    for(const c of l){
+      const g=ecoGiorniDentro(c.inizio,c.fine,pDa,pA);
+      if(!g||!+c.canone)continue;
+      tot=r2(tot+(+c.canone)*g/30.44);n++;
+    }
+    add(costi,'Canoni di contratto',tot,n,'Contratti fornitori','Canone mensile rapportato ai giorni del periodo');
+  }
+  if(on.man){
+    const l=S.man.filter(m=>normTarga(m.targa)===t&&m.stato!=='Annullata'
+      &&ecoDentro(m.dataUscita||m.dataSegnalazione,pDa,pA)
+      &&!/fornitore|assicuraz|cliente/i.test(m.aCarico||''));
+    add(costi,'Manutenzioni',r2(l.reduce((a,m)=>a+(+m.consuntivo||+m.preventivo||0)+(+m.costoSostitutivo||0),0)),
+      l.length,'Manutenzioni');
+  }
+  if(on.sin){
+    const l=S.sin.filter(s=>normTarga(s.targa)===t&&ecoDentro(s.data,pDa,pA));
+    add(costi,'Franchigie sinistri',r2(l.reduce((a,s)=>a+(+s.franchigia||0),0)),l.length,'Sinistri');
+  }
+
+  /* --- ricavi --- */
+  if(on.fa){
+    const righe=(S.fal||[]).filter(l=>normTarga(l.targa)===t&&ecoDentro(ecoDataRiga(l),pDa,pA));
+    const perCat=new Map();
+    for(const l of righe){
+      const f=(S.fa||[]).find(x=>x.codice===l.fattura);
+      const s=f?faSegno(f):1;
+      const c=l.categoria||(f&&f.categoria)||'Altri ricavi';
+      const v=perCat.get(c)||{i:0,n:0};
+      v.i=r2(v.i+s*(+l.imponibile||0));v.n++;perCat.set(c,v);
+    }
+    const intere=(S.fa||[]).filter(f=>normTarga(f.targa)===t&&!(S.fal||[]).some(l=>l.fattura===f.codice)
+      &&ecoDentro(f.dataRegistrazione||f.data,pDa,pA));
+    for(const f of intere){
+      const c=f.categoria||'Altri ricavi';
+      const v=perCat.get(c)||{i:0,n:0};
+      v.i=r2(v.i+faSegno(f)*faImponibile(f));v.n++;perCat.set(c,v);
+    }
+    for(const [c,v] of perCat)add(ricavi,c,v.i,v.n,'Fatture attive');
+  }
+  if(on.righe){
+    /* solo le proforma che non hanno una fattura attiva corrispondente */
+    const coperte=new Set((S.fa||[]).map(f=>f.proforma).filter(Boolean));
+    const l=S.righe.filter(r=>normTarga(r.targa)===t&&!coperte.has(r.proforma)
+      &&ecoDentro(ecoDataProforma(r),pDa,pA));
+    const perTipo=new Map();
+    for(const r of l){const k=r.tipo||'Altro';const v=perTipo.get(k)||{i:0,n:0};
+      v.i=r2(v.i+(+r.imponibile||0));v.n++;perTipo.set(k,v);}
+    for(const [k,v] of perTipo)add(ricavi,k,v.i,v.n,'Proforma non fatturate');
+  }
+  if(on.riadd){
+    const mv=S.mov.filter(m=>normTarga(m.targa)===t&&m.riaddebita==='Sì'&&!m.proforma
+      &&ecoDentro(m.data,pDa,pA));
+    add(ricavi,'Riaddebiti da movimenti',r2(mv.reduce((a,m)=>a+((+m.importo||0)-(+m.iva||0)),0)),
+      mv.length,'Movimenti da riaddebitare');
+    const sn=S.sin.filter(s=>normTarga(s.targa)===t&&+s.importoRiaddebito>0&&!s.proforma
+      &&ecoDentro(s.data,pDa,pA));
+    add(ricavi,'Riaddebiti da sinistri',r2(sn.reduce((a,s)=>a+(+s.importoRiaddebito||0),0)),
+      sn.length,'Sinistri da riaddebitare');
+  }
+  if(on.nol){
+    const l=S.rows.filter(r=>normTarga(r.targa)===t);
+    let tot=0,n=0,gg=0;
+    for(const r of l){
+      const g=ecoGiorniDentro(r.inizio,r.fine,pDa,pA);
+      if(!g||!+r.canone)continue;
+      tot=r2(tot+(+r.canone)*g/30.44);n++;gg+=g;
+    }
+    add(ricavi,'Canoni di noleggio',tot,n,'Contratti di noleggio',
+      gg?`${gg} giorni di noleggio nel periodo`:'');
+  }
+
+  const totCosti=r2(costi.reduce((a,x)=>a+x.importo,0));
+  const totRicavi=r2(ricavi.reduce((a,x)=>a+x.importo,0));
+  const giorni=pDa&&pA?daysBetween(pDa,pA)+1:0;
+  const noleggiati=S.rows.filter(r=>normTarga(r.targa)===t)
+    .reduce((a,r)=>a+ecoGiorniDentro(r.inizio,r.fine,pDa,pA),0);
+  return {targa:t,pDa,pA,fonti:on,costi,ricavi,totCosti,totRicavi,
+    margine:r2(totRicavi-totCosti),
+    marginePc:totRicavi?r2((totRicavi-totCosti)/totRicavi*100):null,
+    giorni,noleggiati,
+    costoGiorno:giorni?r2(totCosti/giorni):null,
+    ricavoGiorno:giorni?r2(totRicavi/giorni):null,
+    utilizzo:giorni?r2(noleggiati/giorni*100):null};
+}
+/* La data che colloca una riga di fattura nel tempo: il periodo di
+   competenza se c'è, altrimenti la data del documento. */
+function ecoDataRiga(l){
+  if(l.periodoDa)return l.periodoDa;
+  const f=S.fp.find(x=>x.codice===l.fattura)||(S.fa||[]).find(x=>x.codice===l.fattura);
+  return f?(f.dataRegistrazione||f.data):'';
+}
+function ecoDataProforma(r){
+  if(r.dal)return r.dal;
+  const f=S.fat.find(x=>x.codice===r.proforma);
+  return f?(f.dataFattura||f.data):'';
+}
+
+/* ---------- la finestra ---------- */
+function apriSchedaMezzo(targa,pDa,pA){
+  const u=ui('ecoscheda');
+  if(!u.fonti)u.fonti=ECO_DEF();
+  u.targa=normTarga(targa)||u.targa;
+  if(pDa!==undefined)u.pDa=pDa;
+  if(pA!==undefined)u.pA=pA;
+  if(!u.pDa){u.pA=todayISO();u.pDa=addMonths(u.pA,-12);}
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const paint=()=>{
+    const e=schedaEconomica(u.targa,u.pDa,u.pA,u.fonti);
+    const m=mezzoBy(u.targa);
+    const spente=ECO_FONTI.filter(f=>!u.fonti[f.k]);
+    const riga=x=>`<tr><td>${esc(x.voce)}</td><td class="num">${x.n||''}</td>
+      <td class="num"><b>${eur(x.importo)}</b></td>
+      <td><span class="sub">${esc(x.fonte)}${x.dettaglio?' · '+esc(x.dettaglio):''}</span></td></tr>`;
+    d.innerHTML=`<header><h2>Scheda economica ${esc(u.targa)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <p class="muted" style="margin-top:0">${m?esc(mezzoName(m)+(m.tipologia?' · '+m.tipologia:'')+(m.centroCosto?' · '+m.centroCosto:'')):'Targa non in anagrafica mezzi'}</p>
+      <div class="fgrid">
+        <div class="field s3"><label for="ecoDa">Dal</label><input class="input" type="date" id="ecoDa" value="${esc(u.pDa)}"></div>
+        <div class="field s3"><label for="ecoA">Al</label><input class="input" type="date" id="ecoA" value="${esc(u.pA)}"></div>
+        <div class="field s6" style="align-self:end;flex-direction:row;gap:6px;flex-wrap:wrap">
+          ${[[12,'Ultimi 12 mesi'],[6,'6 mesi'],[3,'3 mesi']].map(([n,l])=>`<button class="btn" data-mesi="${n}">${l}</button>`).join('')}
+          <button class="btn" data-anno>Anno in corso</button></div>
+      </div>
+      <div class="ledger" style="margin-top:12px">
+        <div><b>${eur(e.totRicavi)}</b><small>ricavi</small></div>
+        <div><b>${eur(e.totCosti)}</b><small>costi</small></div>
+        <div><b class="${e.margine>0?'cfok':e.margine<0?'late':''}">${eur(e.margine)}</b><small>margine${e.marginePc!=null?` · ${numF.format(e.marginePc)}%`:''}</small></div>
+        <div><b>${e.utilizzo!=null?numF.format(e.utilizzo)+'%':'–'}</b><small>giorni noleggiato (${e.noleggiati} su ${e.giorni})</small></div>
+        <div><b>${e.costoGiorno!=null?eur(e.costoGiorno):'–'}</b><small>costo al giorno</small></div>
+      </div>
+      <div class="ecodue" style="margin-top:14px">
+        <div class="panel"><h3>Ricavi</h3>
+          <div class="tablewrap"><table class="grid mini"><thead><tr><th>Voce</th><th class="num">N.</th><th class="num">Importo</th><th>Fonte</th></tr></thead>
+          <tbody>${e.ricavi.map(riga).join('')||'<tr><td colspan="4" class="empty">Nessun ricavo nel periodo.</td></tr>'}</tbody>
+          ${e.ricavi.length?`<tfoot><tr><th colspan="2">Totale</th><th class="num">${eur(e.totRicavi)}</th><th></th></tr></tfoot>`:''}</table></div></div>
+        <div class="panel"><h3>Costi</h3>
+          <div class="tablewrap"><table class="grid mini"><thead><tr><th>Voce</th><th class="num">N.</th><th class="num">Importo</th><th>Fonte</th></tr></thead>
+          <tbody>${e.costi.map(riga).join('')||'<tr><td colspan="4" class="empty">Nessun costo nel periodo.</td></tr>'}</tbody>
+          ${e.costi.length?`<tfoot><tr><th colspan="2">Totale</th><th class="num">${eur(e.totCosti)}</th><th></th></tr></tfoot>`:''}</table></div></div>
+      </div>
+      <div class="panel" style="margin-top:14px"><h3>Da dove vengono i numeri</h3>
+        <p class="muted">Accendi una fonte per includerla. Le fonti del registro operativo sono spente perché, se le fatture sono registrate, conterebbero lo stesso costo due volte.</p>
+        <div class="fgrid">
+        ${ECO_FONTI.map(f=>`<div class="field s3"><label class="check"><input type="checkbox" data-fonte="${f.k}" ${u.fonti[f.k]?'checked':''}>
+          <b>${esc(f.l)}</b></label>
+          <small class="muted" style="margin-left:24px">${esc(f.lato)} · ${esc(f.d)}</small></div>`).join('')}
+        </div>
+      </div>
+      ${spente.length?`<p class="muted">Non conteggiate: ${esc(spente.map(f=>f.l).join(', '))}.</p>`:''}
+    </div>
+    <footer><button class="btn" data-pdf>Scarica in PDF</button>
+      <button class="btn" data-fatt>Fatture del mezzo</button>
+      <button class="btn primary" data-x>Chiudi</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+    d.querySelector('#ecoDa').onchange=ev=>{u.pDa=ev.target.value;paint();};
+    d.querySelector('#ecoA').onchange=ev=>{u.pA=ev.target.value;paint();};
+    d.querySelectorAll('[data-mesi]').forEach(b=>b.onclick=()=>{
+      u.pA=todayISO();u.pDa=addMonths(u.pA,-(+b.dataset.mesi));paint();});
+    d.querySelector('[data-anno]').onclick=()=>{
+      const a=todayISO().slice(0,4);u.pDa=`${a}-01-01`;u.pA=todayISO();paint();};
+    d.querySelectorAll('[data-fonte]').forEach(c=>c.onchange=()=>{
+      u.fonti[c.dataset.fonte]=c.checked;paint();});
+    d.querySelector('[data-pdf]').onclick=()=>ecoPdf(e);
+    d.querySelector('[data-fatt]').onclick=()=>{close();S.tab='fp';render();
+      const uu=ui('fp');uu.f.__vei=u.targa;renderFp();
+      toast(`Fatture passive filtrate su ${u.targa}.`);};
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);};
+  const kd=ev=>{if(ev.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);
+  sc.onclick=close;document.body.append(sc,d);paint();
+}
+
+function ecoPdf(e){
+  const m=mezzoBy(e.targa);
+  const righe=[];
+  righe.push(['RICAVI','','','']);
+  for(const x of e.ricavi)righe.push([x.voce,x.n||'',ammEuroPdf(x.importo),x.fonte]);
+  righe.push(['Totale ricavi','',ammEuroPdf(e.totRicavi),'']);
+  righe.push(['','','','']);
+  righe.push(['COSTI','','','']);
+  for(const x of e.costi)righe.push([x.voce,x.n||'',ammEuroPdf(x.importo),x.fonte]);
+  righe.push(['Totale costi','',ammEuroPdf(e.totCosti),'']);
+  const spente=ECO_FONTI.filter(f=>!e.fonti[f.k]).map(f=>f.l);
+  return saveInFolder('Amministrazione/Schede mezzo',[{
+    name:`Scheda_economica_${safe(e.targa)}_${stampNow()}.pdf`,
+    data:ammPdf({orizzontale:false,
+      titolo:`Scheda economica ${e.targa}`,
+      sottotitolo:`${m?mezzoName(m)+' · ':''}dal ${fmtD(e.pDa)} al ${fmtD(e.pA)} · margine ${ammEuroPdf(e.margine)} euro`
+        +(spente.length?` · non conteggiate: ${spente.join(', ')}`:''),
+      colonne:[{l:'Voce',w:180},{l:'N.',w:34,num:true},{l:'Importo',w:70,num:true},{l:'Fonte',w:170}],
+      righe,
+      piede:['Margine del periodo','',ammEuroPdf(e.margine),
+        e.marginePc!=null?`${numF.format(e.marginePc)}% sui ricavi`:''],
+    })}]).then(()=>toast(`Scheda economica di ${e.targa} in PDF.`));
+}
+
+/* =====================================================================
+   I MARGINI DI TUTTA LA FLOTTA
+   ===================================================================== */
+function margini(pDa,pA,fonti,soloFlotta){
+  const l=S.mezzi.filter(m=>m.targa&&(!soloFlotta||(!ARCH(m)&&!FUORI_FLOTTA(m.stato)))&&inScope('mezzi',m));
+  return l.map(m=>{
+    const e=schedaEconomica(m.targa,pDa,pA,fonti);
+    return {targa:m.targa,mezzo:mezzoName(m),cdc:m.centroCosto||'',stato:m.stato,
+      ricavi:e.totRicavi,costi:e.totCosti,margine:e.margine,marginePc:e.marginePc,
+      utilizzo:e.utilizzo,noleggiati:e.noleggiati,giorni:e.giorni};
+  });
+}
+function renderMargini(){
+  const u=ui('margini');
+  if(!u.fonti)u.fonti=ECO_DEF();
+  if(!u.pDa){u.pA=todayISO();u.pDa=addMonths(u.pA,-12);}
+  if(u.soloFlotta===undefined)u.soloFlotta=true;
+  if(!u.ord)u.ord='margine';
+  const l=margini(u.pDa,u.pA,u.fonti,u.soloFlotta);
+  const ord={margine:(a,b)=>a.margine-b.margine,ricavi:(a,b)=>b.ricavi-a.ricavi,
+    costi:(a,b)=>b.costi-a.costi,utilizzo:(a,b)=>(a.utilizzo??999)-(b.utilizzo??999),
+    targa:(a,b)=>String(a.targa).localeCompare(String(b.targa))};
+  l.sort(ord[u.ord]||ord.margine);
+  const tR=r2(l.reduce((a,x)=>a+x.ricavi,0)),tC=r2(l.reduce((a,x)=>a+x.costi,0));
+  const perdita=l.filter(x=>x.margine<0);
+  const spente=ECO_FONTI.filter(f=>!u.fonti[f.k]);
+  $('#main').innerHTML=`${pageHead('Margini per veicolo',
+    'Costi e ricavi di ogni mezzo nel periodo scelto, per vedere quali veicoli rendono e quali no.',
+    `<button class="btn" data-pdf>Scarica in PDF</button><button class="btn" data-xls>Esporta Excel</button>`)}
+  <div class="panel">
+    <div class="fgrid">
+      <div class="field s3"><label for="mgDa">Dal</label><input class="input" type="date" id="mgDa" value="${esc(u.pDa)}"></div>
+      <div class="field s3"><label for="mgA">Al</label><input class="input" type="date" id="mgA" value="${esc(u.pA)}"></div>
+      <div class="field s3"><label for="mgOrd">Ordina per</label>
+        <select class="input" id="mgOrd">${[['margine','Margine, dal peggiore'],['ricavi','Ricavi'],['costi','Costi'],['utilizzo','Giorni noleggiato'],['targa','Targa']]
+          .map(([k,x])=>`<option value="${k}" ${u.ord===k?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+      <div class="field s3" style="align-self:end"><label class="check"><input type="checkbox" id="mgFlotta" ${u.soloFlotta?'checked':''}> Solo i mezzi in flotta</label></div>
+    </div>
+    <details style="margin-top:8px"><summary><b>Fonti conteggiate</b>${spente.length?` — ${spente.length} spente`:''}</summary>
+      <div class="fgrid" style="margin-top:8px">
+      ${ECO_FONTI.map(f=>`<div class="field s3"><label class="check"><input type="checkbox" data-fonte="${f.k}" ${u.fonti[f.k]?'checked':''}> <b>${esc(f.l)}</b></label>
+        <small class="muted" style="margin-left:24px">${esc(f.d)}</small></div>`).join('')}</div>
+    </details>
+  </div>
+  <div class="ledger">
+    <div><b>${l.length}</b><small>veicoli</small></div>
+    <div><b>${eur(tR)}</b><small>ricavi</small></div>
+    <div><b>${eur(tC)}</b><small>costi</small></div>
+    <div><b class="${tR-tC>0?'cfok':'late'}">${eur(r2(tR-tC))}</b><small>margine della flotta</small></div>
+    <div><b class="${perdita.length?'late':''}">${perdita.length}</b><small>veicoli in perdita</small></div>
+  </div>
+  <div class="tablewrap"><table class="grid"><thead><tr>
+    <th>Veicolo</th><th>Centro di costo</th><th class="num">Ricavi</th><th class="num">Costi</th>
+    <th class="num">Margine</th><th class="num">%</th><th class="num">Giorni noleggiato</th><th></th></tr></thead><tbody>
+  ${l.map(x=>`<tr class="${x.margine<0?'rowwarn':''}">
+    <td>${plate(x.targa)}<span class="sub">${esc(x.mezzo)}</span></td>
+    <td>${esc(x.cdc||'–')}<span class="sub">${esc(x.stato||'')}</span></td>
+    <td class="num">${eur(x.ricavi)}</td><td class="num">${eur(x.costi)}</td>
+    <td class="num"><b class="${x.margine>0?'cfok':x.margine<0?'late':''}">${eur(x.margine)}</b></td>
+    <td class="num">${x.marginePc!=null?numF.format(x.marginePc)+'%':'–'}</td>
+    <td class="num">${x.noleggiati}<span class="sub">su ${x.giorni}${x.utilizzo!=null?` · ${numF.format(x.utilizzo)}%`:''}</span></td>
+    <td><button class="btn ghost" data-sch="${esc(x.targa)}">Scheda</button></td></tr>`).join('')
+    ||'<tr><td colspan="8" class="empty">Nessun mezzo.</td></tr>'}
+  </tbody>${l.length?`<tfoot><tr><th colspan="2">Totali</th><th class="num">${eur(tR)}</th><th class="num">${eur(tC)}</th><th class="num">${eur(r2(tR-tC))}</th><th colspan="3"></th></tr></tfoot>`:''}</table></div>
+  ${spente.length?`<p class="muted" style="margin-top:12px">Non conteggiate: ${esc(spente.map(f=>f.l).join(', '))}. Sono le fonti del registro operativo: accenderle insieme alle fatture conterebbe lo stesso costo due volte.</p>`:''}`;
+  const q=s=>$('#main').querySelector(s);
+  q('#mgDa').onchange=e=>{u.pDa=e.target.value;renderMargini();};
+  q('#mgA').onchange=e=>{u.pA=e.target.value;renderMargini();};
+  q('#mgOrd').onchange=e=>{u.ord=e.target.value;renderMargini();};
+  q('#mgFlotta').onchange=e=>{u.soloFlotta=e.target.checked;renderMargini();};
+  $('#main').querySelectorAll('[data-fonte]').forEach(c=>c.onchange=()=>{
+    u.fonti[c.dataset.fonte]=c.checked;renderMargini();});
+  $('#main').querySelectorAll('[data-sch]').forEach(b=>b.onclick=()=>apriSchedaMezzo(b.dataset.sch,u.pDa,u.pA));
+  q('[data-pdf]').onclick=()=>saveInFolder('Amministrazione/Estrazioni',[{
+    name:`Margini_per_veicolo_${stampNow()}.pdf`,
+    data:ammPdf({titolo:'Margini per veicolo',
+      sottotitolo:`Dal ${fmtD(u.pDa)} al ${fmtD(u.pA)} · ${l.length} veicoli`
+        +(spente.length?` · non conteggiate: ${spente.map(f=>f.l).join(', ')}`:''),
+      colonne:[{l:'Targa',w:62},{l:'Veicolo',w:140},{l:'Centro di costo',w:120},
+        {l:'Ricavi',w:70,num:true},{l:'Costi',w:70,num:true},{l:'Margine',w:70,num:true},
+        {l:'%',w:44,num:true},{l:'Giorni',w:44,num:true}],
+      righe:l.map(x=>[x.targa,x.mezzo,x.cdc,ammEuroPdf(x.ricavi),ammEuroPdf(x.costi),
+        ammEuroPdf(x.margine),x.marginePc!=null?numF.format(x.marginePc):'',x.noleggiati]),
+      piede:['','','Totali',ammEuroPdf(tR),ammEuroPdf(tC),ammEuroPdf(r2(tR-tC)),'',''],
+    })}]).then(()=>toast('Margini per veicolo in PDF.'));
+  q('[data-xls]').onclick=async()=>{
+    const wb=new ExcelJS.Workbook();const ws=wb.addWorksheet('Margini');
+    ws.addRow(['Targa','Veicolo','Centro di costo','Stato','Ricavi','Costi','Margine','% sui ricavi','Giorni noleggiato','Giorni del periodo']);
+    ws.getRow(1).font={bold:true};
+    l.forEach(x=>ws.addRow([x.targa,x.mezzo,x.cdc,x.stato,x.ricavi,x.costi,x.margine,
+      x.marginePc,x.noleggiati,x.giorni]));
+    ['E','F','G'].forEach(c=>ws.getColumn(c).numFmt='#,##0.00 "€"');
+    ws.columns.forEach(c=>{c.width=16;});
+    await saveFile(`Margini_per_veicolo_${stampNow()}.xlsx`,
+      new Blob([await wb.xlsx.writeBuffer()],{type:XLSX_MIME}));
+  };
+}
+AMM_TABS.push('margini');
+VIEWS.margini=()=>renderMargini();
+(()=>{
+  const g=MENU.find(x=>x.g==='Amministrazione');
+  if(g&&!g.items.some(([k])=>k==='margini'))g.items.push(['margini','Margini per veicolo']);
+})();
+
+/* Il pannello del cruscotto: i peggiori e i migliori, e la porta per la
+   vista completa. Chi non ha accesso all'amministrazione non lo vede. */
+function ecoPannelloCruscotto(){
+  if(!puoAmm())return '';
+  const u=ui('margini');
+  if(!u.fonti)u.fonti=ECO_DEF();
+  if(!u.pDa){u.pA=todayISO();u.pDa=addMonths(u.pA,-12);}
+  const l=margini(u.pDa,u.pA,u.fonti,true).filter(x=>x.ricavi||x.costi);
+  if(!l.length)return '';
+  const tR=r2(l.reduce((a,x)=>a+x.ricavi,0)),tC=r2(l.reduce((a,x)=>a+x.costi,0));
+  const peggio=l.slice().sort((a,b)=>a.margine-b.margine).slice(0,5);
+  const meglio=l.slice().sort((a,b)=>b.margine-a.margine).slice(0,5);
+  const perdita=l.filter(x=>x.margine<0).length;
+  const tab=(tit,rr)=>`<div><h4 style="margin:0 0 6px;font-size:13px">${esc(tit)}</h4>
+    <table class="grid mini"><tbody>${rr.map(x=>`<tr>
+      <td>${plate(x.targa)}</td><td class="num">${eur(x.ricavi)}</td><td class="num">${eur(x.costi)}</td>
+      <td class="num"><b class="${x.margine>0?'cfok':x.margine<0?'late':''}">${eur(x.margine)}</b></td>
+      <td><button class="btn ghost" data-ecosch="${esc(x.targa)}">Scheda</button></td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="panel" data-ecobox><h3>Margini per veicolo</h3>
+    <p class="muted">Dal ${fmtD(u.pDa)} al ${fmtD(u.pA)} · ${l.length} mezzi con movimenti${perdita?` · <b class="late">${perdita} in perdita</b>`:''}</p>
+    <div class="ledger" style="margin:0 0 10px">
+      <div><b>${eur(tR)}</b><small>ricavi</small></div>
+      <div><b>${eur(tC)}</b><small>costi</small></div>
+      <div><b class="${tR-tC>0?'cfok':'late'}">${eur(r2(tR-tC))}</b><small>margine</small></div>
+    </div>
+    <div class="field" style="max-width:280px;margin-bottom:10px"><label for="ecoPick">Scheda di un mezzo</label>
+      <select class="input" id="ecoPick"><option value="">Scegli la targa…</option>
+      ${l.map(x=>`<option value="${esc(x.targa)}">${esc(x.targa)} · ${esc(x.mezzo)}</option>`).join('')}</select></div>
+    <div class="ecodue">${tab('I cinque peggiori',peggio)}${tab('I cinque migliori',meglio)}</div>
+    <div class="acts" style="justify-content:flex-start;margin-top:10px">
+      <button class="btn" data-ecotutti>Vedi tutti i margini</button></div>
+  </div>`;
+}
+function ecoLegaCruscotto(){
+  const box=$('#main')&&$('#main').querySelector('[data-ecobox]');
+  if(!box)return;
+  const u=ui('margini');
+  const p=box.querySelector('#ecoPick');
+  if(p)p.onchange=()=>{if(p.value)apriSchedaMezzo(p.value,u.pDa,u.pA);p.value='';};
+  box.querySelectorAll('[data-ecosch]').forEach(b=>b.onclick=()=>apriSchedaMezzo(b.dataset.ecosch,u.pDa,u.pA));
+  const t=box.querySelector('[data-ecotutti]');
+  if(t)t.onclick=()=>{S.tab='margini';render();};
+}
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
