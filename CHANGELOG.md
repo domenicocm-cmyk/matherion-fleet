@@ -36,3 +36,9 @@
   noleggio si duplicano: «Duplica» ricopia fornitore, date, canone, servizi e
   franchigie e lascia vuoto il numero. Si fa una copia sola, e si apre subito
   la scheda, oppure più copie in un colpo, numerate di seguito.
+- **2026.10.09** — pubblicata il 09/10/2026 — nuovo modulo **Amministrazione**
+  con sei sottosezioni: fatture passive, prima nota, bolli e tasse,
+  liquidazione IVA, F24 e previsionale F24. Le fatture entrano dagli XML
+  dello SDI (anche firmati .p7m) o da Excel e il file resta allegato alla
+  riga; escono in Excel, XML e PDF. Il modulo si vede solo con ruolo Master
+  o con il nuovo ruolo **Amministrazione**. Vedi AMMINISTRAZIONE.md.

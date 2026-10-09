@@ -870,6 +870,12 @@ body.app .aggbanner{bottom:76px;left:10px;right:10px;padding:10px 12px}
 .provabanner b{color:var(--gold)}
 .provabanner .btn{background:var(--surface);border-color:var(--surface)}
 body.app .provabanner{bottom:76px;left:10px;right:10px}
+
+/* ---------- amministrazione ---------- */
+details.ammdet>summary,.body details>summary{cursor:pointer;padding:6px 0;color:var(--ink)}
+.body details>summary:hover{color:var(--gold-ink,var(--ink))}
+.grid tfoot th{background:var(--surface-2);font-weight:800;padding:8px 10px;border-top:2px solid var(--line)}
+.grid tfoot th.num{text-align:right}
 </style>
 </head>
 <body>
@@ -1151,7 +1157,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.07b';
+const APP_VERSION='2026.10.09';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -3054,6 +3060,10 @@ const PARAMS_EXTRA=[
  ['cdcInit',28,'Centri di costo inizializzati',''],
  ['aggiornaAuto',29,'Aggiornamento automatico dal registro (Sì/No)','Sì'],
  ['aggiornaOgni',30,'Controlla il registro ogni (secondi)',45],
+ ['ivaPeriodicita',31,'Liquidazione IVA: periodicità (Mensile/Trimestrale)','Trimestrale'],
+ ['contoBanca',32,'Conto banca predefinito per la prima nota','Banca c/c'],
+ ['bolloRegione',33,'Regione per il calcolo del bollo',''],
+ ['bolloTariffaKw',34,'Bollo: tariffa unitaria predefinita (€ per kW)',''],
 ];
 
 const MODS={
@@ -3618,8 +3628,9 @@ function azioniRegistroHtml(){
 function menuPerRuolo(){
   const t=tabsConsentite();
   const vis=k=>(t?t.includes(k):true)&&(k!=='utenti'||ruolo()==='master')
-             &&(!filiale()||FILIALE_TABS.includes(k));
-  if(!t&&!filiale()&&ruolo()==='master')return MENU;
+             &&(!filiale()||FILIALE_TABS.includes(k))
+             &&!(typeof AMM_TABS!=='undefined'&&AMM_TABS.includes(k)&&!puoAmm());
+  if(!t&&!filiale()&&ruolo()==='master'&&puoAmm())return MENU;
   return MENU.map(g=>({g:g.g,items:g.items.filter(([k])=>vis(k))})).filter(g=>g.items.length);
 }
 function renderSide(){
@@ -3697,7 +3708,7 @@ function pageHead(title,sub,buttons){
 function genericList(key,o){
   const m=MODS[key];const u=ui(o.uiKey||key);
   const btns=(o.buttons||[]).map((b,i)=>`<button class="btn ${b.primary?'primary':''}" data-gb="${i}">${esc(b.l)}</button>`).join('');
-  const std=`<button class="btn" data-std="qf">${u.cfOn?'Nascondi filtri colonna':'Filtri per colonna'}</button>${o.noImport?'':`<button class="btn" data-std="imp">Importa</button>`}<button class="btn" data-std="exp">Esporta Excel</button>${o.noNew||!puoScrivere(key)?'':`<button class="btn primary" data-std="new">${esc(o.newLabel||'Nuovo')}</button>`}`;
+  const std=`<button class="btn" data-std="qf">${u.cfOn?'Nascondi filtri colonna':'Filtri per colonna'}</button>${o.noImport?'':`<button class="btn" data-std="imp">Importa</button>`}${o.noExport?'':`<button class="btn" data-std="exp">Esporta Excel</button>`}${o.noNew||!puoScrivere(key)?'':`<button class="btn primary" data-std="new">${esc(o.newLabel||'Nuovo')}</button>`}`;
   const target=o.target||$('#main');
   target.innerHTML=`${o.noHead?'':pageHead(o.title||m.title,o.sub,btns+std)}${o.noHead?`<div class="acts" style="justify-content:flex-end;margin-bottom:10px">${btns+std}</div>`:''}
    ${o.tabsHtml||''}
@@ -4013,6 +4024,7 @@ function toDrawerField(f,rec){
     case 'ref':d.type='select';d.options=REF[f.ref].opts(f.flt);break;
   }
   if(f.list==='tip')d.list=S.tip;
+  if(typeof f.listOf==='function')try{d.list=f.listOf();}catch(e){}
   if(f.plate)d.upper=true;
   return d;
 }
@@ -4206,7 +4218,7 @@ async function importTemplate(m){
   const buf=await wb.xlsx.writeBuffer();
   await saveFile(`Modello_Importazione_${m.sheet.replace(/\s+/g,'_')}.xlsx`,new Blob([buf],{type:XLSX_MIME}));
 }
-function openImport(key){
+function openImport(key,opt={}){
   const m=MODS[key];
   const st={sheets:null,sheet:'',rows:[],map:{},dup:'update',name:'',recs:[]};
   const fields=m.fields.filter(f=>!f.hidden);
@@ -4252,7 +4264,7 @@ function openImport(key){
   drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])readFile(e.dataTransfer.files[0]);});
   q('[data-read]').onclick=()=>{const t=q('[data-paste]').value;if(!t.trim())return toast('Incolla prima le righe da importare.',true);st.name='dati incollati';st.sheets=null;useRows(parseDelimited(t));};
   async function readFile(f){
-    st.name=f.name;
+    st.name=f.name;st.file=f;
     try{
       if(/\.xlsx$/i.test(f.name)){
         const wb=new ExcelJS.Workbook();await wb.xlsx.load(await f.arrayBuffer());
@@ -4317,19 +4329,21 @@ function openImport(key){
   q('[data-go]').onclick=async()=>{
     const err=st.recs.filter(r=>r.act==='error').length;
     if(err&&!await confirmBox('Righe con errori',`${err} righe con errori non verranno importate. Continuare con le altre?`,'Importa le righe valide'))return;
-    let nn=0,nu=0;
+    let nn=0,nu=0;const creati=[];
     for(const r of st.recs){
       if(r.act==='new'){
         const rec={id:uid()};for(const f of m.fields)rec[f.k]=r.o[f.k]!==undefined&&r.o[f.k]!==''?r.o[f.k]:(f.def??'');
         if(m.code)rec.codice=r.o.codice&&!S[m.store].some(x=>x.codice===r.o.codice)?r.o.codice:nextCode(m,rec.data||rec.dataSegnalazione||rec.dataNotifica);
-        S[m.store].push(rec);if(m.afterSave)m.afterSave(rec,true);nn++;
+        S[m.store].push(rec);if(m.afterSave)m.afterSave(rec,true);nn++;creati.push(rec);
         if(rec.tipologia&&m.fmap.tipologia?.list==='tip'&&!S.tip.includes(rec.tipologia))S.tip.push(rec.tipologia);
       }else if(r.act==='update'){
         for(const f of m.fields)if(r.o[f.k]!==''&&r.o[f.k]!=null)r.target[f.k]=r.o[f.k];
         if(m.afterSave)m.afterSave(r.target,false);nu++;
       }
     }
-    markDirty();close();render();
+    markDirty();
+    if(opt.onDone)try{await opt.onDone(creati,st.file);}catch(e){toast('Dopo l’importazione: '+e.message,true);}
+    close();render();
     toast(`${m.title}: ${nn} aggiunti, ${nu} aggiornati.`);
   };
 }
@@ -6856,7 +6870,11 @@ function tabsConsentite(){
   const r=ruoloDef();if(!r)return [];
   return r.tabs;                       // null = tutte
 }
-function tabOk(k){const t=tabsConsentite();return t?t.includes(k):true;}
+function tabOk(k){
+  /* i moduli dell'amministrazione non si vedono per esclusione: serve un
+     ruolo che li abbia espressamente (amm:true) */
+  if(typeof AMM_TABS!=='undefined'&&AMM_TABS.includes(k)&&!puoAmm())return false;
+  const t=tabsConsentite();return t?t.includes(k):true;}
 function puoScrivere(key){
   if(S.readonly)return false;
   const r=ruoloDef();if(!r)return false;
@@ -7671,7 +7689,7 @@ function navInScope(nav){
   const s=scopeData();if(!s||!nav)return true;
   if(nav.mod==='mezzi')return s.targhe.has(normTarga(nav.id));
   if(nav.mod==='dip')return s.dip.has(nav.id);
-  if(['rows','cp','fat','cap','soc','righe','all'].includes(nav.mod))return false;
+  if(['rows','cp','fat','cap','soc','righe','all','fp','fpr','pn','bolli','iva','f24','f24r'].includes(nav.mod))return false;
   const m=MODS[nav.mod];if(!m)return true;
   const r=(S[m.store]||[]).find(x=>(m.code?x.codice:x[m.key])===nav.id);
   return r?inScope(nav.mod,r):false;
@@ -7736,7 +7754,8 @@ function openNav(nav){
   if(nav.mod==='rows'){const r=S.rows.find(x=>x.numero===nav.id);S.tab='contratti';render();if(r)openContract(r);return;}
   if(nav.mod==='all'){S.tab='cruscotto';render();return;}
   const m=MODS[nav.mod];if(!m)return;
-  const tabOf={mezzi:'mezzi',cp:'cp',dip:'dip',vrb:'vrb',disp:'disp',cap:'capfin',man:'man',sin:'sin',fat:'fatturazione',scad:'cruscotto',soc:'soc',ass:'dip',mov:'disp'};
+  const tabOf={mezzi:'mezzi',cp:'cp',dip:'dip',vrb:'vrb',disp:'disp',cap:'capfin',man:'man',sin:'sin',fat:'fatturazione',scad:'cruscotto',soc:'soc',ass:'dip',mov:'disp',
+    fp:'fp',pn:'pn',bolli:'bolli',iva:'iva',f24:'f24'};
   const rec=S[m.store].find(r=>recRef(nav.mod,r)===nav.id);
   S.tab=tabOf[nav.mod]||'cruscotto';render();if(rec)openRecord(nav.mod,rec);
 }
@@ -9161,6 +9180,2298 @@ async function generate(){
     toast('Generazione non riuscita. '+det,true);
   }finally{busy(false);fillStampa();}
 }
+
+
+/* =====================================================================
+   AMMINISTRAZIONE — archivi, menu e accessi
+   ---------------------------------------------------------------------
+   Sei archivi nuovi: fatture passive (con il riepilogo IVA per aliquota),
+   prima nota, bolli, liquidazione IVA, F24 e le righe dei tributi dell'F24.
+   Tutto passa dai fogli del registro come gli altri moduli: niente di
+   nuovo da salvare a mano.
+
+   Gli importi e le aliquote si leggono dalle fatture; i codici tributo e
+   le scadenze proposte vanno confermati con il commercialista: il
+   gestionale li calcola, non li certifica.
+   ===================================================================== */
+
+/* ---------- codici del tracciato FatturaPA ---------- */
+const AMM_TIPODOC={
+ TD01:'TD01 Fattura',TD02:'TD02 Acconto/anticipo su fattura',TD03:'TD03 Acconto/anticipo su parcella',
+ TD04:'TD04 Nota di credito',TD05:'TD05 Nota di debito',TD06:'TD06 Parcella',
+ TD16:'TD16 Integrazione fattura reverse charge interno',
+ TD17:'TD17 Integrazione/autofattura per acquisto servizi dall’estero',
+ TD18:'TD18 Integrazione per acquisto di beni intracomunitari',
+ TD19:'TD19 Integrazione/autofattura per acquisto di beni ex art. 17 c. 2',
+ TD20:'TD20 Autofattura per regolarizzazione',TD21:'TD21 Autofattura per splafonamento',
+ TD22:'TD22 Estrazione beni da deposito IVA',TD23:'TD23 Estrazione beni da deposito IVA con versamento IVA',
+ TD24:'TD24 Fattura differita',TD25:'TD25 Fattura differita (art. 21 c. 4 lett. b)',
+ TD26:'TD26 Cessione di beni ammortizzabili',TD27:'TD27 Fattura per autoconsumo',
+ TD28:'TD28 Acquisti da San Marino con IVA'};
+const AMM_NATURA={
+ N1:'N1 Escluse ex art. 15',N21:'N2.1 Non soggette ad IVA ex artt. 7-7septies',N22:'N2.2 Non soggette – altri casi',
+ N31:'N3.1 Non imponibili – esportazioni',N32:'N3.2 Non imponibili – cessioni intracomunitarie',
+ N33:'N3.3 Non imponibili – cessioni verso San Marino',N34:'N3.4 Non imponibili – operazioni assimilate',
+ N35:'N3.5 Non imponibili – a seguito di dichiarazione d’intento',N36:'N3.6 Non imponibili – altre operazioni',
+ N4:'N4 Esenti',N5:'N5 Regime del margine / IVA non esposta',
+ N61:'N6.1 Inversione contabile – rottami',N62:'N6.2 Inversione contabile – oro e argento',
+ N63:'N6.3 Inversione contabile – subappalto edile',N64:'N6.4 Inversione contabile – fabbricati',
+ N65:'N6.5 Inversione contabile – telefoni cellulari',N66:'N6.6 Inversione contabile – prodotti elettronici',
+ N67:'N6.7 Inversione contabile – prestazioni comparto edile',N68:'N6.8 Inversione contabile – settore energetico',
+ N69:'N6.9 Inversione contabile – altri casi',
+ N7:'N7 IVA assolta in altro stato UE'};
+const AMM_PAG={
+ MP01:'MP01 Contanti',MP02:'MP02 Assegno',MP03:'MP03 Assegno circolare',MP04:'MP04 Contanti presso tesoreria',
+ MP05:'MP05 Bonifico',MP06:'MP06 Vaglia cambiario',MP07:'MP07 Bollettino bancario',MP08:'MP08 Carta di pagamento',
+ MP09:'MP09 RID',MP10:'MP10 RID utenze',MP11:'MP11 RID veloce',MP12:'MP12 RIBA',MP13:'MP13 MAV',
+ MP14:'MP14 Quietanza erario',MP15:'MP15 Giroconto su conti di contabilità speciale',MP16:'MP16 Domiciliazione bancaria',
+ MP17:'MP17 Domiciliazione postale',MP18:'MP18 Bollettino di c/c postale',MP19:'MP19 SEPA Direct Debit',
+ MP20:'MP20 SEPA Core',MP21:'MP21 SEPA B2B',MP22:'MP22 Trattenuta su somme già riscosse',MP23:'MP23 PagoPA'};
+
+/* La chiave senza punto serve perché «N2.1» nel tracciato e «N21» nelle
+   nostre liste siano la stessa cosa. */
+const ammNat=v=>{const k=String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return AMM_NATURA[k]?k:(k||'');};
+const ammNatLabel=v=>AMM_NATURA[ammNat(v)]||String(v||'');
+const ammRevCharge=v=>/^N6/.test(ammNat(v));
+
+/* ---------- categorie di costo e piano dei conti ---------- */
+const AMM_CATEGORIE=['Carburanti','Pedaggi e transiti','Manutenzioni e riparazioni','Pneumatici',
+ 'Canoni di noleggio e leasing','Assicurazioni','Bolli e tasse','Acquisto veicoli','Ricambi e accessori',
+ 'Lavaggi e rimessaggio','Utenze','Consulenze e prestazioni professionali','Provvigioni',
+ 'Servizi vari','Altri costi'];
+const AMM_PDC_COSTO={'Carburanti':'Carburanti e lubrificanti','Pedaggi e transiti':'Pedaggi e transiti',
+ 'Manutenzioni e riparazioni':'Manutenzioni e riparazioni','Pneumatici':'Pneumatici',
+ 'Canoni di noleggio e leasing':'Canoni di noleggio e leasing','Assicurazioni':'Premi assicurativi',
+ 'Bolli e tasse':'Tasse di proprietà e bolli','Acquisto veicoli':'Automezzi',
+ 'Ricambi e accessori':'Ricambi e accessori','Lavaggi e rimessaggio':'Lavaggi e rimessaggio',
+ 'Utenze':'Utenze','Consulenze e prestazioni professionali':'Consulenze e prestazioni professionali',
+ 'Provvigioni':'Provvigioni passive','Servizi vari':'Servizi vari','Altri costi':'Costi diversi di gestione'};
+const AMM_PDC_FISSI=['IVA a credito','IVA a debito','IVA indetraibile','Debiti verso fornitori',
+ 'Crediti verso clienti','Banca c/c','Cassa','Erario c/ritenute','Erario c/IVA','INPS c/contributi',
+ 'Erario c/imposte','Ricavi da noleggio','Arrotondamenti passivi','Arrotondamenti attivi'];
+const ammPdc=()=>[...new Set([...Object.values(AMM_PDC_COSTO),...AMM_PDC_FISSI,
+  ...S.pn.map(r=>r.conto).filter(Boolean),...S.fp.map(r=>r.conto).filter(Boolean)])].sort();
+
+/* ---------- codici tributo che usiamo davvero ----------
+   Solo quelli di cui siamo certi. Il campo resta libero: qualunque altro
+   codice si scrive a mano, questi sono solo i suggerimenti. */
+const AMM_TRIBUTI=[
+ ['6001','IVA mensile – gennaio','Erario'],['6002','IVA mensile – febbraio','Erario'],
+ ['6003','IVA mensile – marzo','Erario'],['6004','IVA mensile – aprile','Erario'],
+ ['6005','IVA mensile – maggio','Erario'],['6006','IVA mensile – giugno','Erario'],
+ ['6007','IVA mensile – luglio','Erario'],['6008','IVA mensile – agosto','Erario'],
+ ['6009','IVA mensile – settembre','Erario'],['6010','IVA mensile – ottobre','Erario'],
+ ['6011','IVA mensile – novembre','Erario'],['6012','IVA mensile – dicembre','Erario'],
+ ['6031','IVA 1° trimestre','Erario'],['6032','IVA 2° trimestre','Erario'],
+ ['6033','IVA 3° trimestre','Erario'],['6034','IVA 4° trimestre (soggetti art. 74)','Erario'],
+ ['6013','Acconto IVA – contribuenti mensili','Erario'],['6035','Acconto IVA – contribuenti trimestrali','Erario'],
+ ['6099','IVA – versamento annuale a saldo','Erario'],
+ ['1001','Ritenute su retribuzioni e redditi assimilati','Erario'],
+ ['1012','Ritenute su indennità di fine rapporto','Erario'],
+ ['1040','Ritenute su redditi di lavoro autonomo','Erario'],
+ ['1038','Ritenute su provvigioni','Erario'],
+ ['1668','Interessi sul pagamento rateale dei tributi erariali','Erario'],
+ ['8904','Sanzione pecuniaria IVA','Erario'],
+ ['8911','Sanzioni pecuniarie per altre violazioni tributarie','Erario'],
+ ['2001','IRES – saldo','Erario'],['2002','IRES – acconto prima rata','Erario'],['2003','IRES – acconto seconda rata o unica soluzione','Erario'],
+ ['4001','IRPEF – saldo','Erario'],['4033','IRPEF – acconto prima rata','Erario'],['4034','IRPEF – acconto seconda rata o unica soluzione','Erario'],
+ ['3800','IRAP – saldo','Regioni'],['3812','IRAP – acconto prima rata','Regioni'],['3813','IRAP – acconto seconda rata o unica soluzione','Regioni'],
+ ['3802','Addizionale regionale IRPEF trattenuta dal sostituto','Regioni'],
+ ['3844','Addizionale comunale IRPEF – saldo','IMU e altri tributi locali'],
+ ['3845','Addizionale comunale IRPEF – acconto','IMU e altri tributi locali'],
+ ['DM10','Contributi INPS – denuncia mensile','INPS'],
+ ['CF','Contributi INPS gestione separata – committenti','INPS'],
+ ['C10','Contributi INPS artigiani e commercianti','INPS'],
+];
+const ammTributoDesc=c=>{const x=AMM_TRIBUTI.find(t=>t[0]===String(c||'').toUpperCase());return x?x[1]:'';};
+const ammTributoSez=c=>{const x=AMM_TRIBUTI.find(t=>t[0]===String(c||'').toUpperCase());return x?x[2]:'Erario';};
+const AMM_SEZIONI=['Erario','INPS','Regioni','IMU e altri tributi locali','Altri enti previdenziali e assicurativi','Accise'];
+const AMM_REGIONI=['Abruzzo','Basilicata','Calabria','Campania','Emilia-Romagna','Friuli-Venezia Giulia',
+ 'Lazio','Liguria','Lombardia','Marche','Molise','Piemonte','Puglia','Sardegna','Sicilia','Toscana',
+ 'Trentino-Alto Adige','Umbria','Valle d’Aosta','Veneto'];
+const AMM_MESI=['01','02','03','04','05','06','07','08','09','10','11','12'];
+const AMM_MESE_L=['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+const AMM_PERIODI=[...AMM_MESI,'T1','T2','T3','T4'];
+const ammPeriodoL=p=>/^T/.test(p)?`${p[1]}° trimestre`:(AMM_MESE_L[+p-1]||p);
+
+/* =====================================================================
+   GLI ARCHIVI
+   ===================================================================== */
+
+/* ---------- fatture passive ---------- */
+MODS.fp={sheet:'Fatture passive',store:'fp',title:'Fatture passive',code:'FP',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'Documento',f:[
+   fd('numero','Numero documento','text',{req:true,span:'s3'}),
+   fd('data','Data documento','date',{req:true}),
+   fd('tipoDoc','Tipo documento','sel',{span:'s3',def:'TD01',opts:Object.keys(AMM_TIPODOC)}),
+   fd('fornitore','Fornitore','ref',{ref:'soc',flt:'for',req:true,span:'s4'}),
+   fd('pivaFornitore','P.IVA fornitore','up',{span:'s2'}),
+   fd('cfFornitore','Codice fiscale fornitore','up',{span:'s2'}),
+   fd('societa','Società intestataria','ref',{ref:'soc',flt:'tit',span:'s4',
+      hint:'La nostra società a cui la fattura è intestata: decide la liquidazione IVA'}),
+   fd('protocollo','Protocollo IVA','text',{span:'s2',hint:'Numero di registrazione sul registro acquisti'}),
+   fd('dataRegistrazione','Data di registrazione','date',
+      {hint:'La data che decide in quale liquidazione IVA finisce'}),
+   fd('divisa','Divisa','up',{def:'EUR',span:'s2'}),
+   fd('sdi','Identificativo SDI','text',{span:'s3'})]},
+  {t:'Importi',f:[
+   fd('imponibile','Imponibile (€)','eur'),fd('imposta','IVA (€)','eur'),
+   fd('totale','Totale documento (€)','eur',{hint:'Come riportato in fattura'}),
+   fd('bollo','Bollo (€)','eur'),fd('ritenuta','Ritenuta d’acconto (€)','eur'),
+   fd('causaleRitenuta','Causale ritenuta','sel',{span:'s3',
+      opts:['','1040 Lavoro autonomo','1038 Provvigioni','1001 Lavoro dipendente']}),
+   fd('arrotondamento','Arrotondamento (€)','eur'),
+   fd('nonImponibile','Di cui non imponibile o esente (€)','eur',{span:'s3'})]},
+  {t:'IVA e detraibilità',f:[
+   fd('detraibilita','IVA detraibile (%)','num',{def:100,span:'s2',
+      hint:'100 per i veicoli strumentali e dati a noleggio, 40 per le autovetture a uso promiscuo'}),
+   fd('ivaDetraibile','IVA detraibile (€)','eur',{span:'s2',hint:'Calcolata dal riepilogo IVA'}),
+   fd('reverseCharge','Inversione contabile','bool',{def:'No',span:'s2',
+      hint:'Natura N6: l’IVA va sia a debito sia a credito'}),
+   fd('periodoIva','Periodo IVA','text',{span:'s2',hint:'Es. 2026-03 oppure 2026-T1'}),
+   fd('esclusaLiquidazione','Fuori liquidazione IVA','bool',{def:'No',span:'s2',
+      hint:'Per i documenti da non portare in liquidazione'})]},
+  {t:'Classificazione',f:[
+   fd('categoria','Categoria di costo','sel',{span:'s3',opts:AMM_CATEGORIE}),
+   fd('conto','Conto di costo','text',{span:'s3',listOf:ammPdc}),
+   fd('targa','Targa','ref',{ref:'mezzo',span:'s2'}),
+   fd('contrattoFornitore','Contratto fornitore','ref',{ref:'cp',span:'s4'}),
+   cdcField(),
+   fd('manutenzione','Manutenzione collegata','ref',{ref:'man',span:'s3'})]},
+  {t:'Pagamento',f:[
+   fd('modalita','Modalità di pagamento','sel',{span:'s3',opts:Object.keys(AMM_PAG)}),
+   fd('scadenza','Scadenza','date'),
+   fd('statoPagamento','Stato','sel',{req:true,def:'Da pagare',span:'s3',
+      opts:['Da pagare','Pagata','Pagata in parte','Insoluta','Non dovuta','Compensata']}),
+   fd('importoPagato','Importo pagato (€)','eur'),fd('dataPagamento','Pagata il','date'),
+   fd('iban','IBAN del fornitore','up',{span:'s4'})]},
+  {t:'Registrazione e note',f:[
+   fd('registrata','In prima nota','bool',{def:'No',span:'s2'}),
+   fd('fonte','Origine del dato','text',{span:'s3',hint:'XML, Excel o inserimento a mano'}),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+
+/* ---------- riepilogo IVA per aliquota ---------- */
+MODS.fpr={sheet:'Fatture passive IVA',store:'fpr',title:'Riepilogo IVA delle fatture passive',code:'FR',
+ groups:[{t:'Riga di riepilogo',f:[
+   fd('fattura','Fattura passiva','text',{req:true,span:'s3',hint:'Codice della fattura passiva'}),
+   fd('aliquota','Aliquota IVA (%)','num'),
+   fd('natura','Natura','sel',{span:'s3',opts:['',...Object.keys(AMM_NATURA)]}),
+   fd('imponibile','Imponibile (€)','eur'),fd('imposta','Imposta (€)','eur'),
+   fd('esigibilita','Esigibilità IVA','sel',{span:'s2',opts:['','I Immediata','D Differita','S Scissione dei pagamenti']}),
+   fd('riferimentoNormativo','Riferimento normativo','text',{span:'s6'})]}]};
+
+/* ---------- prima nota ---------- */
+MODS.pn={sheet:'Prima nota',store:'pn',title:'Prima nota',code:'PN',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'Registrazione',f:[
+   fd('data','Data','date',{req:true}),
+   fd('societa','Società','ref',{ref:'soc',flt:'tit',span:'s4'}),
+   fd('tipo','Tipo','sel',{req:true,span:'s3',def:'Acquisto',
+      opts:['Acquisto','Vendita','Pagamento','Incasso','Banca','Cassa','Giroconto','Stipendi','Versamento F24','Rettifica','Altro']}),
+   fd('registrazione','Registrazione','text',{span:'s3',
+      hint:'Le righe con la stessa registrazione formano un’unica scrittura'}),
+   fd('riga','Riga','int',{span:'s2'}),
+   fd('descrizione','Descrizione','text',{req:true,span:'s6'})]},
+  {t:'Conti e importi',f:[
+   fd('conto','Conto','text',{req:true,span:'s4',listOf:ammPdc}),
+   fd('dare','Dare (€)','eur'),fd('avere','Avere (€)','eur'),
+   fd('contropartita','Contropartita','text',{span:'s4',listOf:ammPdc}),
+   fd('mezzoPagamento','Mezzo','sel',{span:'s3',
+      opts:['','Banca','Cassa','Carta','RID/SDD','Assegno','Bonifico','Compensazione','Giroconto']}),
+   fd('banca','Banca o conto','text',{span:'s3'})]},
+  {t:'Riferimenti',f:[
+   fd('documento','Documento','text',{span:'s3',hint:'Numero della fattura o del documento'}),
+   fd('riferimento','Codice collegato','text',{span:'s3',hint:'Codice della fattura passiva, della proforma o dell’F24'}),
+   fd('targa','Targa','ref',{ref:'mezzo',span:'s2'}),
+   cdcField(),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+
+/* ---------- bolli ---------- */
+MODS.bolli={sheet:'Bolli',store:'bolli',title:'Bolli e tasse automobilistiche',code:'BO',attach:true,wide:true,
+ groups:[
+  {t:'Veicolo e periodo',f:[
+   fd('targa','Targa','ref',{ref:'mezzo',req:true,span:'s3'}),
+   fd('anno','Anno','int',{req:true,span:'s2'}),
+   fd('periodo','Periodo','sel',{req:true,def:'Annuale',span:'s3',
+      opts:['Annuale','Semestrale','Quadrimestrale','Trimestrale']}),
+   fd('scadenza','Scadenza','date',{req:true}),
+   fd('societa','Società','ref',{ref:'soc',flt:'tit',span:'s4'}),
+   cdcField()]},
+  {t:'Calcolo',f:[
+   fd('regione','Regione','sel',{span:'s3',opts:['',...AMM_REGIONI]}),
+   fd('baseCalcolo','Base di calcolo','sel',{span:'s3',def:'kW',
+      opts:['kW','Massa complessiva','Importo fisso']}),
+   fd('kw','Potenza (kW)','int',{span:'s2'}),
+   fd('massa','Massa complessiva (kg)','int',{span:'s2'}),
+   fd('euro','Classe ambientale','text',{span:'s2'}),
+   fd('tariffa','Tariffa unitaria (€)','num',{span:'s2',
+      hint:'€ per kW o per quintale secondo la tabella della tua regione'}),
+   fd('importoCalcolato','Importo calcolato (€)','eur',{span:'s2',hint:'Proposta: tariffa × base'}),
+   fd('superbollo','Superbollo (€)','eur',{span:'s2'}),
+   fd('esenzione','Esenzione','sel',{span:'s3',
+      opts:['Nessuna','Veicolo storico','Veicolo elettrico','Veicolo ibrido','Disabili art. 8','Altra']})]},
+  {t:'Pagamento',f:[
+   fd('importo','Importo dovuto (€)','eur',{req:true}),
+   fd('interessi','Interessi (€)','eur'),fd('sanzioni','Sanzioni (€)','eur'),
+   fd('stato','Stato','sel',{req:true,def:'Da pagare',span:'s3',
+      opts:['Da pagare','Pagato','Esente','Non dovuto','Contestato']}),
+   fd('dataPagamento','Pagato il','date'),
+   fd('modalita','Modalità','sel',{span:'s3',
+      opts:['','F24','PagoPA','ACI','Delega bancaria','Agenzia pratiche auto','Tabaccheria o ricevitoria','Altro']}),
+   fd('ricevuta','Numero ricevuta','text',{span:'s3'}),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+
+/* ---------- liquidazione IVA ---------- */
+MODS.iva={sheet:'Liquidazione IVA',store:'iva',title:'Liquidazione IVA',code:'LI',attach:true,wide:true,
+ groups:[
+  {t:'Periodo',f:[
+   fd('societa','Società','ref',{ref:'soc',flt:'tit',req:true,span:'s4'}),
+   fd('anno','Anno','int',{req:true,span:'s2'}),
+   fd('periodicita','Periodicità','sel',{req:true,def:'Trimestrale',span:'s3',opts:['Mensile','Trimestrale']}),
+   fd('periodo','Periodo','sel',{req:true,span:'s2',opts:AMM_PERIODI}),
+   fd('scadenza','Scadenza del versamento','date'),
+   fd('codiceTributo','Codice tributo','text',{span:'s2',listOf:()=>AMM_TRIBUTI.map(t=>t[0])})]},
+  {t:'IVA del periodo',f:[
+   fd('ivaVendite','IVA sulle vendite (€)','eur'),
+   fd('ivaAcquisti','IVA sugli acquisti detraibile (€)','eur'),
+   fd('ivaIndetraibile','IVA sugli acquisti indetraibile (€)','eur',{hint:'Non entra nel calcolo: diventa costo'}),
+   fd('ivaReverse','IVA da inversione contabile (€)','eur',{hint:'Sommata sia a debito sia a credito'}),
+   fd('creditoPrecedente','Credito del periodo precedente (€)','eur'),
+   fd('acconto','Acconto già versato (€)','eur'),
+   fd('interessi','Interessi 1% (€)','eur',{hint:'Dovuti dai trimestrali, non sul quarto periodo'}),
+   fd('altreVariazioni','Altre variazioni (€)','eur')]},
+  {t:'Esito',f:[
+   fd('saldo','Saldo del periodo (€)','eur',{hint:'Positivo da versare, negativo a credito'}),
+   fd('aVersare','Da versare (€)','eur'),fd('aCredito','A credito (€)','eur'),
+   fd('stato','Stato','sel',{req:true,def:'Da calcolare',span:'s3',
+      opts:['Da calcolare','Calcolata','Da versare','Versata','A credito','Azzerata']}),
+   fd('dataVersamento','Versata il','date'),
+   fd('f24','F24 collegato','text',{span:'s3',hint:'Codice dell’F24'}),
+   fd('fonteVendite','Da dove viene l’IVA sulle vendite','text',{span:'s6'}),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+
+/* ---------- F24 ---------- */
+MODS.f24={sheet:'F24',store:'f24',title:'Modelli F24',code:'F24',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'Modello',f:[
+   fd('societa','Società','ref',{ref:'soc',flt:'tit',req:true,span:'s4'}),
+   fd('tipo','Tipo di modello','sel',{req:true,def:'F24 ordinario',span:'s3',
+      opts:['F24 ordinario','F24 semplificato','F24 Elide','F24 accise']}),
+   fd('scadenza','Scadenza','date',{req:true}),
+   fd('stato','Stato','sel',{req:true,def:'Previsionale',span:'s3',
+      opts:['Previsionale','Da versare','Versato','Annullato','Sospeso']}),
+   fd('anno','Anno di riferimento','int',{span:'s2'}),
+   fd('periodo','Periodo di riferimento','sel',{span:'s2',opts:['',...AMM_PERIODI]}),
+   fd('descrizione','Descrizione','text',{span:'s6'})]},
+  {t:'Importi',f:[
+   fd('totaleDebito','Totale a debito (€)','eur'),
+   fd('totaleCredito','Totale compensato (€)','eur'),
+   fd('saldo','Saldo da versare (€)','eur')]},
+  {t:'Versamento',f:[
+   fd('modalita','Modalità','sel',{span:'s3',
+      opts:['','Addebito su conto','Home banking','Entratel o Fisconline','Sportello bancario','Ufficio postale']}),
+   fd('banca','Banca','text',{span:'s3'}),fd('iban','IBAN','up',{span:'s4'}),
+   fd('dataVersamento','Versato il','date'),
+   fd('protocollo','Protocollo telematico','text',{span:'s3'}),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+
+/* ---------- righe dei tributi dell'F24 ---------- */
+MODS.f24r={sheet:'F24 tributi',store:'f24r',title:'Tributi dell’F24',code:'FT',
+ groups:[{t:'Tributo',f:[
+   fd('f24','F24','text',{req:true,span:'s3'}),
+   fd('sezione','Sezione','sel',{req:true,def:'Erario',span:'s3',opts:AMM_SEZIONI}),
+   fd('codiceTributo','Codice tributo o causale','up',{req:true,span:'s2',listOf:()=>AMM_TRIBUTI.map(t=>t[0])}),
+   fd('descrizione','Descrizione','text',{span:'s6'}),
+   fd('rateazione','Rateazione o regione o provincia','text',{span:'s2'}),
+   fd('anno','Anno di riferimento','int',{span:'s2'}),
+   fd('periodoDa','Periodo da (mm/aaaa)','text',{span:'s2'}),
+   fd('periodoA','Periodo a (mm/aaaa)','text',{span:'s2'}),
+   fd('importoDebito','Importo a debito (€)','eur'),
+   fd('importoCredito','Importo a credito (€)','eur'),
+   fd('codiceSede','Codice sede o ente','text',{span:'s2'}),
+   fd('matricola','Matricola INPS o filiale','text',{span:'s3'})]}]};
+
+/* =====================================================================
+   REGISTRAZIONE: fogli, stati, menu, viste, accessi
+   ===================================================================== */
+const AMM_MODULI=['fp','fpr','pn','bolli','iva','f24','f24r'];
+const AMM_TABS=['fp','pn','bolli','iva','f24','f24p'];
+
+/* I nuovi moduli vanno normalizzati come gli altri: il ciclo che lo fa
+   per MODS è già passato quando questo file viene eseguito. */
+for(const k of AMM_MODULI){
+  const m=MODS[k];m.id=k;
+  m.fields=m.groups.flatMap(g=>g.f);
+  m.fmap=Object.fromEntries(m.fields.map(f=>[f.k,f]));
+  if(!Array.isArray(S[m.store]))S[m.store]=[];
+  if(!SHEET_ORDER.includes(m.sheet))SHEET_ORDER.push(m.sheet);
+}
+
+/* il menu: un gruppo solo, nell'ordine in cui si lavora */
+if(!MENU.some(g=>g.g==='Amministrazione')){
+  const i=MENU.findIndex(g=>g.items.some(([k])=>k==='docs'));
+  MENU.splice(i<0?MENU.length:i,0,{g:'Amministrazione',items:[
+    ['fp','Fatture passive'],['pn','Prima nota'],['bolli','Bolli e tasse'],
+    ['iva','Liquidazione IVA'],['f24','F24'],['f24p','Previsionale F24']]});
+}
+
+/* ---------- chi può entrare ----------
+   I moduli dell'amministrazione non si vedono per esclusione ma per
+   permesso esplicito: un ruolo li vede solo se ha amm:true. Così la sola
+   lettura, che vede tutto il resto, qui non entra. */
+RUOLI.master.amm=true;
+if(!RUOLI.amministrazione)RUOLI.amministrazione={l:'Amministrazione',
+  d:'Fatture passive, prima nota, bolli, IVA e F24. Vede mezzi, contratti e anagrafiche senza modificarli.',
+  tabs:['cruscotto','calendario','fp','pn','bolli','iva','f24','f24p','docs','fatturazione','mezzi','cp','soc','disp','cdc'],
+  scrivi:['fp','fpr','pn','bolli','iva','f24','f24r','all','scad','fat','righe'],
+  amm:true};
+RUOLO_L['amministrazione']='amministrazione';
+try{
+  const o=MODS.utenti.fmap.ruolo.opts;
+  if(o&&!o.includes(RUOLI.amministrazione.l))o.splice(o.length-1,0,RUOLI.amministrazione.l);
+}catch(e){}
+const puoAmm=()=>{const r=RUOLI[ruolo()];return !!(r&&r.amm);};
+
+/* le viste */
+VIEWS.fp=()=>renderFp();
+VIEWS.pn=()=>renderPn();
+VIEWS.bolli=()=>renderBolli();
+VIEWS.iva=()=>renderIva();
+VIEWS.f24=()=>renderF24();
+VIEWS.f24p=()=>renderF24Prev();
+
+/* i contatori accanto alle voci di menu */
+const ammBadges0=badges;
+badges=function(){
+  const b=ammBadges0();
+  if(puoAmm()){
+    const t=todayISO();
+    b.fp=S.fp.filter(f=>f.statoPagamento==='Da pagare'||f.statoPagamento==='Insoluta').length;
+    b.f24=S.f24.filter(f=>['Previsionale','Da versare'].includes(f.stato)).length;
+    b.bolli=S.bolli.filter(x=>x.stato==='Da pagare'&&x.scadenza&&x.scadenza<=addDays(t,30)).length;
+    b.iva=S.iva.filter(x=>['Da calcolare','Da versare'].includes(x.stato)).length;
+  }
+  return b;
+};
+
+/* ---------- date e periodi ---------- */
+const ammMeseDi=iso=>String(iso||'').slice(0,7);
+const ammTrimDi=iso=>{const m=+String(iso||'').slice(5,7);return m?('T'+Math.ceil(m/3)):'';};
+/* La scadenza che cade di sabato o di domenica slitta al primo giorno
+   lavorativo: le festività non le conosciamo, quelle le controlla lui. */
+function ammLavorativo(iso){
+  if(!iso)return '';
+  let d=iso;
+  for(let i=0;i<4;i++){
+    const g=fromISO(d).getUTCDay();
+    if(g===6)d=addDays(d,2);else if(g===0)d=addDays(d,1);else break;
+  }
+  return d;
+}
+/* Scadenze del versamento IVA. Mensili: il 16 del mese dopo. Trimestrali:
+   16 maggio, 20 agosto, 16 novembre; il quarto periodo va col saldo annuale. */
+function ammScadenzaIva(anno,periodo,periodicita){
+  const a=+anno;if(!a||!periodo)return '';
+  if(periodicita==='Mensile'){
+    const m=+periodo;if(!m)return '';
+    const aa=m===12?a+1:a,mm=m===12?1:m+1;
+    return ammLavorativo(`${aa}-${String(mm).padStart(2,'0')}-16`);
+  }
+  const map={T1:`${a}-05-16`,T2:`${a}-08-20`,T3:`${a}-11-16`,T4:`${a+1}-03-16`};
+  return ammLavorativo(map[periodo]||'');
+}
+function ammTributoIva(periodo,periodicita){
+  if(periodicita==='Mensile'){const m=+periodo;return m?String(6000+m):'';}
+  return {T1:'6031',T2:'6032',T3:'6033',T4:'6099'}[periodo]||'';
+}
+
+
+/* =====================================================================
+   AMMINISTRAZIONE — fatture passive
+   ---------------------------------------------------------------------
+   Le fatture entrano da XML (il tracciato FatturaPA dello SDI, anche
+   firmato .p7m) o da Excel, e il file che le ha portate dentro resta
+   allegato alla riga: chi consulta la fattura non deve andare a cercarla
+   sul server. Escono in Excel, in XML e in PDF, più gli originali.
+   ===================================================================== */
+
+/* =====================================================================
+   UN PDF SENZA LIBRERIE
+   Serve per i registri da passare al commercialista. Testo Helvetica,
+   codifica WinAnsi: gli accenti italiani e l'euro ci stanno.
+   ===================================================================== */
+const AMM_W=(()=>{
+  const w=new Array(256).fill(556);
+  const asc=[278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,
+    556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,
+    667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,
+    278,278,278,469,556,333,
+    556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,
+    334,260,334,584];
+  for(let i=0;i<asc.length;i++)w[32+i]=asc[i];
+  return w;
+})();
+const AMM_CP1252={'€':128,'‚':130,'ƒ':131,'„':132,'…':133,'†':134,'‡':135,'ˆ':136,'‰':137,'Š':138,
+ '‹':139,'Œ':140,'Ž':142,'‘':145,'’':146,'“':147,'”':148,'•':149,'–':150,'—':151,'˜':152,'™':153,
+ 'š':154,'›':155,'œ':156,'ž':158,'Ÿ':159};
+/* Codifica WinAnsi conservando i caratteri di controllo: serve per i byte
+   del documento, dove «xref» e «%%EOF» devono stare su righe proprie. Un
+   a capo trasformato in spazio qui rende il PDF illeggibile. */
+function ammLat8(s){
+  let out='';
+  for(const ch of String(s??'')){
+    const c=ch.codePointAt(0);
+    if(c<256)out+=ch;
+    else if(AMM_CP1252[ch]!=null)out+=String.fromCharCode(AMM_CP1252[ch]);
+    else out+='?';
+  }
+  return out;
+}
+/* Per il testo da stampare, invece, gli a capo e le tabulazioni diventano
+   spazi: dentro una stringa PDF non ci stanno. */
+function ammLatin(s){
+  let out='';
+  for(const ch of ammLat8(s)){
+    const c=ch.charCodeAt(0);
+    out+=c<32?' ':ch;
+  }
+  return out;
+}
+const ammPdfEsc=s=>ammLatin(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
+const ammLarghezza=(s,size)=>{const t=ammLatin(s);let n=0;for(let i=0;i<t.length;i++)n+=AMM_W[t.charCodeAt(i)]||556;return n*size/1000;};
+function ammTronca(s,max,size){
+  const t=ammLatin(s);
+  if(ammLarghezza(t,size)<=max)return t;
+  let out='';
+  for(const ch of t){if(ammLarghezza(out+ch+'…',size)>max)break;out+=ch;}
+  return out+'…';
+}
+const ammEuroPdf=n=>(n===''||n==null||isNaN(n))?'':Number(n).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+/* colonne: [{l,w,num}] con w in punti; righe: array di array di stringhe */
+function ammPdf({titolo,sottotitolo,colonne,righe,piede,orizzontale=true}){
+  const W=orizzontale?842:595,H=orizzontale?595:842;
+  const M=28,RH=13,HFS=8,FS=7.5;
+  const tot=colonne.reduce((a,c)=>a+c.w,0);
+  const k=tot>W-2*M?(W-2*M)/tot:1;
+  const col=colonne.map(c=>({...c,w:c.w*k}));
+  const pagine=[];let cur=[];
+  const perPag=Math.floor((H-M-96)/RH);
+  for(const r of righe){cur.push(r);if(cur.length>=perPag){pagine.push(cur);cur=[];}}
+  if(cur.length||!pagine.length)pagine.push(cur);
+
+  const contenuti=pagine.map((rr,pi)=>{
+    const L=[];
+    const T=(x,y,s,font,size)=>L.push(`BT /${font} ${size} Tf 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${ammPdfEsc(s)}) Tj ET`);
+    /* i numeri si allineano a destra lasciando un margine, se no toccano
+       la colonna che segue */
+    const TD=(x,y,s,font,size)=>{const w=ammLarghezza(s,size);T(x-w,y,s,font,size);};
+    const GUT=7;
+    const linea=(x1,y1,x2,y2,sp)=>L.push(`${sp} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`);
+    let y=H-M-16;
+    T(M,y,titolo,'F2',13);y-=15;
+    if(sottotitolo){T(M,y,sottotitolo,'F1',8.5);y-=13;}
+    TD(W-M,H-M-16,`pagina ${pi+1} di ${pagine.length}`,'F1',8);
+    y-=6;
+    linea(M,y,W-M,y,0.8);y-=12;
+    let x=M;
+    for(const c of col){
+      const t=ammTronca(c.l,c.w-4,HFS);
+      if(c.num)TD(x+c.w-GUT,y,t,'F2',HFS);else T(x+2,y,t,'F2',HFS);
+      x+=c.w;
+    }
+    y-=4;linea(M,y,W-M,y,0.5);y-=11;
+    for(const r of rr){
+      x=M;
+      r.forEach((v,i)=>{
+        const c=col[i];if(!c)return;
+        const t=ammTronca(v==null?'':String(v),c.w-4,FS);
+        if(c.num)TD(x+c.w-GUT,y,t,'F1',FS);else T(x+2,y,t,'F1',FS);
+        x+=c.w;
+      });
+      y-=RH;
+    }
+    if(pi===pagine.length-1&&piede&&piede.length){
+      y-=2;linea(M,y,W-M,y,0.8);y-=12;
+      x=M;
+      piede.forEach((v,i)=>{
+        const c=col[i];if(!c)return;
+        const t=ammTronca(v==null?'':String(v),c.w-4,HFS);
+        if(c.num)TD(x+c.w-GUT,y,t,'F2',HFS);else T(x+2,y,t,'F2',HFS);
+        x+=c.w;
+      });
+      y-=16;
+    }
+    if(pi===pagine.length-1){
+      T(M,M,`Matherion Fleet · estratto il ${fmtD(todayISO())} · ${righe.length} righe`,'F1',7);
+    }
+    return L.join('\n');
+  });
+
+  /* assemblaggio: oggetti, xref, trailer */
+  const objs=[];
+  const nPag=contenuti.length;
+  const idsPag=[],idsCont=[];
+  for(let i=0;i<nPag;i++){idsPag.push(5+i*2);idsCont.push(6+i*2);}
+  objs[1]='<</Type/Catalog/Pages 2 0 R>>';
+  objs[2]=`<</Type/Pages/Kids[${idsPag.map(i=>i+' 0 R').join(' ')}]/Count ${nPag}>>`;
+  objs[3]='<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>';
+  objs[4]='<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>';
+  for(let i=0;i<nPag;i++){
+    objs[idsPag[i]]=`<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${W} ${H}]/Resources<</Font<</F1 3 0 R/F2 4 0 R>>>>/Contents ${idsCont[i]} 0 R>>`;
+    const c=contenuti[i];
+    objs[idsCont[i]]=`<</Length ${ammLat8(c).length}>>\nstream\n${c}\nendstream`;
+  }
+  let out='%PDF-1.4\n';
+  const off=[];
+  for(let i=1;i<objs.length;i++){
+    if(objs[i]==null){off[i]=null;continue;}
+    off[i]=out.length;
+    out+=`${i} 0 obj\n${objs[i]}\nendobj\n`;
+  }
+  const xref=out.length;
+  out+=`xref\n0 ${objs.length}\n0000000000 65535 f \n`;
+  for(let i=1;i<objs.length;i++)out+=String(off[i]==null?0:off[i]).padStart(10,'0')+' 00000 '+(off[i]==null?'f':'n')+' \n';
+  out+=`trailer\n<</Size ${objs.length}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;
+  const lat=ammLat8(out);
+  const bytes=new Uint8Array(lat.length);
+  for(let i=0;i<lat.length;i++)bytes[i]=lat.charCodeAt(i)&0xFF;
+  return new Blob([bytes],{type:'application/pdf'});
+}
+
+/* =====================================================================
+   LETTURA DEL TRACCIATO FatturaPA
+   I prefissi di namespace cambiano da intermediario a intermediario
+   (p:, ns2:, nessuno): si cercano i nomi locali, non i tag interi.
+   ===================================================================== */
+const ammFigli=(el,nome)=>el?[...el.children].filter(c=>c.localName===nome):[];
+const ammFiglio=(el,nome)=>ammFigli(el,nome)[0]||null;
+function ammGiu(el,percorso){
+  let cur=el;
+  for(const p of percorso.split('/')){cur=ammFiglio(cur,p);if(!cur)return null;}
+  return cur;
+}
+const ammT=(el,percorso)=>{const n=percorso?ammGiu(el,percorso):el;return n?String(n.textContent||'').trim():'';};
+const ammN=(el,percorso)=>{const v=ammT(el,percorso);if(!v)return '';const n=parseFloat(v.replace(',','.'));return isNaN(n)?'':n;};
+function ammCerca(el,nome){
+  if(!el)return null;
+  const pila=[...el.children];
+  while(pila.length){const n=pila.shift();if(n.localName===nome)return n;pila.push(...n.children);}
+  return null;
+}
+
+/* Un .p7m è la fattura dentro una busta firmata. Senza una libreria di
+   crittografia non si verifica la firma: si estrae l'XML che contiene,
+   e lo si dichiara. */
+function ammEstraiXml(buf){
+  const b=new Uint8Array(buf);
+  let testo='';
+  for(let i=0;i<b.length;i++)testo+=String.fromCharCode(b[i]);
+  if(/^\s*(?:<\?xml|<[A-Za-z])/.test(testo.slice(0,200))&&/FatturaElettronica/.test(testo))
+    return {testo:new TextDecoder('utf-8').decode(b),firmato:false};
+  /* busta in base64: la si decodifica e si riparte */
+  const soloB64=testo.replace(/[\r\n\s]/g,'');
+  if(/^[A-Za-z0-9+/=]{200,}$/.test(soloB64)){
+    try{
+      const bin=atob(soloB64);
+      const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+      const r=ammEstraiXml(u.buffer);if(r)return {...r,firmato:true};
+    }catch(e){}
+  }
+  const apre=testo.search(/<([A-Za-z0-9]+:)?FatturaElettronica[\s>]/);
+  if(apre<0)return null;
+  const pre=/<([A-Za-z0-9]+:)?FatturaElettronica[\s>]/.exec(testo.slice(apre))[1]||'';
+  const tagFine=`</${pre}FatturaElettronica>`;
+  const chiude=testo.indexOf(tagFine,apre);
+  if(chiude<0)return null;
+  const fine=chiude+tagFine.length;
+  const dichiarazione=testo.lastIndexOf('<?xml',apre);
+  const da=dichiarazione>=0&&apre-dichiarazione<300?dichiarazione:apre;
+  return {testo:new TextDecoder('utf-8').decode(b.slice(da,fine)),firmato:true};
+}
+
+/* targhe citate nelle righe della fattura: solo quelle già in anagrafica,
+   così non si inventano accostamenti */
+function ammTargheCitate(testo){
+  const n=String(testo||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!n)return [];
+  return [...new Set(S.mezzi.map(m=>normTarga(m.targa)).filter(t=>t&&t.length>=5&&n.includes(t)))];
+}
+const AMM_INDIZI=[
+ [/gasolio|diesel|benzina|carburant|rifornim|metano|gpl|adblue/i,'Carburanti'],
+ [/pedagg|telepass|autostrad|transit|viacard/i,'Pedaggi e transiti'],
+ [/pneumatic|gomme|gommist|treno gomme/i,'Pneumatici'],
+ [/manutenz|tagliand|riparaz|officin|carrozz|revision|frizione|freni/i,'Manutenzioni e riparazioni'],
+ [/ricambi|accessor|filtr|batteri/i,'Ricambi e accessori'],
+ [/canone|noleggi|leasing|locazione/i,'Canoni di noleggio e leasing'],
+ [/assicuraz|polizza|\brca\b|kasko/i,'Assicurazioni'],
+ [/bollo|tassa automobilistic|tassa di propriet/i,'Bolli e tasse'],
+ [/lavaggi|rimessagg|parchegg|custodia/i,'Lavaggi e rimessaggio'],
+ [/consulenz|parcella|compet(enze|)|onorari|commercialist|avvocat/i,'Consulenze e prestazioni professionali'],
+ [/provvigion|intermediaz/i,'Provvigioni'],
+ [/energia|\bluce\b|\bgas\b|telefon|internet|utenz/i,'Utenze'],
+];
+const ammCategoriaDa=t=>{for(const[re,c] of AMM_INDIZI)if(re.test(t||''))return c;return '';};
+
+/* ---------- da XML a record ---------- */
+function ammLeggiFatturaPA(testo,nomeFile){
+  const doc=new DOMParser().parseFromString(testo,'text/xml');
+  if(doc.querySelector('parsererror'))throw new Error('XML non valido');
+  const root=doc.documentElement;
+  if(!/FatturaElettronica/.test(root.localName||''))throw new Error('non è un file FatturaPA');
+  const head=ammCerca(root,'FatturaElettronicaHeader');
+  const ced=ammCerca(head,'CedentePrestatore');
+  const cess=ammCerca(head,'CessionarioCommittente');
+  const tras=ammCerca(head,'DatiTrasmissione');
+  const anaC=ammGiu(ced,'DatiAnagrafici');
+  const nomeCed=(()=>{
+    const a=ammGiu(anaC,'Anagrafica');
+    const d=ammT(a,'Denominazione');
+    return d||[ammT(a,'Nome'),ammT(a,'Cognome')].filter(Boolean).join(' ');
+  })();
+  const pivaCed=[ammT(anaC,'IdFiscaleIVA/IdPaese'),ammT(anaC,'IdFiscaleIVA/IdCodice')]
+    .filter(Boolean).join('').replace(/^IT/,'');
+  const cfCed=ammT(anaC,'CodiceFiscale');
+  const anaCess=ammGiu(cess,'DatiAnagrafici');
+  const nomeCess=(()=>{
+    const a=ammGiu(anaCess,'Anagrafica');
+    const d=ammT(a,'Denominazione');
+    return d||[ammT(a,'Nome'),ammT(a,'Cognome')].filter(Boolean).join(' ');
+  })();
+  const pivaCess=ammT(anaCess,'IdFiscaleIVA/IdCodice').replace(/^IT/,'');
+
+  const out=[];
+  for(const body of ammFigli(root,'FatturaElettronicaBody')){
+    const dg=ammGiu(body,'DatiGenerali/DatiGeneraliDocumento');
+    if(!dg)continue;
+    const bs=ammGiu(body,'DatiBeniServizi');
+    const riepiloghi=ammFigli(bs,'DatiRiepilogo').map(r=>({
+      aliquota:ammN(r,'AliquotaIVA'),natura:ammNat(ammT(r,'Natura')),
+      imponibile:ammN(r,'ImponibileImporto'),imposta:ammN(r,'Imposta'),
+      esigibilita:ammT(r,'EsigibilitaIVA'),riferimentoNormativo:ammT(r,'RiferimentoNormativo')}));
+    const linee=ammFigli(bs,'DettaglioLinee').map(l=>({
+      n:ammT(l,'NumeroLinea'),descrizione:ammT(l,'Descrizione'),
+      quantita:ammN(l,'Quantita'),prezzo:ammN(l,'PrezzoUnitario'),
+      totale:ammN(l,'PrezzoTotale'),aliquota:ammN(l,'AliquotaIVA'),
+      natura:ammNat(ammT(l,'Natura')),riferimento:ammT(l,'RiferimentoAmministrazione')}));
+    const pag=ammGiu(body,'DatiPagamento');
+    const dett=ammFigli(pag,'DettaglioPagamento')[0]||null;
+    const rit=ammFigli(dg,'DatiRitenuta')[0]||null;
+    const bollo=ammFiglio(dg,'DatiBollo');
+    const testoLinee=linee.map(l=>`${l.descrizione} ${l.riferimento}`).join(' | ');
+    const imponibile=r2(riepiloghi.reduce((a,r)=>a+(+r.imponibile||0),0));
+    const imposta=r2(riepiloghi.reduce((a,r)=>a+(+r.imposta||0),0));
+    const nonImp=r2(riepiloghi.filter(r=>r.natura).reduce((a,r)=>a+(+r.imponibile||0),0));
+    const causale=(()=>{const c=ammT(rit,'CausalePagamento');
+      if(/^A$|lavoro autonomo/i.test(c))return '1040 Lavoro autonomo';
+      const t=ammT(rit,'TipoRitenuta');
+      if(/RT02/.test(t))return '1040 Lavoro autonomo';
+      if(/RT01/.test(t))return '1040 Lavoro autonomo';
+      return c?'1040 Lavoro autonomo':'';})();
+    out.push({
+      numero:ammT(dg,'Numero'),data:ammT(dg,'Data').slice(0,10),
+      tipoDoc:(ammT(dg,'TipoDocumento')||'TD01').toUpperCase(),
+      divisa:ammT(dg,'Divisa')||'EUR',
+      fornitoreNome:nomeCed,pivaFornitore:pivaCed,cfFornitore:cfCed,
+      cessionario:nomeCess,pivaCessionario:pivaCess,
+      sdi:[ammT(tras,'IdTrasmittente/IdCodice'),ammT(tras,'ProgressivoInvio')].filter(Boolean).join('/'),
+      imponibile,imposta,
+      totale:ammN(dg,'ImportoTotaleDocumento')!==''?ammN(dg,'ImportoTotaleDocumento'):r2(imponibile+imposta),
+      arrotondamento:ammN(dg,'Arrotondamento'),
+      bollo:bollo?(ammN(bollo,'ImportoBollo')||''):'',
+      ritenuta:rit?(ammN(rit,'ImportoRitenuta')||''):'',
+      causaleRitenuta:causale,
+      nonImponibile:nonImp||'',
+      reverseCharge:riepiloghi.some(r=>ammRevCharge(r.natura))?'Sì':'No',
+      modalita:(ammT(dett,'ModalitaPagamento')||'').toUpperCase(),
+      scadenza:ammT(dett,'DataScadenzaPagamento').slice(0,10),
+      iban:ammT(dett,'IBAN'),
+      categoria:ammCategoriaDa(testoLinee),
+      targhe:ammTargheCitate(testoLinee),
+      descrizioneLinee:testoLinee.slice(0,900),
+      riepiloghi,nomeFile:nomeFile||''});
+  }
+  if(!out.length)throw new Error('nessun corpo fattura nel file');
+  return out;
+}
+
+/* =====================================================================
+   CALCOLI SULLA FATTURA
+   ===================================================================== */
+const fpRighe=f=>f?S.fpr.filter(r=>r.fattura===f.codice):[];
+/* Nel tracciato gli importi di una nota di credito sono positivi: il segno
+   sta nel tipo di documento. In liquidazione e nei totali di periodo una
+   TD04 va sottratta, altrimenti gli storni gonfiano l'IVA a credito. */
+const fpSegno=f=>f&&f.tipoDoc==='TD04'?-1:1;
+const fpQuota=f=>{const d=f&&f.detraibilita!==''&&f.detraibilita!=null?+f.detraibilita:100;
+  return Math.max(0,Math.min(100,isNaN(d)?100:d))/100;};
+function fpImposta(f){
+  const rr=fpRighe(f);
+  if(rr.length)return r2(rr.reduce((a,r)=>a+(+r.imposta||0),0));
+  return +f.imposta||0;
+}
+function fpImponibile(f){
+  const rr=fpRighe(f);
+  if(rr.length)return r2(rr.reduce((a,r)=>a+(+r.imponibile||0),0));
+  return +f.imponibile||0;
+}
+const fpIvaDetraibile=f=>r2(fpImposta(f)*fpQuota(f));
+const fpIvaIndetraibile=f=>r2(fpImposta(f)-fpIvaDetraibile(f));
+/* L'IVA dell'inversione contabile non è scritta in fattura: si ricava
+   dall'imponibile per l'aliquota indicata nelle righe. */
+function fpIvaReverse(f){
+  if(!f||f.reverseCharge!=='Sì')return 0;
+  const rr=fpRighe(f).filter(r=>ammRevCharge(r.natura));
+  if(!rr.length)return 0;
+  return r2(rr.reduce((a,r)=>a+(+r.imponibile||0)*((+r.aliquota||0)/100),0));
+}
+function fpRicalcola(f){
+  if(!f)return f;
+  const rr=fpRighe(f);
+  if(rr.length){f.imponibile=fpImponibile(f);f.imposta=fpImposta(f);
+    f.nonImponibile=r2(rr.filter(r=>r.natura).reduce((a,r)=>a+(+r.imponibile||0),0))||'';}
+  f.ivaDetraibile=fpIvaDetraibile(f);
+  if(!f.periodoIva)f.periodoIva=fpPeriodo(f);
+  if(!f.conto&&f.categoria)f.conto=AMM_PDC_COSTO[f.categoria]||'';
+  return f;
+}
+/* Il periodo IVA segue la data di registrazione se c'è, altrimenti la
+   data del documento: è la regola del registro acquisti. */
+function fpPeriodo(f,periodicita){
+  const d=f.dataRegistrazione||f.data;if(!d)return '';
+  const p=periodicita||S.par.ivaPeriodicita||'Trimestrale';
+  return p==='Mensile'?ammMeseDi(d):`${d.slice(0,4)}-${ammTrimDi(d)}`;
+}
+/* Quadratura: imponibile + imposta + bollo + arrotondamento deve fare il
+   totale del documento. La ritenuta no: si trattiene al pagamento. */
+function fpQuadra(f){
+  const t=+f.totale||0;if(!t)return null;
+  const atteso=r2(fpImponibile(f)+fpImposta(f)+(+f.bollo||0)+(+f.arrotondamento||0));
+  const d=r2(t-atteso);
+  return Math.abs(d)<=0.02?null:d;
+}
+const fpResiduo=f=>r2((+f.totale||0)-(+f.importoPagato||0));
+
+/* =====================================================================
+   IMPORTAZIONE DEI FILE XML
+   ===================================================================== */
+function ammFornitoreDa(nome,piva,cf){
+  const p=String(piva||'').replace(/\D/g,'');
+  const c=String(cf||'').toUpperCase();
+  let x=p&&S.soc.find(s=>String(s.piva||'').replace(/\D/g,'')===p);
+  if(!x&&c)x=S.soc.find(s=>String(s.cf||'').toUpperCase()===c);
+  if(!x&&nome)x=S.soc.find(s=>normSoc(s.ragione)===normSoc(nome));
+  return x||null;
+}
+function ammCreaFornitore(nome,piva,cf){
+  const r={id:uid(),codice:nextCode(MODS.soc)};
+  for(const f of MODS.soc.fields)r[f.k]=f.def??'';
+  Object.assign(r,{ragione:nome||('Fornitore '+(piva||cf||'senza dati')),
+    piva:String(piva||'').replace(/\D/g,''),cf:String(cf||'').toUpperCase(),
+    fornitore:'Sì',cliente:'No',titolare:'No',
+    note:'Creato automaticamente dall’importazione di una fattura passiva: completare l’anagrafica.'});
+  S.soc.push(r);return r;
+}
+const ammSocietaDa=(nome,piva)=>{
+  const p=String(piva||'').replace(/\D/g,'');
+  return S.soc.find(s=>s.titolare==='Sì'&&(p&&String(s.piva||'').replace(/\D/g,'')===p))
+      ||S.soc.find(s=>s.titolare==='Sì'&&nome&&normSoc(s.ragione)===normSoc(nome))||null;
+};
+
+/* Un record per ogni corpo fattura, le righe del riepilogo IVA, e il file
+   che l'ha portata dentro allegato alla riga. */
+async function ammImportaUna(dati,file,creaFornitori){
+  const forn=ammFornitoreDa(dati.fornitoreNome,dati.pivaFornitore,dati.cfFornitore)
+    ||(creaFornitori?ammCreaFornitore(dati.fornitoreNome,dati.pivaFornitore,dati.cfFornitore):null);
+  const gia=S.fp.find(f=>f.numero===dati.numero&&f.data===dati.data
+    &&String(f.pivaFornitore||'')===String(dati.pivaFornitore||''));
+  if(gia)return {esito:'doppia',rec:gia};
+  const r={id:uid(),codice:nextCode(MODS.fp,dati.data)};
+  for(const f of MODS.fp.fields)r[f.k]=f.def??'';
+  const soc=ammSocietaDa(dati.cessionario,dati.pivaCessionario);
+  Object.assign(r,{
+    numero:dati.numero,data:dati.data,tipoDoc:AMM_TIPODOC[dati.tipoDoc]?dati.tipoDoc:'TD01',
+    fornitore:forn?forn.ragione:(dati.fornitoreNome||''),
+    pivaFornitore:dati.pivaFornitore,cfFornitore:dati.cfFornitore,
+    societa:soc?soc.ragione:'',divisa:dati.divisa,sdi:dati.sdi,
+    /* Si registra alla data del documento: è quella che decide il periodo
+       IVA. Chi registra in ritardo la cambia a mano. */
+    dataRegistrazione:dati.data||todayISO(),
+    imponibile:dati.imponibile,imposta:dati.imposta,totale:dati.totale,
+    bollo:dati.bollo,ritenuta:dati.ritenuta,causaleRitenuta:dati.causaleRitenuta,
+    arrotondamento:dati.arrotondamento,nonImponibile:dati.nonImponibile,
+    reverseCharge:dati.reverseCharge,detraibilita:100,
+    categoria:dati.categoria,conto:AMM_PDC_COSTO[dati.categoria]||'',
+    targa:dati.targhe[0]||'',modalita:AMM_PAG[dati.modalita]?dati.modalita:'',
+    scadenza:dati.scadenza,iban:dati.iban,statoPagamento:'Da pagare',
+    registrata:'No',fonte:dati.nomeFile?`XML ${dati.nomeFile}`:'XML',
+    note:dati.targhe.length>1?`Targhe citate in fattura: ${dati.targhe.join(', ')}`:''});
+  S.fp.push(r);
+  for(const q of dati.riepiloghi){
+    S.fpr.push({id:uid(),codice:nextCode(MODS.fpr),fattura:r.codice,
+      aliquota:q.aliquota,natura:q.natura,imponibile:q.imponibile,imposta:q.imposta,
+      esigibilita:({I:'I Immediata',D:'D Differita',S:'S Scissione dei pagamenti'})[q.esigibilita]||'',
+      riferimentoNormativo:q.riferimentoNormativo});
+  }
+  fpRicalcola(r);
+  if(file)await addAttachment(file,'fp',r.codice,'Fattura');
+  return {esito:'nuova',rec:r,targhe:dati.targhe};
+}
+
+async function ammImportaXml(files,creaFornitori){
+  const esito={nuove:0,doppie:0,errori:[],creati:[],senzaSoc:0,firmate:0};
+  for(const file of files){
+    try{
+      const buf=await file.arrayBuffer();
+      const x=ammEstraiXml(buf);
+      if(!x)throw new Error('non contiene una fattura elettronica');
+      if(x.firmato)esito.firmate++;
+      const lista=ammLeggiFatturaPA(x.testo,file.name);
+      for(const d of lista){
+        const r=await ammImportaUna(d,file,creaFornitori);
+        if(r.esito==='doppia')esito.doppie++;
+        else{esito.nuove++;esito.creati.push(r.rec);if(!r.rec.societa)esito.senzaSoc++;}
+      }
+    }catch(e){esito.errori.push(`${file.name}: ${e.message}`);}
+  }
+  if(esito.nuove)markDirty();
+  return esito;
+}
+
+/* Lo stesso lavoro partendo da un Excel: le colonne si abbinano come
+   negli altri moduli, e il file resta allegato a tutte le righe che ha
+   creato. L'importazione generica fa il grosso; qui si aggiunge solo
+   l'allegato e il ricalcolo. */
+async function ammAllegaSorgente(file,recs){
+  if(!file||!recs.length)return 0;
+  let n=0;
+  try{
+    const path=`Allegati/fp/_importazioni/${stampNow(true)}_${safe(file.name)}`;
+    const arch=await putBlob(path,file);
+    for(const r of recs){
+      S.all.push({id:uid(),codice:nextCode(MODS.all),modulo:'fp',riferimento:r.codice,
+        tipo:'Fattura',descrizione:'File da cui è stata importata la fattura',
+        file:file.name,percorso:path,archivio:arch,dataDocumento:r.data||'',scadenza:'',
+        caricatoIl:todayISO(),note:'importazione'});
+      n++;
+    }
+    markDirty();
+  }catch(e){toast('File di origine non allegato: '+e.message,true);}
+  return n;
+}
+
+/* ---------- la finestra di importazione ---------- */
+function ammBoxImport(){
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  d.innerHTML=`<header><h2>Importa fatture passive</h2><button class="btn ghost" data-x>Chiudi</button></header>
+  <div class="body">
+    <fieldset><legend>Da XML dello SDI</legend>
+      <div class="drop" data-drop>
+        <p style="margin:0 0 10px"><b>Trascina qui i file XML</b> delle fatture ricevute, anche tutti insieme, oppure</p>
+        <button class="btn primary" data-xml>Scegli i file XML</button>
+        <p class="muted" style="margin:10px 0 0">Vanno bene i file <b>.xml</b> e quelli firmati <b>.xml.p7m</b>: della busta firmata si legge la fattura, la firma non viene verificata.
+        Da ogni file nasce una riga per ogni fattura contenuta, con il riepilogo IVA per aliquota, e il file resta allegato alla riga.</p>
+      </div>
+      <label class="check" style="margin-top:10px"><input type="checkbox" data-crea checked>
+        Crea in anagrafica i fornitori che non ci sono</label>
+      <div class="muted" style="font-size:12px;margin:4px 0 0 24px">Vengono creati con partita IVA e denominazione presi dalla fattura, da completare poi.</div>
+    </fieldset>
+    <fieldset><legend>Da Excel o CSV</legend>
+      <p class="muted" style="margin:0 0 10px">Le colonne si abbinano a mano come negli altri moduli. Il file importato resta allegato a tutte le righe che ha creato.</p>
+      <button class="btn" data-xls>Apri l’importazione da Excel</button>
+    </fieldset>
+    <div data-esito></div>
+  </div>
+  <footer><button class="btn primary" data-x>Chiudi</button></footer>`;
+  document.body.append(sc,d);
+  const q=s=>d.querySelector(s);
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);renderFp();};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);
+  sc.onclick=close;d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+
+  const mostra=r=>{
+    const box=q('[data-esito]');
+    box.innerHTML=`<fieldset><legend>Esito</legend>
+      <div class="counts">
+        <div><b>${r.nuove}</b><small>fatture importate</small></div>
+        <div><b>${r.doppie}</b><small>già presenti, saltate</small></div>
+        <div><b class="${r.errori.length?'late':''}">${r.errori.length}</b><small>file non letti</small></div>
+      </div>
+      ${r.firmate?`<p class="muted">${r.firmate} file erano firmati (.p7m): la fattura è stata estratta dalla busta, la firma non è stata verificata.</p>`:''}
+      ${r.senzaSoc?`<p class="muted">${r.senzaSoc} fatture non hanno trovato a quale delle tue società sono intestate: mettila a mano, serve per la liquidazione IVA.</p>`:''}
+      ${r.errori.length?`<p style="margin-top:8px"><b>File non letti</b></p><ul class="muted">${r.errori.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`:''}
+      ${r.creati.length?`<div class="tablewrap" style="max-height:260px;overflow:auto"><table class="grid mini"><thead><tr><th>Codice</th><th>Numero</th><th>Data</th><th>Fornitore</th><th class="num">Totale</th><th>Categoria</th><th>Targa</th></tr></thead><tbody>
+        ${r.creati.map(f=>`<tr><td>${esc(f.codice)}</td><td>${esc(f.numero)}</td><td>${fmtD(f.data)}</td><td>${esc(f.fornitore)}</td><td class="num">${eur(f.totale)}</td><td>${esc(f.categoria||'–')}</td><td>${f.targa?esc(f.targa):'–'}</td></tr>`).join('')}
+        </tbody></table></div>`:''}
+      <p class="muted" style="margin-top:8px">Categoria e targa sono proposte lette dalle descrizioni delle righe: controllale prima di portare le fatture in prima nota.</p>
+      </fieldset>`;
+  };
+  const leggi=async files=>{
+    if(!files.length)return;
+    busy(true,`Lettura di ${files.length} file`);
+    const r=await ammImportaXml(files,q('[data-crea]').checked);
+    busy(false);mostra(r);
+    toast(r.nuove?`${r.nuove} ${r.nuove===1?'fattura importata':'fatture importate'}.`:'Nessuna fattura nuova.',!r.nuove);
+  };
+  q('[data-xml]').onclick=()=>{const i=document.createElement('input');i.type='file';i.multiple=true;
+    i.accept='.xml,.p7m,text/xml,application/xml';
+    i.onchange=()=>leggi([...i.files]);i.click();};
+  const drop=q('[data-drop]');
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');leggi([...e.dataTransfer.files]);});
+  q('[data-xls]').onclick=()=>{
+    close();
+    openImport('fp',{onDone:async(creati,file)=>{
+      creati.forEach(fpRicalcola);
+      const n=await ammAllegaSorgente(file,creati);
+      if(n)toast(`${n===1?'La fattura importata ha':'Le '+n+' fatture importate hanno'} il file di origine fra gli allegati.`);
+    }});};
+}
+
+
+/* =====================================================================
+   AMMINISTRAZIONE — l'elenco delle fatture passive e le estrazioni
+   ===================================================================== */
+
+/* ---------- riepilogo IVA di una fattura ---------- */
+function openFpRiepilogo(f){
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const ro=!puoScrivere('fpr');
+  const paint=()=>{
+    const rr=fpRighe(f);fpRicalcola(f);
+    const scarto=fpQuadra(f);
+    d.innerHTML=`<header><h2>Riepilogo IVA – ${esc(f.numero||f.codice)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <div class="calcbox">
+        <div><small>Imponibile</small><b>${eur(fpImponibile(f))}</b></div>
+        <div><small>IVA</small><b>${eur(fpImposta(f))}</b></div>
+        <div><small>IVA detraibile al ${numF.format(fpQuota(f)*100)}%</small><b>${eur(fpIvaDetraibile(f))}</b></div>
+        <div><small>Totale documento</small><b>${eur(f.totale)}</b></div>
+      </div>
+      ${scarto!=null?`<div class="alert">Il totale del documento non torna con imponibile + IVA + bollo: differenza di <b>${eur(scarto)}</b>. Controlla le righe o il totale.</div>`:''}
+      ${f.reverseCharge==='Sì'?`<p class="muted">Inversione contabile: l’IVA calcolata sulle righe a natura N6 è <b>${eur(fpIvaReverse(f))}</b> e in liquidazione va sia a debito sia a credito.</p>`:''}
+      <div class="tablewrap"><table class="grid mini"><thead><tr>
+        <th class="num">Aliquota %</th><th>Natura</th><th class="num">Imponibile</th><th class="num">Imposta</th>
+        <th>Esigibilità</th><th>Riferimento normativo</th><th></th></tr></thead><tbody>
+      ${rr.map(r=>`<tr data-r="${r.id}">
+        <td class="num">${ro?numF.format(r.aliquota||0):`<input class="input cin" style="width:72px" type="number" step="any" data-k="aliquota" value="${r.aliquota}">`}</td>
+        <td>${ro?esc(ammNatLabel(r.natura)):`<select class="input" data-k="natura"><option value="">–</option>${Object.keys(AMM_NATURA).map(k=>`<option value="${k}" ${ammNat(r.natura)===k?'selected':''}>${esc(AMM_NATURA[k])}</option>`).join('')}</select>`}</td>
+        <td class="num">${ro?eur(r.imponibile):`<input class="input cin" type="number" step="0.01" data-k="imponibile" value="${r.imponibile}">`}</td>
+        <td class="num">${ro?eur(r.imposta):`<input class="input cin" type="number" step="0.01" data-k="imposta" value="${r.imposta}">`}</td>
+        <td>${esc(r.esigibilita||'–')}</td><td>${esc(r.riferimentoNormativo||'')}</td>
+        <td>${ro?'':`<button class="btn ghost danger" data-del="${r.id}">Togli</button>`}</td></tr>`).join('')
+        ||'<tr><td colspan="7" class="empty">Nessuna riga di riepilogo: l’IVA è quella scritta sulla testata della fattura.</td></tr>'}
+      </tbody></table></div>
+      ${ro?'':'<button class="btn" data-add style="margin-top:8px">Aggiungi un’aliquota</button>'}
+      <p class="muted" style="margin-top:10px">Da qui viene l’IVA che finisce nella liquidazione del periodo <b>${esc(f.periodoIva||fpPeriodo(f))}</b>. La percentuale di detraibilità si cambia nella scheda della fattura.</p>
+    </div>
+    <footer><button class="btn" data-edit>Scheda della fattura</button><button class="btn primary" data-x>Fatto</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+    d.querySelector('[data-edit]').onclick=()=>{close();openRecord('fp',f,{onSaved:()=>renderFp()});};
+    const add=d.querySelector('[data-add]');
+    if(add)add.onclick=()=>{S.fpr.push({id:uid(),codice:nextCode(MODS.fpr),fattura:f.codice,
+      aliquota:22,natura:'',imponibile:0,imposta:0,esigibilita:'',riferimentoNormativo:''});markDirty();paint();};
+    d.querySelectorAll('tr[data-r] input,tr[data-r] select').forEach(i=>i.onchange=()=>{
+      const r=S.fpr.find(x=>x.id===i.closest('tr').dataset.r);if(!r)return;
+      const k=i.dataset.k;
+      r[k]=['aliquota','imponibile','imposta'].includes(k)?(parseFloat(i.value)||0):i.value.trim();
+      if(k==='natura'&&r.natura){r.aliquota=0;r.imposta=0;}
+      if(k==='imponibile'||k==='aliquota'){if(!r.natura)r.imposta=r2((+r.imponibile||0)*((+r.aliquota||0)/100));}
+      markDirty();paint();});
+    d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+      S.fpr=S.fpr.filter(x=>x.id!==b.dataset.del);markDirty();paint();});
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);renderFp();};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);
+  sc.onclick=close;document.body.append(sc,d);paint();
+}
+
+/* =====================================================================
+   ESTRAZIONI: XML di scambio, PDF del registro, file originali
+   ===================================================================== */
+const ammXmlEsc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+const ammTag=(n,v)=>(v===''||v==null)?'':`<${n}>${ammXmlEsc(v)}</${n}>`;
+
+/* Un XML di scambio: una riga per fattura con il riepilogo IVA dentro.
+   Non è un FatturaPA — quello è il documento del fornitore, e sta fra gli
+   allegati. Questo è il registro acquisti in forma leggibile da un
+   programma di contabilità. */
+function ammFpXml(list){
+  const righe=list.map(f=>{
+    const rr=fpRighe(f);
+    return `  <Fattura codice="${ammXmlEsc(f.codice)}">
+${['numero','data','tipoDoc','protocollo','dataRegistrazione','periodoIva','divisa']
+  .map(k=>'    '+ammTag(k[0].toUpperCase()+k.slice(1),f[k])).filter(s=>s.trim()).join('\n')}
+    <Fornitore>
+      ${ammTag('Denominazione',f.fornitore)}
+      ${ammTag('PartitaIVA',f.pivaFornitore)}
+      ${ammTag('CodiceFiscale',f.cfFornitore)}
+    </Fornitore>
+    ${ammTag('SocietaIntestataria',f.societa)}
+    <Importi>
+      ${ammTag('Imponibile',fpImponibile(f))}
+      ${ammTag('Imposta',fpImposta(f))}
+      ${ammTag('NonImponibile',f.nonImponibile)}
+      ${ammTag('Bollo',f.bollo)}
+      ${ammTag('Ritenuta',f.ritenuta)}
+      ${ammTag('Arrotondamento',f.arrotondamento)}
+      ${ammTag('TotaleDocumento',f.totale)}
+    </Importi>
+    <IVA detraibilita="${ammXmlEsc(f.detraibilita)}" inversioneContabile="${f.reverseCharge==='Sì'?'true':'false'}">
+      ${ammTag('Detraibile',fpIvaDetraibile(f))}
+      ${ammTag('Indetraibile',fpIvaIndetraibile(f))}
+${rr.map(r=>`      <Riepilogo aliquota="${ammXmlEsc(r.aliquota)}"${r.natura?` natura="${ammXmlEsc(ammNat(r.natura))}"`:''}>
+        ${ammTag('Imponibile',r.imponibile)}
+        ${ammTag('Imposta',r.imposta)}
+        ${ammTag('RiferimentoNormativo',r.riferimentoNormativo)}
+      </Riepilogo>`).join('\n')}
+    </IVA>
+    <Classificazione>
+      ${ammTag('Categoria',f.categoria)}
+      ${ammTag('Conto',f.conto)}
+      ${ammTag('CentroCosto',f.centroCosto)}
+      ${ammTag('Targa',f.targa)}
+      ${ammTag('ContrattoFornitore',f.contrattoFornitore)}
+    </Classificazione>
+    <Pagamento>
+      ${ammTag('Modalita',f.modalita)}
+      ${ammTag('Scadenza',f.scadenza)}
+      ${ammTag('Stato',f.statoPagamento)}
+      ${ammTag('ImportoPagato',f.importoPagato)}
+      ${ammTag('DataPagamento',f.dataPagamento)}
+    </Pagamento>
+  </Fattura>`;
+  }).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<RegistroFatturePassive versione="1.0" generato="${todayISO()}" fatture="${list.length}">
+${righe}
+</RegistroFatturePassive>
+`;
+}
+
+function ammFpPdf(list){
+  const tot=k=>r2(list.reduce((a,f)=>a+fpSegno(f)*(+f[k]||0),0));
+  const imp=r2(list.reduce((a,f)=>a+fpSegno(f)*fpImponibile(f),0));
+  const iva=r2(list.reduce((a,f)=>a+fpSegno(f)*fpImposta(f),0));
+  const det=r2(list.reduce((a,f)=>a+fpSegno(f)*fpIvaDetraibile(f),0));
+  const date=list.map(f=>f.data).filter(Boolean).sort();
+  return ammPdf({
+    titolo:'Registro delle fatture passive',
+    sottotitolo:date.length?`Documenti dal ${fmtD(date[0])} al ${fmtD(date[date.length-1])} · ${list.length} fatture`:`${list.length} fatture`,
+    colonne:[{l:'Codice',w:52},{l:'Numero',w:74},{l:'Data',w:48},{l:'Fornitore',w:128},
+      {l:'Categoria',w:92},{l:'Targa',w:50},{l:'Imponibile',w:58,num:true},{l:'IVA',w:50,num:true},
+      {l:'Detraibile',w:56,num:true},{l:'Totale',w:58,num:true},{l:'Pagamento',w:62}],
+    righe:list.map(f=>{const s=fpSegno(f);
+      return [f.codice,f.numero+(s<0?' (NC)':''),fmtD(f.data),f.fornitore,f.categoria||'',f.targa||'',
+        ammEuroPdf(r2(s*fpImponibile(f))),ammEuroPdf(r2(s*fpImposta(f))),
+        ammEuroPdf(r2(s*fpIvaDetraibile(f))),ammEuroPdf(r2(s*(+f.totale||0))),f.statoPagamento||''];}),
+    piede:['','','','Totali','','',ammEuroPdf(imp),ammEuroPdf(iva),ammEuroPdf(det),ammEuroPdf(tot('totale')),''],
+  });
+}
+
+/* Un pulsante solo e la scelta del formato: tre pulsanti «Estrai …» in
+   testata schiacciavano il titolo della pagina. */
+function ammBoxEstrai(list){
+  return new Promise(res=>{
+    const conAll=list.filter(f=>attachFor('fp',f.codice).length).length;
+    const m=document.createElement('div');m.className='modal';
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true">
+      <h3>Estrai ${list.length===1?'la fattura':list.length+' fatture'}</h3>
+      <div class="muted" style="margin-bottom:12px">Il file finisce nella cartella del registro, in «Amministrazione».</div>
+      <label class="radio"><input type="radio" name="estrfmt" value="xlsx" checked><span><b>Excel</b><small>Una riga per fattura, da aprire e rielaborare</small></span></label>
+      <label class="radio"><input type="radio" name="estrfmt" value="xml"><span><b>XML</b><small>Registro acquisti con il riepilogo IVA per aliquota, per il programma di contabilità</small></span></label>
+      <label class="radio"><input type="radio" name="estrfmt" value="pdf"><span><b>PDF</b><small>Il registro stampabile, con i totali in fondo</small></span></label>
+      <label class="radio"><input type="radio" name="estrfmt" value="originali"><span><b>I file originali</b><small>${conAll} ${conAll===1?'fattura ha':'fatture hanno'} l’XML o il PDF ricevuto fra gli allegati</small></span></label>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button>
+        <button class="btn primary" data-a="1">Estrai</button></div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click',e=>{
+      const a=e.target.closest('[data-a]');
+      if(!a&&e.target!==m)return;
+      const ok=a&&a.dataset.a==='1';
+      const sel=m.querySelector('[name=estrfmt]:checked');
+      m.remove();res(ok&&sel?sel.value:null);
+    });
+  });
+}
+async function ammEsportaFp(list,formato){
+  if(!list.length)return toast('Nessuna fattura da estrarre con questi filtri.',true);
+  if(!formato){formato=await ammBoxEstrai(list);if(!formato)return;}
+  if(formato==='xlsx')return exportRows(MODS.fp,list);
+  const stamp=stampNow();
+  if(formato==='xml'){
+    await saveInFolder('Amministrazione/Estrazioni',
+      [{name:`Fatture_passive_${stamp}.xml`,data:new Blob([ammFpXml(list)],{type:'application/xml'})}]);
+    return toast(`${list.length} fatture estratte in XML.`);
+  }
+  if(formato==='pdf'){
+    await saveInFolder('Amministrazione/Estrazioni',
+      [{name:`Registro_fatture_passive_${stamp}.pdf`,data:ammFpPdf(list)}]);
+    return toast(`Registro in PDF di ${list.length} fatture.`);
+  }
+  /* gli originali: i file che le fatture hanno portato dentro */
+  busy(true,'Recupero dei file originali');
+  const files=[];const senza=[];
+  for(const f of list){
+    const att=attachFor('fp',f.codice);
+    if(!att.length){senza.push(f.codice);continue;}
+    for(const a of att){
+      try{const b=await getBlob(a);
+        files.push({name:`${safe(f.codice)}_${safe(a.file)}`,data:b});}
+      catch(e){senza.push(`${f.codice} (${e.message})`);}
+    }
+  }
+  busy(false);
+  if(!files.length)return toast('Nessun file originale fra gli allegati di queste fatture.',true);
+  await saveInFolder(`Amministrazione/Originali_${stamp}`,files);
+  toast(`${files.length} file originali estratti${senza.length?`; ${senza.length} fatture senza allegato`:''}.`);
+}
+
+/* =====================================================================
+   L'ELENCO
+   ===================================================================== */
+function ammPeriodiFp(){
+  return [...new Set(S.fp.map(f=>f.periodoIva||fpPeriodo(f)).filter(Boolean))].sort().reverse();
+}
+const AMM_PAGPILL={'Da pagare':'rent','Pagata':'run','Pagata in parte':'rent','Insoluta':'bad','Non dovuta':'end','Compensata':'end'};
+
+function renderFp(){
+  genericList('fp',{
+    sub:'Le fatture ricevute dai fornitori: entrano da XML o da Excel, il file resta allegato alla riga, e da qui nascono la prima nota e la liquidazione IVA.',
+    newLabel:'Nuova fattura',searchPh:'Numero, fornitore, targa, categoria',
+    search:['numero','fornitore','codice','targa','categoria','pivaFornitore','conto','protocollo'],
+    noImport:true,
+    noExport:true,
+    buttons:[
+      {l:'Importa fatture',primary:true,fn:()=>ammBoxImport()},
+      {l:'Estrai',fn:l=>ammEsportaFp(l)},
+    ],
+    filters:[
+      {k:'fornitore',label:'Fornitore',opts:()=>[...new Set(S.fp.map(f=>f.fornitore).filter(Boolean))].sort()},
+      {k:'categoria',label:'Categoria',opts:()=>AMM_CATEGORIE},
+      {k:'statoPagamento',label:'Pagamento',opts:()=>MODS.fp.fmap.statoPagamento.opts},
+      {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
+      {k:'__per',label:'Periodo IVA',opts:ammPeriodiFp,test:(r,v)=>(r.periodoIva||fpPeriodo(r))===v},
+    ],
+    ledger:l=>{
+      /* i totali di periodo tengono conto del segno: una nota di credito
+         abbassa il costo e l'IVA a credito, non li alza */
+      const imp=r2(l.reduce((a,f)=>a+fpSegno(f)*fpImponibile(f),0));
+      const det=r2(l.reduce((a,f)=>a+fpSegno(f)*fpIvaDetraibile(f),0));
+      const nc=l.filter(f=>fpSegno(f)<0).length;
+      const dap=l.filter(f=>['Da pagare','Insoluta','Pagata in parte'].includes(f.statoPagamento));
+      const res=r2(dap.reduce((a,f)=>a+fpSegno(f)*fpResiduo(f),0));
+      const sca=dap.filter(f=>f.scadenza&&f.scadenza<todayISO()).length;
+      return `<div><b>${l.length}</b><small>fatture${nc?` (${nc} di credito)`:''}</small></div>
+        <div><b>${eur(imp)}</b><small>imponibile</small></div>
+        <div><b>${eur(det)}</b><small>IVA detraibile</small></div>
+        <div><b>${eur(res)}</b><small>da pagare</small></div>
+        <div><b class="${sca?'late':''}">${sca}</b><small>scadute</small></div>`;
+    },
+    sort:(a,b)=>(b.data||'').localeCompare(a.data||'')||String(b.codice).localeCompare(String(a.codice)),
+    cols:[
+      {l:'Fattura',v:r=>`<b>${esc(r.numero)}</b><span class="sub">${esc(r.codice)} · ${fmtD(r.data)}${r.tipoDoc&&r.tipoDoc!=='TD01'?' · '+esc(r.tipoDoc):''}</span>`,
+       s:r=>r.data+r.codice},
+      {l:'Fornitore',v:r=>`${esc(r.fornitore)}<span class="sub">${esc(r.societa||'società da indicare')}</span>`},
+      {l:'Costo',v:r=>`${esc(r.categoria||'da classificare')}<span class="sub">${r.targa?plate(r.targa):''}${r.centroCosto?' '+esc(r.centroCosto):''}</span>`},
+      {l:'Imponibile',cls:'num',v:r=>eur(fpImponibile(r)),s:r=>fpImponibile(r)},
+      {l:'IVA',cls:'num',v:r=>{const i=fpImposta(r),d=fpIvaDetraibile(r);
+        return `${eur(i)}${i&&r2(i-d)?`<span class="sub">detraibile ${eur(d)}</span>`:''}${r.reverseCharge==='Sì'?'<span class="sub">inversione contabile</span>':''}`;},s:r=>fpImposta(r)},
+      {l:'Totale',cls:'num',v:r=>{const q=fpQuadra(r);
+        return `<b>${eur(r.totale)}</b>${q!=null?`<span class="sub late">non quadra di ${eur(q)}</span>`:''}`;},s:r=>+r.totale||0},
+      {l:'Pagamento',v:r=>`${pillS(r.statoPagamento,AMM_PAGPILL[r.statoPagamento]||'end')}<span class="sub">${r.scadenza?dueCell(r.scadenza,10):'senza scadenza'}</span>`},
+      {l:'In prima nota',v:r=>r.registrata==='Sì'
+        ?'<span class="cfok">sì</span>'
+        :`<span class="muted">no</span>`},
+      {l:'Allegati',v:r=>{const n=attachFor('fp',r.codice).length;
+        return n?`<span class="sub">${n} ${n===1?'allegato':'allegati'}</span>`:'<span class="muted">nessuno</span>';}},
+    ],
+    rowActions:[
+      {l:'Riepilogo IVA',fn:openFpRiepilogo},
+      {l:'Porta in prima nota',show:r=>r.registrata!=='Sì',fn:r=>ammInPrimaNota([r])},
+      {l:'Pagata',show:r=>['Da pagare','Insoluta','Pagata in parte'].includes(r.statoPagamento),
+       fn:r=>ammSegnaPagata([r])},
+    ],
+    selActions:[
+      {l:'Porta in prima nota',primary:true,fn:l=>ammInPrimaNota(l.filter(r=>r.registrata!=='Sì'))},
+      {l:'Segna pagate',fn:l=>ammSegnaPagata(l)},
+      {l:'Estrai',fn:l=>ammEsportaFp(l)},
+    ],
+    empty:'Nessuna fattura passiva. Usa «Importa fatture» per caricare gli XML ricevuti dallo SDI.',
+    after:`<p class="muted" style="margin-top:12px">Categoria, targa e percentuale di detraibilità sono proposte del gestionale: la detraibilità è impostata al 100%, giusta per i veicoli strumentali e per quelli dati a noleggio, da correggere al 40% sulle autovetture a uso promiscuo.</p>`,
+  });
+}
+
+
+/* =====================================================================
+   AMMINISTRAZIONE — prima nota e bolli
+   ---------------------------------------------------------------------
+   La prima nota non si scrive a mano: nasce dalle fatture passive, e ogni
+   scrittura quadra. Se non quadra il gestionale lo dice, non la nasconde
+   con un arrotondamento silenzioso.
+   ===================================================================== */
+
+const pnScrittura=reg=>S.pn.filter(r=>r.registrazione===reg).sort((a,b)=>(+a.riga||0)-(+b.riga||0));
+const pnDare=l=>r2(l.reduce((a,r)=>a+(+r.dare||0),0));
+const pnAvere=l=>r2(l.reduce((a,r)=>a+(+r.avere||0),0));
+const pnSbilancio=l=>r2(pnDare(l)-pnAvere(l));
+function pnRegistrazioni(){
+  const m=new Map();
+  for(const r of S.pn){const k=r.registrazione||('(senza)'+r.codice);
+    if(!m.has(k))m.set(k,[]);m.get(k).push(r);}
+  return m;
+}
+
+/* ---------- la scrittura di una fattura passiva ----------
+   Costo e IVA in dare, il debito verso il fornitore in avere. Sulle note
+   di credito (TD04) i due lati si scambiano. La ritenuta non entra qui:
+   si trattiene quando si paga. */
+function pnRigheDaFattura(f){
+  const nc=f.tipoDoc==='TD04';
+  const righe=[];
+  const add=(conto,dare,avere,descr)=>{
+    const d=r2(nc?avere:dare),a=r2(nc?dare:avere);
+    if(!d&&!a)return;
+    righe.push({conto,dare:d||'',avere:a||'',descrizione:descr});
+  };
+  const imp=fpImponibile(f),det=fpIvaDetraibile(f),ind=fpIvaIndetraibile(f);
+  const conto=f.conto||AMM_PDC_COSTO[f.categoria]||'Costi diversi di gestione';
+  const etich=`${nc?'Nota di credito':'Fattura'} ${f.numero} del ${fmtD(f.data)} – ${f.fornitore}`;
+  add(conto,imp,0,etich);
+  if(det)add('IVA a credito',det,0,`IVA detraibile ${etich}`);
+  if(ind)add(conto,ind,0,`IVA indetraibile ${etich}`);
+  if(+f.bollo)add('Imposta di bollo',+f.bollo,0,`Bollo ${etich}`);
+  const rev=fpIvaReverse(f);
+  if(rev){add('IVA a credito',rev,0,`IVA inversione contabile ${etich}`);
+    add('IVA a debito',0,rev,`IVA inversione contabile ${etich}`);}
+  add('Debiti verso fornitori',0,+f.totale||0,etich);
+  /* quadratura dichiarata: lo scarto diventa una riga che si vede */
+  const sb=r2(righe.reduce((a,r)=>a+(+r.dare||0),0)-righe.reduce((a,r)=>a+(+r.avere||0),0));
+  if(Math.abs(sb)>0.005){
+    if(sb>0)righe.push({conto:'Arrotondamenti attivi',dare:'',avere:Math.abs(sb),descrizione:`Quadratura ${etich}`});
+    else righe.push({conto:'Arrotondamenti passivi',dare:Math.abs(sb),avere:'',descrizione:`Quadratura ${etich}`});
+  }
+  return righe;
+}
+
+async function ammInPrimaNota(list){
+  if(soloLettura()||!puoScrivere('pn'))return toast('Il tuo ruolo non può scrivere in prima nota.',true);
+  const da=list.filter(f=>f.registrata!=='Sì');
+  if(!da.length)return toast('Queste fatture sono già in prima nota.',true);
+  const tot=r2(da.reduce((a,f)=>a+(+f.totale||0),0));
+  const senzaConto=da.filter(f=>!f.conto&&!AMM_PDC_COSTO[f.categoria]).length;
+  if(!await confirmBox('Porta in prima nota',
+    `${da.length} ${da.length===1?'fattura':'fatture'} per ${eur(tot)}: nasce una scrittura per ciascuna, costo e IVA in dare e il debito verso il fornitore in avere.
+     ${senzaConto?`<br><br><b>${senzaConto}</b> ${senzaConto===1?'fattura non ha':'fatture non hanno'} categoria né conto: ${senzaConto===1?'andrà':'andranno'} su «Costi diversi di gestione».`:''}
+     <br><br>La registrazione si può annullare dalla prima nota.`,
+    `Registra ${da.length===1?'la fattura':'le '+da.length+' fatture'}`))return;
+  let n=0;
+  for(const f of da){
+    fpRicalcola(f);
+    const righe=pnRigheDaFattura(f);
+    righe.forEach((r,i)=>{
+      S.pn.push({id:uid(),codice:nextCode(MODS.pn,f.data),
+        data:f.dataRegistrazione||f.data,societa:f.societa||'',
+        tipo:f.tipoDoc==='TD04'?'Rettifica':'Acquisto',
+        registrazione:f.codice,riga:i+1,descrizione:r.descrizione,
+        conto:r.conto,dare:r.dare,avere:r.avere,
+        contropartita:r.conto==='Debiti verso fornitori'?(f.conto||AMM_PDC_COSTO[f.categoria]||''):'Debiti verso fornitori',
+        mezzoPagamento:'',banca:'',
+        documento:f.numero,riferimento:f.codice,
+        targa:f.targa||'',centroCosto:f.centroCosto||'',note:''});
+    });
+    f.registrata='Sì';n++;
+  }
+  markDirty();renderFp();
+  toast(`${n} ${n===1?'fattura registrata':'fatture registrate'} in prima nota. Le trovi nella sezione Prima nota.`);
+}
+
+/* ---------- il pagamento ---------- */
+function pnRighePagamento(f,banca){
+  const righe=[];
+  const tot=+f.totale||0,rit=+f.ritenuta||0;
+  const etich=`Pagamento fattura ${f.numero} – ${f.fornitore}`;
+  righe.push({conto:'Debiti verso fornitori',dare:tot,avere:'',descrizione:etich});
+  righe.push({conto:banca||'Banca c/c',dare:'',avere:r2(tot-rit),descrizione:etich});
+  if(rit)righe.push({conto:'Erario c/ritenute',dare:'',avere:rit,descrizione:`Ritenuta d’acconto ${etich}`});
+  return righe;
+}
+async function ammSegnaPagata(list){
+  if(soloLettura()||!puoScrivere('fp'))return toast('Il tuo ruolo non può modificare le fatture.',true);
+  const da=list.filter(f=>['Da pagare','Insoluta','Pagata in parte'].includes(f.statoPagamento));
+  if(!da.length)return toast('Nessuna fattura da pagare fra quelle scelte.',true);
+  const tot=r2(da.reduce((a,f)=>a+fpResiduo(f),0));
+  const rit=r2(da.reduce((a,f)=>a+(+f.ritenuta||0),0));
+  const inPn=da.filter(f=>f.registrata==='Sì').length;
+  const scelta=await ammBoxPagamento(da.length,tot,rit,inPn);
+  if(!scelta)return;
+  let n=0,p=0;
+  for(const f of da){
+    f.statoPagamento='Pagata';f.importoPagato=+f.totale||0;f.dataPagamento=scelta.data;n++;
+    if(scelta.primaNota&&f.registrata==='Sì'){
+      const reg=`${f.codice}/PAG`;
+      if(!S.pn.some(r=>r.registrazione===reg)){
+        pnRighePagamento(f,scelta.banca).forEach((r,i)=>{
+          S.pn.push({id:uid(),codice:nextCode(MODS.pn,scelta.data),data:scelta.data,
+            societa:f.societa||'',tipo:'Pagamento',registrazione:reg,riga:i+1,
+            descrizione:r.descrizione,conto:r.conto,dare:r.dare,avere:r.avere,contropartita:'',
+            mezzoPagamento:scelta.mezzo,banca:scelta.banca,
+            documento:f.numero,riferimento:f.codice,targa:f.targa||'',
+            centroCosto:f.centroCosto||'',note:''});
+        });
+        p++;
+      }
+    }
+  }
+  markDirty();renderFp();
+  toast(`${n} ${n===1?'fattura segnata pagata':'fatture segnate pagate'}${p?`, ${p} ${p===1?'pagamento registrato':'pagamenti registrati'} in prima nota`:''}.`);
+}
+function ammBoxPagamento(quante,tot,rit,inPn){
+  return new Promise(res=>{
+    const m=document.createElement('div');m.className='modal';
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true">
+      <h3>Segna ${quante===1?'la fattura':quante+' fatture'} come pagate</h3>
+      <div class="muted" style="margin-bottom:12px">Residuo da pagare: <b>${eur(tot)}</b>${rit?`, di cui <b>${eur(rit)}</b> di ritenuta d’acconto da versare all’erario`:''}.</div>
+      <div class="fgrid">
+        <div class="field s3"><label for="pgData">Data del pagamento</label>
+          <input class="input" type="date" id="pgData" value="${todayISO()}"></div>
+        <div class="field s3"><label for="pgMezzo">Mezzo</label>
+          <select class="input" id="pgMezzo">${['Bonifico','Banca','RID/SDD','Carta','Cassa','Assegno','Compensazione'].map(x=>`<option>${x}</option>`).join('')}</select></div>
+        <div class="field s3"><label for="pgBanca">Conto</label>
+          <input class="input" id="pgBanca" value="${esc(S.par.contoBanca||'Banca c/c')}"></div>
+      </div>
+      ${inPn?`<label class="check" style="margin-top:10px"><input type="checkbox" id="pgPn" checked>
+        Registra il pagamento anche in prima nota</label>
+        <div class="muted" style="font-size:12px;margin:4px 0 0 24px">Debito verso il fornitore in dare, banca in avere${rit?', ritenuta su Erario c/ritenute':''}. Vale per le ${inPn} fatture già registrate.</div>`
+       :'<p class="muted" style="margin-top:10px">Nessuna di queste fatture è in prima nota: il pagamento non viene registrato.</p>'}
+      <div class="acts"><button class="btn" data-a="0">Annulla</button>
+        <button class="btn primary" data-a="1">Segna pagate</button></div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click',e=>{
+      const a=e.target.closest('[data-a]');
+      if(!a&&e.target!==m)return;
+      const ok=a&&a.dataset.a==='1';
+      const pn=m.querySelector('#pgPn');
+      const out=ok?{data:m.querySelector('#pgData').value||todayISO(),
+        mezzo:m.querySelector('#pgMezzo').value,banca:m.querySelector('#pgBanca').value.trim(),
+        primaNota:!!(pn&&pn.checked)}:null;
+      m.remove();res(out);
+    });
+    m.querySelector('#pgData').focus();
+  });
+}
+
+/* ---------- annullare una registrazione ---------- */
+async function ammAnnullaScrittura(r){
+  if(soloLettura()||!puoScrivere('pn'))return toast('Il tuo ruolo non può scrivere in prima nota.',true);
+  const reg=r.registrazione;
+  if(!reg)return toast('Questa riga non fa parte di una registrazione: cancellala dalla riga.',true);
+  const righe=pnScrittura(reg);
+  if(!await confirmBox('Annulla la registrazione',
+    `La registrazione <b>${esc(reg)}</b> ha ${righe.length} righe per ${eur(pnDare(righe))}. Vengono tolte tutte.
+     ${/\/PAG$/.test(reg)?'':'<br><br>La fattura torna fra quelle da portare in prima nota.'}`,
+    'Annulla la registrazione',true))return;
+  S.pn=S.pn.filter(x=>x.registrazione!==reg);
+  if(/\/PAG$/.test(reg)){/* era un pagamento: la fattura resta registrata */}
+  else{const f=S.fp.find(x=>x.codice===reg);if(f)f.registrata='No';}
+  markDirty();renderPn();
+  toast(`Registrazione ${reg} annullata.`);
+}
+
+/* ---------- l'elenco della prima nota ---------- */
+function ammPnPdf(list){
+  const d=pnDare(list),a=pnAvere(list);
+  const date=list.map(r=>r.data).filter(Boolean).sort();
+  return ammPdf({
+    titolo:'Prima nota',
+    sottotitolo:date.length?`Dal ${fmtD(date[0])} al ${fmtD(date[date.length-1])} · ${list.length} righe`:`${list.length} righe`,
+    colonne:[{l:'Data',w:48},{l:'Registrazione',w:70},{l:'Tipo',w:58},{l:'Conto',w:150},
+      {l:'Descrizione',w:218},{l:'Documento',w:66},{l:'Dare',w:62,num:true},{l:'Avere',w:62,num:true}],
+    righe:list.map(r=>[fmtD(r.data),r.registrazione||'',r.tipo||'',r.conto||'',r.descrizione||'',
+      r.documento||'',ammEuroPdf(r.dare),ammEuroPdf(r.avere)]),
+    piede:['','','','','','Totali',ammEuroPdf(d),ammEuroPdf(a)],
+  });
+}
+function renderPn(){
+  const sbil=[...pnRegistrazioni().entries()].filter(([,l])=>Math.abs(pnSbilancio(l))>0.005);
+  genericList('pn',{
+    sub:'Le scritture di prima nota. Nascono dalle fatture passive e dai pagamenti; le righe con la stessa registrazione formano un’unica scrittura e devono quadrare.',
+    newLabel:'Nuova riga',searchPh:'Conto, descrizione, documento, registrazione',
+    search:['conto','descrizione','documento','registrazione','codice','contropartita','targa'],
+    buttons:[
+      {l:'Estrai PDF',fn:async l=>{if(!l.length)return toast('Nessuna riga con questi filtri.',true);
+        await saveInFolder('Amministrazione/Estrazioni',
+          [{name:`Prima_nota_${stampNow()}.pdf`,data:ammPnPdf(l)}]);
+        toast(`Prima nota in PDF: ${l.length} righe.`);}},
+      {l:'Vai alle fatture passive',fn:()=>{S.tab='fp';render();}},
+    ],
+    filters:[
+      {k:'tipo',label:'Tipo',opts:()=>MODS.pn.fmap.tipo.opts},
+      {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
+      {k:'conto',label:'Conto',opts:()=>[...new Set(S.pn.map(r=>r.conto).filter(Boolean))].sort()},
+      {k:'__mese',label:'Mese',opts:()=>[...new Set(S.pn.map(r=>ammMeseDi(r.data)).filter(Boolean))].sort().reverse(),
+       test:(r,v)=>ammMeseDi(r.data)===v},
+    ],
+    ledger:l=>{
+      const d=pnDare(l),a=pnAvere(l),s=r2(d-a);
+      return `<div><b>${l.length}</b><small>righe</small></div>
+        <div><b>${eur(d)}</b><small>dare</small></div>
+        <div><b>${eur(a)}</b><small>avere</small></div>
+        <div><b class="${Math.abs(s)>0.005?'late':'cfok'}">${Math.abs(s)>0.005?eur(s):'quadra'}</b><small>sbilancio</small></div>
+        <div><b class="${sbil.length?'late':''}">${sbil.length}</b><small>scritture che non quadrano</small></div>`;
+    },
+    sort:(a,b)=>(b.data||'').localeCompare(a.data||'')
+      ||String(a.registrazione||'').localeCompare(String(b.registrazione||''))
+      ||(+a.riga||0)-(+b.riga||0),
+    rowClass:r=>{const l=pnScrittura(r.registrazione);
+      return r.registrazione&&l.length&&Math.abs(pnSbilancio(l))>0.005?'rowerr':'';},
+    cols:[
+      {l:'Data',v:r=>`${fmtD(r.data)}<span class="sub">${esc(r.tipo||'')}</span>`,s:r=>r.data},
+      {l:'Registrazione',v:r=>`${esc(r.registrazione||'–')}${r.riga?`<span class="sub">riga ${r.riga}</span>`:''}`},
+      {l:'Conto',v:r=>`<b>${esc(r.conto)}</b>${r.contropartita?`<span class="sub">contro ${esc(r.contropartita)}</span>`:''}`},
+      {l:'Descrizione',v:r=>`${esc(r.descrizione)}${r.targa?`<span class="sub">${esc(r.targa)}</span>`:''}`},
+      {l:'Documento',v:r=>esc(r.documento||'')},
+      {l:'Dare',cls:'num',v:r=>eur(r.dare),s:r=>+r.dare||0},
+      {l:'Avere',cls:'num',v:r=>eur(r.avere),s:r=>+r.avere||0},
+    ],
+    rowActions:[
+      {l:'Annulla la registrazione',show:r=>!!r.registrazione,fn:ammAnnullaScrittura},
+      {l:'Apri la fattura',show:r=>!!S.fp.find(f=>f.codice===r.riferimento),
+       fn:r=>{const f=S.fp.find(x=>x.codice===r.riferimento);S.tab='fp';render();openRecord('fp',f,{onSaved:()=>renderFp()});}},
+    ],
+    empty:'Nessuna registrazione. Porta qui le fatture passive dalla loro sezione, oppure aggiungi una riga a mano.',
+    after:sbil.length?`<div class="panel" style="margin-top:14px"><h3>Scritture che non quadrano</h3>
+      <p class="muted">Dare e avere non coincidono: va corretto prima di passare i dati al commercialista.</p>
+      <div class="tablewrap"><table class="grid mini"><thead><tr><th>Registrazione</th><th class="num">Dare</th><th class="num">Avere</th><th class="num">Sbilancio</th></tr></thead><tbody>
+      ${sbil.map(([k,l])=>`<tr><td>${esc(k)}</td><td class="num">${eur(pnDare(l))}</td><td class="num">${eur(pnAvere(l))}</td><td class="num late"><b>${eur(pnSbilancio(l))}</b></td></tr>`).join('')}
+      </tbody></table></div></div>`:'',
+  });
+}
+
+/* =====================================================================
+   BOLLI E TASSE AUTOMOBILISTICHE
+   L'importo lo decide la tabella della regione, non noi: qui si calcola
+   una proposta da tariffa × base e si dichiara che è una proposta.
+   ===================================================================== */
+const bolloBase=b=>b.baseCalcolo==='Massa complessiva'?(+b.massa||0)/100:(b.baseCalcolo==='Importo fisso'?1:(+b.kw||0));
+function bolloCalcola(b){
+  const t=+b.tariffa||0;
+  if(!t)return '';
+  return r2(bolloBase(b)*t+(+b.superbollo||0));
+}
+const bolloDovuto=b=>r2((+b.importo||0)+(+b.interessi||0)+(+b.sanzioni||0));
+MODS.bolli.afterSave=b=>{b.importoCalcolato=bolloCalcola(b)||'';};
+
+/* Dalla flotta: un bollo per ogni veicolo in flotta che non ce l'ha
+   ancora per quell'anno. Potenza, massa e classe arrivano dal libretto;
+   la scadenza dal campo Bollo del mezzo. */
+async function ammBolliDaFlotta(anno){
+  if(soloLettura()||!puoScrivere('bolli'))return toast('Il tuo ruolo non può modificare i bolli.',true);
+  const a=+anno||+todayISO().slice(0,4);
+  const mezzi=S.mezzi.filter(m=>!ARCH(m)&&!FUORI_FLOTTA(m.stato));
+  const gia=new Set(S.bolli.filter(b=>+b.anno===a).map(b=>normTarga(b.targa)));
+  const da=mezzi.filter(m=>!gia.has(normTarga(m.targa)));
+  if(!da.length)return toast(`Tutti i ${mezzi.length} veicoli in flotta hanno già il bollo ${a}.`);
+  const precedenti=new Map(S.bolli.filter(b=>+b.anno===a-1).map(b=>[normTarga(b.targa),b]));
+  if(!await confirmBox(`Genera i bolli ${a}`,
+    `${da.length} ${da.length===1?'veicolo non ha':'veicoli non hanno'} il bollo ${a}.
+     Vengono creati con potenza, massa e classe ambientale prese dal libretto e con la scadenza del campo Bollo del mezzo.
+     ${precedenti.size?`<br><br>Dove c’è il bollo ${a-1} vengono ripresi importo, tariffa e regione.`:'<br><br>Gli importi restano da mettere: la tariffa dipende dalla tua regione.'}`,
+    `Crea ${da.length} ${da.length===1?'bollo':'bolli'}`))return;
+  let n=0;
+  for(const m of da){
+    const p=precedenti.get(normTarga(m.targa));
+    const r={id:uid(),codice:nextCode(MODS.bolli)};
+    for(const f of MODS.bolli.fields)r[f.k]=f.def??'';
+    const scad=m.bollo&&m.bollo.slice(0,4)==String(a)?m.bollo
+      :(p&&p.scadenza?addMonths(p.scadenza,12):(m.bollo?`${a}${m.bollo.slice(4)}`:''));
+    Object.assign(r,{targa:m.targa,anno:a,periodo:p?p.periodo:'Annuale',scadenza:scad,
+      societa:p?p.societa:(m.titolare||m.proprietaria||''),centroCosto:m.centroCosto||'',
+      regione:p?p.regione:(S.par.bolloRegione||''),
+      baseCalcolo:p?p.baseCalcolo:(/^N/.test(m.categoria||'')?'Massa complessiva':'kW'),
+      kw:m.potenza||'',massa:m.massaMax||m.massa||'',euro:m.euro||'',
+      tariffa:p?p.tariffa:(S.par.bolloTariffaKw||''),
+      importo:p?p.importo:'',superbollo:p?p.superbollo:'',
+      esenzione:p?p.esenzione:'Nessuna',stato:'Da pagare',
+      note:p?`Ripreso dal bollo ${a-1} (${p.codice})`:'Generato dalla flotta: importo da verificare sulla tabella regionale'});
+    r.importoCalcolato=bolloCalcola(r)||'';
+    if(!r.importo&&r.importoCalcolato)r.importo=r.importoCalcolato;
+    S.bolli.push(r);n++;
+  }
+  markDirty();renderBolli();
+  toast(`${n} ${n===1?'bollo creato':'bolli creati'} per il ${a}: controlla gli importi prima di pagarli.`);
+}
+
+async function ammRinnovaBolli(list){
+  if(soloLettura()||!puoScrivere('bolli'))return toast('Il tuo ruolo non può modificare i bolli.',true);
+  if(!list.length)return toast('Scegli i bolli da rinnovare.',true);
+  const mesi={Annuale:12,Semestrale:6,Quadrimestrale:4,Trimestrale:3};
+  const nuovi=[];
+  for(const b of list){
+    const passo=mesi[b.periodo]||12;
+    const scad=b.scadenza?addMonths(b.scadenza,passo):'';
+    const anno=scad?+scad.slice(0,4):(+b.anno||0)+1;
+    if(S.bolli.some(x=>normTarga(x.targa)===normTarga(b.targa)&&x.scadenza===scad&&scad))continue;
+    nuovi.push({b,scad,anno});
+  }
+  if(!nuovi.length)return toast('Il periodo successivo è già presente per tutti quelli scelti.',true);
+  if(!await confirmBox('Rinnova i bolli',
+    `${nuovi.length} ${nuovi.length===1?'bollo viene rinnovato':'bolli vengono rinnovati'} al periodo successivo, con lo stesso importo e la scadenza spostata.
+     <br><br>Gli importi vanno confermati sulla tabella regionale dell’anno nuovo.`,
+    `Rinnova ${nuovi.length===1?'il bollo':'i '+nuovi.length+' bolli'}`))return;
+  for(const {b,scad,anno} of nuovi){
+    const r={id:uid(),codice:nextCode(MODS.bolli)};
+    for(const f of MODS.bolli.fields)r[f.k]=b[f.k]!==undefined?b[f.k]:(f.def??'');
+    Object.assign(r,{anno,scadenza:scad,stato:b.esenzione&&b.esenzione!=='Nessuna'?'Esente':'Da pagare',
+      dataPagamento:'',ricevuta:'',interessi:'',sanzioni:'',
+      note:`Rinnovo di ${b.codice}: importo da confermare`});
+    S.bolli.push(r);
+  }
+  markDirty();renderBolli();
+  toast(`${nuovi.length} ${nuovi.length===1?'bollo rinnovato':'bolli rinnovati'}.`);
+}
+
+function ammBolliPdf(list){
+  const d=r2(list.reduce((a,b)=>a+bolloDovuto(b),0));
+  return ammPdf({
+    titolo:'Bolli e tasse automobilistiche',
+    sottotitolo:`${list.length} posizioni · dovuto ${ammEuroPdf(d)} euro`,
+    colonne:[{l:'Codice',w:50},{l:'Targa',w:62},{l:'Anno',w:38,num:true},{l:'Periodo',w:68},
+      {l:'Scadenza',w:52},{l:'Regione',w:92},{l:'kW',w:34,num:true},{l:'Tariffa',w:46,num:true},
+      {l:'Importo',w:56,num:true},{l:'Interessi',w:48,num:true},{l:'Dovuto',w:56,num:true},{l:'Stato',w:58},{l:'Società',w:110}],
+    righe:list.map(b=>[b.codice,b.targa,b.anno,b.periodo,fmtD(b.scadenza),b.regione||'',
+      b.kw||'',b.tariffa||'',ammEuroPdf(b.importo),ammEuroPdf(b.interessi),
+      ammEuroPdf(bolloDovuto(b)),b.stato,b.societa||'']),
+    piede:['','','','','','','','Totale','','',ammEuroPdf(d),'',''],
+  });
+}
+
+function renderBolli(){
+  const anno=+todayISO().slice(0,4);
+  genericList('bolli',{
+    sub:'Le tasse automobilistiche veicolo per veicolo: scadenze, importi e pagamenti. L’importo proposto è tariffa × base, da confermare sulla tabella della tua regione.',
+    newLabel:'Nuovo bollo',searchPh:'Targa, anno, regione, ricevuta',
+    search:['targa','anno','regione','ricevuta','codice','societa','note'],
+    buttons:[
+      {l:`Genera dalla flotta ${anno}`,primary:true,fn:()=>ammBolliDaFlotta(anno)},
+      {l:`Genera dalla flotta ${anno+1}`,fn:()=>ammBolliDaFlotta(anno+1)},
+      {l:'Estrai PDF',fn:async l=>{if(!l.length)return toast('Nessun bollo con questi filtri.',true);
+        await saveInFolder('Amministrazione/Estrazioni',
+          [{name:`Bolli_${stampNow()}.pdf`,data:ammBolliPdf(l)}]);
+        toast(`Bolli in PDF: ${l.length} posizioni.`);}},
+    ],
+    filters:[
+      {k:'anno',label:'Anno',opts:()=>[...new Set(S.bolli.map(b=>String(b.anno)).filter(Boolean))].sort().reverse()},
+      {k:'stato',label:'Stato',opts:()=>MODS.bolli.fmap.stato.opts},
+      {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
+      {k:'regione',label:'Regione',opts:()=>[...new Set(S.bolli.map(b=>b.regione).filter(Boolean))].sort()},
+    ],
+    ledger:l=>{
+      const dovuto=r2(l.filter(b=>b.stato==='Da pagare').reduce((a,b)=>a+bolloDovuto(b),0));
+      const pagato=r2(l.filter(b=>b.stato==='Pagato').reduce((a,b)=>a+bolloDovuto(b),0));
+      const sca=l.filter(b=>b.stato==='Da pagare'&&b.scadenza&&b.scadenza<todayISO()).length;
+      const pros=l.filter(b=>b.stato==='Da pagare'&&b.scadenza&&b.scadenza>=todayISO()&&b.scadenza<=addDays(todayISO(),30)).length;
+      return `<div><b>${l.length}</b><small>posizioni</small></div>
+        <div><b>${eur(dovuto)}</b><small>da pagare</small></div>
+        <div><b>${eur(pagato)}</b><small>pagato</small></div>
+        <div><b class="${sca?'late':''}">${sca}</b><small>scadute</small></div>
+        <div><b class="${pros?'warnc':''}">${pros}</b><small>entro 30 giorni</small></div>`;
+    },
+    sort:(a,b)=>(a.scadenza||'9999').localeCompare(b.scadenza||'9999'),
+    cols:[
+      {l:'Veicolo',v:r=>{const m=mezzoBy(r.targa);
+        return `${plate(r.targa)}<span class="sub">${esc(m?mezzoName(m):'non in anagrafica')}</span>`;}},
+      {l:'Periodo',v:r=>`${esc(r.anno)}<span class="sub">${esc(r.periodo)}</span>`,s:r=>String(r.anno)+r.periodo},
+      {l:'Scadenza',v:r=>dueCell(r.scadenza,30),s:r=>r.scadenza||'9999'},
+      {l:'Calcolo',v:r=>{const c=bolloCalcola(r);
+        return `${esc(r.regione||'regione da indicare')}<span class="sub">${r.tariffa?`${numF.format(bolloBase(r))} × ${numF.format(r.tariffa)} = ${eur(c)}`:'tariffa da indicare'}</span>`;}},
+      {l:'Dovuto',cls:'num',v:r=>{const d=bolloDovuto(r);const c=bolloCalcola(r);
+        return `<b>${eur(d)}</b>${c!==''&&Math.abs(r2(c-(+r.importo||0)))>0.5?`<span class="sub warnc">proposta ${eur(c)}</span>`:''}`;},s:r=>bolloDovuto(r)},
+      {l:'Stato',v:r=>`${pillS(r.stato,r.stato==='Pagato'?'run':r.stato==='Da pagare'?'rent':'end')}${r.dataPagamento?`<span class="sub">${fmtD(r.dataPagamento)}${r.modalita?' · '+esc(r.modalita):''}</span>`:''}`},
+      {l:'Società',v:r=>`${esc(r.societa||'–')}<span class="sub">${esc(r.centroCosto||'')}</span>`},
+    ],
+    rowActions:[
+      {l:'Segna pagato',show:r=>r.stato==='Da pagare',
+       fn:r=>{r.stato='Pagato';r.dataPagamento=todayISO();markDirty();renderBolli();
+         toast(`Bollo ${r.targa} ${r.anno} segnato pagato.`);}},
+      {l:'Rinnova',fn:r=>ammRinnovaBolli([r])},
+    ],
+    selActions:[
+      {l:'Rinnova il periodo successivo',primary:true,fn:l=>ammRinnovaBolli(l)},
+      {l:'Segna pagati',fn:l=>{const d=l.filter(b=>b.stato==='Da pagare');
+        d.forEach(b=>{b.stato='Pagato';b.dataPagamento=todayISO();});
+        if(d.length){markDirty();renderBolli();}
+        toast(d.length?`${d.length} bolli segnati pagati.`:'Nessuno da pagare fra quelli scelti.',!d.length);}},
+      {l:'Estrai PDF',fn:l=>saveInFolder('Amministrazione/Estrazioni',
+        [{name:`Bolli_${stampNow()}.pdf`,data:ammBolliPdf(l)}])},
+    ],
+    empty:'Nessun bollo. Usa «Genera dalla flotta» per creare una posizione per ogni veicolo.',
+  });
+}
+
+
+/* =====================================================================
+   AMMINISTRAZIONE — liquidazione IVA, F24 e previsionale
+   ---------------------------------------------------------------------
+   Il calcolo è scomposto a vista: ogni numero dice da quali documenti
+   viene, così si controlla invece di fidarsi. Codici tributo e scadenze
+   sono quelli consueti, ma restano da confermare col commercialista:
+   il gestionale li propone, non li certifica.
+   ===================================================================== */
+
+/* ---------- quali documenti entrano nel periodo ---------- */
+function ivaFattureDi(societa,anno,periodo,periodicita){
+  const atteso=/^T/.test(periodo)?`${anno}-${periodo}`:`${anno}-${periodo}`;
+  return S.fp.filter(f=>{
+    if(f.esclusaLiquidazione==='Sì')return false;
+    if(societa&&f.societa!==societa)return false;
+    return fpPeriodo(f,periodicita)===atteso;
+  });
+}
+function ivaVenditeDi(societa,anno,periodo,periodicita){
+  const dentro=d=>{
+    if(!d||d.slice(0,4)!==String(anno))return false;
+    return /^T/.test(periodo)?ammTrimDi(d)===periodo:d.slice(5,7)===periodo;
+  };
+  return S.fat.filter(f=>['Fattura emessa SDI','Pagata'].includes(f.stato)
+    &&(!societa||f.emittente===societa)&&dentro(f.dataFattura||f.data));
+}
+
+/* ---------- il calcolo ----------
+   debito  = IVA sulle vendite + IVA da inversione contabile
+   credito = IVA detraibile sugli acquisti (compresa la quota detraibile
+             dell'inversione contabile)
+   saldo   = debito - credito - credito del periodo precedente
+             - acconto + interessi + altre variazioni               */
+function ivaCalcola(societa,anno,periodo,periodicita){
+  const fatt=ivaFattureDi(societa,anno,periodo,periodicita);
+  const vend=ivaVenditeDi(societa,anno,periodo,periodicita);
+  let acquisti=0,indetraibile=0,reverse=0;
+  for(const f of fatt){
+    const s=fpSegno(f);                       /* le note di credito sottraggono */
+    const rev=fpIvaReverse(f);
+    acquisti=r2(acquisti+s*(fpIvaDetraibile(f)+r2(rev*fpQuota(f))));
+    indetraibile=r2(indetraibile+s*(fpIvaIndetraibile(f)+r2(rev*(1-fpQuota(f)))));
+    reverse=r2(reverse+s*rev);
+  }
+  const vendite=r2(vend.reduce((a,f)=>a+(+f.iva||0),0));
+  return {fatture:fatt,vendite:vend,
+    ivaVendite:vendite,ivaAcquisti:acquisti,ivaIndetraibile:indetraibile,ivaReverse:reverse,
+    scadenza:ammScadenzaIva(anno,periodo,periodicita),
+    codiceTributo:ammTributoIva(periodo,periodicita),
+    fonteVendite:vend.length
+      ? `${vend.length} fatture emesse registrate nel gestionale (${vend.map(f=>f.numeroFattura||f.codice).slice(0,6).join(', ')}${vend.length>6?'…':''})`
+      : 'Nessuna fattura emessa registrata nel gestionale per questo periodo: se ne hai emesse altrove, scrivi l’IVA sulle vendite a mano.'};
+}
+/* Gli interessi dell'1% li devono i trimestrali, non sull'ultimo periodo. */
+function ivaInteressiProposti(r,base){
+  if(r.periodicita!=='Trimestrale'||r.periodo==='T4')return 0;
+  return base>0?r2(base*0.01):0;
+}
+function ivaSaldo(r){
+  const debito=r2((+r.ivaVendite||0)+(+r.ivaReverse||0));
+  const credito=r2((+r.ivaAcquisti||0)+(+r.creditoPrecedente||0)+(+r.acconto||0));
+  return r2(debito-credito+(+r.interessi||0)+(+r.altreVariazioni||0));
+}
+MODS.iva.afterSave=r=>{
+  const s=ivaSaldo(r);
+  r.saldo=s;r.aVersare=s>0?s:'';r.aCredito=s<0?r2(-s):'';
+  if(!r.scadenza)r.scadenza=ammScadenzaIva(r.anno,r.periodo,r.periodicita);
+  if(!r.codiceTributo)r.codiceTributo=ammTributoIva(r.periodo,r.periodicita);
+  if(r.stato==='Calcolata')r.stato=s>0?'Da versare':(s<0?'A credito':'Azzerata');
+};
+
+/* ---------- il pannello di calcolo ---------- */
+function ivaPannello(){
+  const u=ui('ivacalc');
+  const tit=S.soc.filter(socOk.tit).map(s=>s.ragione);
+  if(!u.societa)u.societa=tit[0]||'';
+  if(!u.anno)u.anno=+todayISO().slice(0,4);
+  if(!u.periodicita)u.periodicita=S.par.ivaPeriodicita||'Trimestrale';
+  if(!u.periodo)u.periodo=u.periodicita==='Mensile'
+    ?String(Math.max(1,+todayISO().slice(5,7)-1)).padStart(2,'0')
+    :ammTrimDi(addMonths(todayISO(),-3));
+  const periodi=u.periodicita==='Mensile'?AMM_MESI:['T1','T2','T3','T4'];
+  if(!periodi.includes(u.periodo))u.periodo=periodi[0];
+  const c=u.esito;
+  return `<div class="panel" data-ivabox>
+    <h3>Calcola la liquidazione di un periodo</h3>
+    <div class="fgrid">
+      <div class="field s3"><label>Società</label>
+        <select class="input" data-iv="societa">${tit.map(s=>`<option ${s===u.societa?'selected':''}>${esc(s)}</option>`).join('')||'<option value="">nessuna società titolare in anagrafica</option>'}</select></div>
+      <div class="field s2"><label>Anno</label>
+        <input class="input" type="number" step="1" data-iv="anno" value="${esc(u.anno)}"></div>
+      <div class="field s2"><label>Periodicità</label>
+        <select class="input" data-iv="periodicita">${['Mensile','Trimestrale'].map(p=>`<option ${p===u.periodicita?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="field s2"><label>Periodo</label>
+        <select class="input" data-iv="periodo">${periodi.map(p=>`<option value="${p}" ${p===u.periodo?'selected':''}>${esc(ammPeriodoL(p))}</option>`).join('')}</select></div>
+      <div class="field s3" style="align-self:end;flex-direction:row"><button class="btn primary" data-ivacalc style="align-self:flex-start">Calcola</button></div>
+    </div>
+    ${c?ivaEsitoHtml(u,c):'<p class="muted">Il calcolo prende l’IVA detraibile dalle fatture passive del periodo e l’IVA sulle vendite dalle fatture emesse registrate nel gestionale.</p>'}
+  </div>`;
+}
+function ivaEsitoHtml(u,c){
+  const base=r2(c.ivaVendite+c.ivaReverse-c.ivaAcquisti);
+  const inter=ivaInteressiProposti(u,base);
+  const saldo=r2(base+inter);
+  const ex=S.iva.find(r=>r.societa===u.societa&&+r.anno===+u.anno&&r.periodo===u.periodo&&r.periodicita===u.periodicita);
+  return `<div class="calcbox" style="margin-top:12px">
+      <div><small>IVA sulle vendite</small><b>${eur(c.ivaVendite)}</b></div>
+      <div><small>IVA detraibile sugli acquisti</small><b>${eur(c.ivaAcquisti)}</b></div>
+      ${c.ivaReverse?`<div><small>Inversione contabile</small><b>${eur(c.ivaReverse)}</b></div>`:''}
+      ${inter?`<div><small>Interessi 1%</small><b>${eur(inter)}</b></div>`:''}
+      <div><small>${saldo>=0?'Da versare':'A credito'}</small><b class="${saldo>0?'late':'cfok'}">${eur(Math.abs(saldo))}</b></div>
+    </div>
+    <p class="muted" style="margin-top:8px">Scadenza proposta <b>${c.scadenza?fmtD(c.scadenza):'da indicare'}</b>, codice tributo <b>${esc(c.codiceTributo||'da indicare')}</b>. ${c.ivaIndetraibile?`L’IVA indetraibile di <b>${eur(c.ivaIndetraibile)}</b> non entra nel calcolo: è un costo.`:''}</p>
+    <p class="muted">Vendite: ${esc(c.fonteVendite)}</p>
+    ${c.fatture.length?`<details style="margin-top:8px"><summary><b>${c.fatture.length} fatture passive nel periodo</b></summary>
+      <div class="tablewrap" style="max-height:300px;overflow:auto;margin-top:8px"><table class="grid mini"><thead><tr><th>Codice</th><th>Numero</th><th>Data</th><th>Fornitore</th><th class="num">Imponibile</th><th class="num">IVA</th><th class="num">Detraibile</th><th class="num">%</th></tr></thead><tbody>
+      ${c.fatture.map(f=>{const s=fpSegno(f);
+        return `<tr><td>${esc(f.codice)}</td><td>${esc(f.numero)}${s<0?'<span class="sub">nota di credito</span>':''}</td><td>${fmtD(f.data)}</td><td>${esc(f.fornitore)}</td>
+        <td class="num">${eur(r2(s*fpImponibile(f)))}</td><td class="num">${eur(r2(s*fpImposta(f)))}</td>
+        <td class="num">${eur(r2(s*(fpIvaDetraibile(f)+r2(fpIvaReverse(f)*fpQuota(f)))))}</td><td class="num">${numF.format(fpQuota(f)*100)}</td></tr>`;}).join('')}
+      </tbody></table></div></details>`
+      :'<p class="muted">Nessuna fattura passiva in questo periodo per questa società. Controlla che le fatture abbiano la società intestataria e la data di registrazione.</p>'}
+    <div class="acts" style="margin-top:12px;justify-content:flex-start">
+      <button class="btn primary" data-ivasalva>${ex?'Aggiorna la liquidazione registrata':'Registra la liquidazione'}</button>
+      ${ex?`<span class="muted">Già registrata come <b>${esc(ex.codice)}</b> (${esc(ex.stato)})</span>`:''}
+    </div>`;
+}
+async function ivaRegistra(){
+  const u=ui('ivacalc');const c=u.esito;if(!c)return;
+  if(soloLettura()||!puoScrivere('iva'))return toast('Il tuo ruolo non può modificare la liquidazione IVA.',true);
+  const base=r2(c.ivaVendite+c.ivaReverse-c.ivaAcquisti);
+  const inter=ivaInteressiProposti(u,base);
+  let r=S.iva.find(x=>x.societa===u.societa&&+x.anno===+u.anno&&x.periodo===u.periodo&&x.periodicita===u.periodicita);
+  const nuova=!r;
+  if(nuova){r={id:uid(),codice:nextCode(MODS.iva)};
+    for(const f of MODS.iva.fields)r[f.k]=f.def??'';
+    S.iva.push(r);}
+  else if(['Versata'].includes(r.stato)&&!await confirmBox('Liquidazione già versata',
+    `La liquidazione <b>${esc(r.codice)}</b> risulta versata il ${fmtD(r.dataVersamento)}. Sovrascrivere i numeri?`,
+    'Sovrascrivi',true))return;
+  Object.assign(r,{societa:u.societa,anno:+u.anno,periodicita:u.periodicita,periodo:u.periodo,
+    ivaVendite:c.ivaVendite,ivaAcquisti:c.ivaAcquisti,ivaIndetraibile:c.ivaIndetraibile,
+    ivaReverse:c.ivaReverse,interessi:inter||'',
+    scadenza:r.scadenza||c.scadenza,codiceTributo:r.codiceTributo||c.codiceTributo,
+    fonteVendite:c.fonteVendite,stato:r.stato==='Versata'?'Versata':'Calcolata'});
+  MODS.iva.afterSave(r);
+  markDirty();renderIva();
+  toast(`Liquidazione ${r.codice} ${nuova?'registrata':'aggiornata'}: ${r.aVersare?`${eur(r.aVersare)} da versare`:(r.aCredito?`${eur(r.aCredito)} a credito`:'saldo a zero')}.`);
+}
+
+function renderIva(){
+  genericList('iva',{
+    sub:'Il saldo IVA periodo per periodo, calcolato dalle fatture passive e dalle fatture emesse registrate nel gestionale.',
+    newLabel:'Nuova liquidazione',searchPh:'Società, anno, periodo',
+    search:['societa','anno','periodo','codice','codiceTributo','note'],
+    tabsHtml:ivaPannello(),
+    buttons:[{l:'Previsionale F24',fn:()=>{S.tab='f24p';render();}}],
+    filters:[
+      {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
+      {k:'anno',label:'Anno',opts:()=>[...new Set(S.iva.map(r=>String(r.anno)).filter(Boolean))].sort().reverse()},
+      {k:'stato',label:'Stato',opts:()=>MODS.iva.fmap.stato.opts},
+    ],
+    ledger:l=>{
+      const v=r2(l.filter(r=>r.stato!=='Versata').reduce((a,r)=>a+(+r.aVersare||0),0));
+      const cr=r2(l.reduce((a,r)=>a+(+r.aCredito||0),0));
+      const pag=r2(l.filter(r=>r.stato==='Versata').reduce((a,r)=>a+(+r.aVersare||0),0));
+      return `<div><b>${l.length}</b><small>liquidazioni</small></div>
+        <div><b>${eur(v)}</b><small>ancora da versare</small></div>
+        <div><b>${eur(pag)}</b><small>versato</small></div>
+        <div><b>${eur(cr)}</b><small>a credito</small></div>`;
+    },
+    sort:(a,b)=>String(b.anno).localeCompare(String(a.anno))||String(b.periodo).localeCompare(String(a.periodo)),
+    cols:[
+      {l:'Periodo',v:r=>`<b>${esc(ammPeriodoL(r.periodo))} ${esc(r.anno)}</b><span class="sub">${esc(r.periodicita)}</span>`,
+       s:r=>`${r.anno}${r.periodo}`},
+      {l:'Società',v:r=>esc(r.societa)},
+      {l:'Vendite',cls:'num',v:r=>eur(r.ivaVendite),s:r=>+r.ivaVendite||0},
+      {l:'Acquisti',cls:'num',v:r=>`${eur(r.ivaAcquisti)}${+r.ivaIndetraibile?`<span class="sub">indetraibile ${eur(r.ivaIndetraibile)}</span>`:''}`,s:r=>+r.ivaAcquisti||0},
+      {l:'Saldo',cls:'num',v:r=>{const s=+r.saldo||0;
+        return `<b class="${s>0?'late':s<0?'cfok':''}">${eur(Math.abs(s))}</b><span class="sub">${s>0?'da versare':s<0?'a credito':'a zero'}</span>`;},s:r=>+r.saldo||0},
+      {l:'Scadenza',v:r=>`${r.scadenza?dueCell(r.scadenza,15):'<span class="muted">–</span>'}<span class="sub">tributo ${esc(r.codiceTributo||'–')}</span>`,s:r=>r.scadenza||'9999'},
+      {l:'Stato',v:r=>`${pillS(r.stato,r.stato==='Versata'?'run':r.stato==='Da versare'?'rent':r.stato==='A credito'?'end':'end')}${r.f24?`<span class="sub">${esc(r.f24)}</span>`:''}`},
+    ],
+    rowActions:[
+      {l:'Ricalcola',fn:r=>{const u=ui('ivacalc');
+        Object.assign(u,{societa:r.societa,anno:r.anno,periodicita:r.periodicita,periodo:r.periodo});
+        u.esito=ivaCalcola(r.societa,r.anno,r.periodo,r.periodicita);renderIva();
+        toast('Ricalcolata nel pannello in alto: controlla e registra.');}},
+      {l:'Crea l’F24',show:r=>+r.aVersare>0&&!r.f24,fn:r=>ammF24DaIva(r)},
+      {l:'Segna versata',show:r=>r.stato!=='Versata'&&+r.aVersare>0,
+       fn:r=>{r.stato='Versata';r.dataVersamento=todayISO();markDirty();renderIva();
+         toast(`Liquidazione ${r.codice} segnata versata.`);}},
+    ],
+    empty:'Nessuna liquidazione registrata. Usa il pannello in alto per calcolare un periodo.',
+  });
+  /* il pannello va legato dopo che genericList ha scritto la pagina */
+  const box=$('#main').querySelector('[data-ivabox]');if(!box)return;
+  const u=ui('ivacalc');
+  box.querySelectorAll('[data-iv]').forEach(el=>el.onchange=()=>{
+    const k=el.dataset.iv;
+    u[k]=k==='anno'?(parseInt(el.value,10)||+todayISO().slice(0,4)):el.value;
+    if(k==='periodicita')u.periodo='';
+    u.esito=null;renderIva();
+  });
+  box.querySelector('[data-ivacalc]').onclick=()=>{
+    if(!u.societa)return toast('Serve una società titolare in anagrafica.',true);
+    u.esito=ivaCalcola(u.societa,u.anno,u.periodo,u.periodicita);renderIva();
+  };
+  const sv=box.querySelector('[data-ivasalva]');if(sv)sv.onclick=ivaRegistra;
+}
+
+/* =====================================================================
+   F24
+   ===================================================================== */
+const f24Righe=f=>f?S.f24r.filter(r=>r.f24===f.codice).sort((a,b)=>AMM_SEZIONI.indexOf(a.sezione)-AMM_SEZIONI.indexOf(b.sezione)):[];
+function f24Ricalcola(f){
+  const rr=f24Righe(f);
+  f.totaleDebito=r2(rr.reduce((a,r)=>a+(+r.importoDebito||0),0));
+  f.totaleCredito=r2(rr.reduce((a,r)=>a+(+r.importoCredito||0),0));
+  f.saldo=r2(f.totaleDebito-f.totaleCredito);
+  return f;
+}
+MODS.f24.afterSave=f=>{if(f24Righe(f).length)f24Ricalcola(f);};
+
+async function ammF24DaIva(r){
+  if(soloLettura()||!puoScrivere('f24'))return toast('Il tuo ruolo non può creare F24.',true);
+  const imp=+r.aVersare||0;
+  if(imp<=0)return toast('Questa liquidazione non ha niente da versare.',true);
+  const f={id:uid(),codice:nextCode(MODS.f24,r.scadenza||todayISO())};
+  for(const x of MODS.f24.fields)f[x.k]=x.def??'';
+  Object.assign(f,{societa:r.societa,tipo:'F24 ordinario',
+    scadenza:r.scadenza||ammScadenzaIva(r.anno,r.periodo,r.periodicita),
+    stato:'Da versare',anno:r.anno,periodo:r.periodo,
+    descrizione:`IVA ${ammPeriodoL(r.periodo)} ${r.anno} – ${r.societa}`,
+    modalita:'Home banking',banca:S.par.contoBanca||''});
+  S.f24.push(f);
+  const cod=r.codiceTributo||ammTributoIva(r.periodo,r.periodicita);
+  S.f24r.push({id:uid(),codice:nextCode(MODS.f24r),f24:f.codice,sezione:'Erario',
+    codiceTributo:cod,descrizione:ammTributoDesc(cod)||`IVA ${ammPeriodoL(r.periodo)} ${r.anno}`,
+    rateazione:'',anno:r.anno,periodoDa:'',periodoA:'',
+    importoDebito:r2(imp-(+r.interessi||0)),importoCredito:'',codiceSede:'',matricola:''});
+  if(+r.interessi)S.f24r.push({id:uid(),codice:nextCode(MODS.f24r),f24:f.codice,sezione:'Erario',
+    codiceTributo:'1668',descrizione:ammTributoDesc('1668'),rateazione:'',anno:r.anno,
+    periodoDa:'',periodoA:'',importoDebito:+r.interessi,importoCredito:'',codiceSede:'',matricola:''});
+  f24Ricalcola(f);
+  r.f24=f.codice;if(r.stato==='Calcolata')r.stato='Da versare';
+  markDirty();S.tab='f24';render();
+  toast(`F24 ${f.codice} creato per ${eur(f.saldo)}: controlla codice tributo e scadenza.`);
+}
+
+function openF24Righe(f){
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const ro=!puoScrivere('f24r');
+  const paint=()=>{
+    const rr=f24Righe(f);f24Ricalcola(f);
+    d.innerHTML=`<header><h2>Tributi dell’F24 ${esc(f.codice)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <div class="calcbox">
+        <div><small>A debito</small><b>${eur(f.totaleDebito)}</b></div>
+        <div><small>Compensato</small><b>${eur(f.totaleCredito)}</b></div>
+        <div><small>Saldo da versare</small><b class="${+f.saldo>0?'late':'cfok'}">${eur(f.saldo)}</b></div>
+        <div><small>Scadenza</small><b>${f.scadenza?fmtD(f.scadenza):'–'}</b></div>
+      </div>
+      <div class="tablewrap"><table class="grid mini"><thead><tr>
+        <th>Sezione</th><th>Codice</th><th>Descrizione</th><th>Rateaz./Regione</th>
+        <th class="num">Anno</th><th class="num">Debito</th><th class="num">Credito</th><th></th></tr></thead><tbody>
+      ${rr.map(r=>`<tr data-r="${r.id}">
+        <td>${ro?esc(r.sezione):`<select class="input" data-k="sezione">${AMM_SEZIONI.map(s=>`<option ${s===r.sezione?'selected':''}>${esc(s)}</option>`).join('')}</select>`}</td>
+        <td>${ro?esc(r.codiceTributo):`<input class="input upc" style="width:76px" data-k="codiceTributo" value="${esc(r.codiceTributo)}" list="f24trib">`}</td>
+        <td>${ro?esc(r.descrizione):`<input class="input" data-k="descrizione" value="${esc(r.descrizione)}">`}</td>
+        <td>${ro?esc(r.rateazione||''):`<input class="input" style="width:110px" data-k="rateazione" value="${esc(r.rateazione||'')}">`}</td>
+        <td class="num">${ro?esc(r.anno):`<input class="input cin" style="width:68px" type="number" step="1" data-k="anno" value="${esc(r.anno)}">`}</td>
+        <td class="num">${ro?eur(r.importoDebito):`<input class="input cin" type="number" step="0.01" data-k="importoDebito" value="${r.importoDebito}">`}</td>
+        <td class="num">${ro?eur(r.importoCredito):`<input class="input cin" type="number" step="0.01" data-k="importoCredito" value="${r.importoCredito}">`}</td>
+        <td>${ro?'':`<button class="btn ghost danger" data-del="${r.id}">Togli</button>`}</td></tr>`).join('')
+        ||'<tr><td colspan="8" class="empty">Nessun tributo. Aggiungi una riga.</td></tr>'}
+      </tbody></table></div>
+      <datalist id="f24trib">${AMM_TRIBUTI.map(t=>`<option value="${t[0]}">${esc(t[1])}</option>`).join('')}</datalist>
+      ${ro?'':'<button class="btn" data-add style="margin-top:8px">Aggiungi un tributo</button>'}
+      <p class="muted" style="margin-top:10px">Scrivendo un codice tributo noto la descrizione si compila da sé. I codici restano modificabili: quelli proposti sono i più usati, non un elenco chiuso.</p>
+    </div>
+    <footer><button class="btn" data-edit>Scheda dell’F24</button><button class="btn primary" data-x>Fatto</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+    d.querySelector('[data-edit]').onclick=()=>{close();openRecord('f24',f,{onSaved:()=>renderF24()});};
+    const add=d.querySelector('[data-add]');
+    if(add)add.onclick=()=>{S.f24r.push({id:uid(),codice:nextCode(MODS.f24r),f24:f.codice,
+      sezione:'Erario',codiceTributo:'',descrizione:'',rateazione:'',anno:f.anno||+todayISO().slice(0,4),
+      periodoDa:'',periodoA:'',importoDebito:0,importoCredito:'',codiceSede:'',matricola:''});markDirty();paint();};
+    d.querySelectorAll('tr[data-r] input,tr[data-r] select').forEach(i=>i.onchange=()=>{
+      const r=S.f24r.find(x=>x.id===i.closest('tr').dataset.r);if(!r)return;
+      const k=i.dataset.k;
+      r[k]=['importoDebito','importoCredito','anno'].includes(k)?(parseFloat(i.value)||'' ):i.value.trim();
+      if(k==='codiceTributo'){r.codiceTributo=r.codiceTributo.toUpperCase();
+        const dsc=ammTributoDesc(r.codiceTributo);
+        if(dsc&&!r.descrizione)r.descrizione=dsc;
+        const sez=ammTributoSez(r.codiceTributo);if(dsc)r.sezione=sez;}
+      markDirty();paint();});
+    d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+      S.f24r=S.f24r.filter(x=>x.id!==b.dataset.del);markDirty();paint();});
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);renderF24();};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);
+  sc.onclick=close;document.body.append(sc,d);paint();
+}
+
+/* Un riepilogo leggibile, non il modello ministeriale: serve a chi paga e
+   a chi controlla, non si presenta in banca al posto dell'F24. */
+function ammF24Pdf(f){
+  const rr=f24Righe(f);f24Ricalcola(f);
+  return ammPdf({
+    titolo:`Riepilogo F24 ${f.codice}`,
+    sottotitolo:`${f.societa} · scadenza ${fmtD(f.scadenza)} · ${f.tipo} · ${f.stato}${f.descrizione?' · '+f.descrizione:''}`,
+    orizzontale:false,
+    colonne:[{l:'Sezione',w:110},{l:'Codice',w:52},{l:'Descrizione',w:190},
+      {l:'Rateaz.',w:52},{l:'Anno',w:38,num:true},{l:'Debito',w:60,num:true},{l:'Credito',w:58,num:true}],
+    righe:rr.map(r=>[r.sezione,r.codiceTributo,r.descrizione||ammTributoDesc(r.codiceTributo),
+      r.rateazione||'',r.anno||'',ammEuroPdf(r.importoDebito),ammEuroPdf(r.importoCredito)]),
+    piede:['','','','','Saldo '+ammEuroPdf(f.saldo),ammEuroPdf(f.totaleDebito),ammEuroPdf(f.totaleCredito)],
+  });
+}
+
+async function ammF24InPrimaNota(list){
+  if(soloLettura()||!puoScrivere('pn'))return toast('Il tuo ruolo non può scrivere in prima nota.',true);
+  const da=list.filter(f=>+f.saldo>0&&!S.pn.some(r=>r.registrazione===f.codice));
+  if(!da.length)return toast('Niente da registrare: già in prima nota, oppure saldo a zero.',true);
+  const tot=r2(da.reduce((a,f)=>a+(+f.saldo||0),0));
+  if(!await confirmBox('Registra i versamenti in prima nota',
+    `${da.length} ${da.length===1?'F24':'F24'} per ${eur(tot)}: i tributi in dare, la banca in avere.`,
+    `Registra ${da.length===1?'il versamento':'i '+da.length+' versamenti'}`))return;
+  for(const f of da){
+    const rr=f24Righe(f);
+    let i=0;
+    for(const r of rr){
+      const d=r2((+r.importoDebito||0)-(+r.importoCredito||0));
+      if(!d)continue;
+      S.pn.push({id:uid(),codice:nextCode(MODS.pn,f.dataVersamento||f.scadenza),
+        data:f.dataVersamento||f.scadenza,societa:f.societa,tipo:'Versamento F24',
+        registrazione:f.codice,riga:++i,
+        descrizione:`${r.codiceTributo} ${r.descrizione||ammTributoDesc(r.codiceTributo)} – F24 ${fmtD(f.scadenza)}`,
+        conto:r.sezione==='INPS'?'INPS c/contributi':(/^6\d/.test(r.codiceTributo)?'Erario c/IVA':'Erario c/imposte'),
+        dare:d,avere:'',contropartita:f.banca||S.par.contoBanca||'Banca c/c',
+        mezzoPagamento:'Banca',banca:f.banca||S.par.contoBanca||'',
+        documento:f.codice,riferimento:f.codice,targa:'',centroCosto:'',note:''});
+    }
+    S.pn.push({id:uid(),codice:nextCode(MODS.pn,f.dataVersamento||f.scadenza),
+      data:f.dataVersamento||f.scadenza,societa:f.societa,tipo:'Versamento F24',
+      registrazione:f.codice,riga:++i,descrizione:`Versamento F24 ${f.codice}`,
+      conto:f.banca||S.par.contoBanca||'Banca c/c',dare:'',avere:+f.saldo||0,contropartita:'',
+      mezzoPagamento:'Banca',banca:f.banca||S.par.contoBanca||'',
+      documento:f.codice,riferimento:f.codice,targa:'',centroCosto:'',note:''});
+  }
+  markDirty();renderF24();
+  toast(`${da.length} ${da.length===1?'versamento registrato':'versamenti registrati'} in prima nota.`);
+}
+
+function renderF24(){
+  genericList('f24',{
+    sub:'I modelli F24 da versare, con i tributi riga per riga. Nascono dalla liquidazione IVA o dal previsionale, e si possono registrare in prima nota.',
+    newLabel:'Nuovo F24',searchPh:'Società, descrizione, protocollo',
+    search:['societa','descrizione','protocollo','codice','anno','note'],
+    buttons:[
+      {l:'Previsionale',primary:true,fn:()=>{S.tab='f24p';render();}},
+      {l:'Vai alla liquidazione IVA',fn:()=>{S.tab='iva';render();}},
+    ],
+    filters:[
+      {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
+      {k:'stato',label:'Stato',opts:()=>MODS.f24.fmap.stato.opts},
+      {k:'tipo',label:'Tipo',opts:()=>MODS.f24.fmap.tipo.opts},
+      {k:'__mese',label:'Mese di scadenza',opts:()=>[...new Set(S.f24.map(f=>ammMeseDi(f.scadenza)).filter(Boolean))].sort().reverse(),
+       test:(r,v)=>ammMeseDi(r.scadenza)===v},
+    ],
+    ledger:l=>{
+      const da=l.filter(f=>['Previsionale','Da versare'].includes(f.stato));
+      const tot=r2(da.reduce((a,f)=>a+(+f.saldo||0),0));
+      const prev=r2(l.filter(f=>f.stato==='Previsionale').reduce((a,f)=>a+(+f.saldo||0),0));
+      const vers=r2(l.filter(f=>f.stato==='Versato').reduce((a,f)=>a+(+f.saldo||0),0));
+      const sca=da.filter(f=>f.scadenza&&f.scadenza<todayISO()).length;
+      return `<div><b>${l.length}</b><small>modelli</small></div>
+        <div><b>${eur(tot)}</b><small>da versare</small></div>
+        <div><b>${eur(prev)}</b><small>di cui previsionale</small></div>
+        <div><b>${eur(vers)}</b><small>versato</small></div>
+        <div><b class="${sca?'late':''}">${sca}</b><small>scaduti</small></div>`;
+    },
+    sort:(a,b)=>(a.scadenza||'9999').localeCompare(b.scadenza||'9999'),
+    cols:[
+      {l:'Scadenza',v:r=>`${r.scadenza?dueCell(r.scadenza,15):'<span class="muted">–</span>'}<span class="sub">${esc(r.codice)}</span>`,s:r=>r.scadenza||'9999'},
+      {l:'Società',v:r=>`${esc(r.societa)}<span class="sub">${esc(r.tipo)}</span>`},
+      {l:'Descrizione',v:r=>`${esc(r.descrizione||'')}<span class="sub">${esc(r.periodo?ammPeriodoL(r.periodo)+' '+(r.anno||''):(r.anno||''))}</span>`},
+      {l:'Tributi',v:r=>{const n=f24Righe(r).length;
+        return n?`${n} ${n===1?'tributo':'tributi'}<span class="sub">${esc(f24Righe(r).map(x=>x.codiceTributo).filter(Boolean).slice(0,4).join(', '))}</span>`:'<span class="muted">nessuno</span>';}},
+      {l:'A debito',cls:'num',v:r=>eur(r.totaleDebito),s:r=>+r.totaleDebito||0},
+      {l:'Compensato',cls:'num',v:r=>eur(r.totaleCredito),s:r=>+r.totaleCredito||0},
+      {l:'Saldo',cls:'num',v:r=>`<b>${eur(r.saldo)}</b>`,s:r=>+r.saldo||0},
+      {l:'Stato',v:r=>`${pillS(r.stato,r.stato==='Versato'?'run':r.stato==='Da versare'?'rent':'end')}${r.dataVersamento?`<span class="sub">${fmtD(r.dataVersamento)}</span>`:''}`},
+    ],
+    rowActions:[
+      {l:'Tributi',fn:openF24Righe},
+      {l:'Riepilogo PDF',fn:async r=>{await saveInFolder('Amministrazione/F24',
+        [{name:`F24_${safe(r.codice)}.pdf`,data:ammF24Pdf(r)}]);}},
+      {l:'Segna versato',show:r=>r.stato!=='Versato',
+       fn:r=>{r.stato='Versato';r.dataVersamento=todayISO();
+         const iv=S.iva.find(x=>x.f24===r.codice);
+         if(iv&&iv.stato!=='Versata'){iv.stato='Versata';iv.dataVersamento=r.dataVersamento;}
+         markDirty();renderF24();toast(`F24 ${r.codice} segnato versato.`);}},
+      {l:'Registra in prima nota',show:r=>+r.saldo>0&&!S.pn.some(x=>x.registrazione===r.codice),
+       fn:r=>ammF24InPrimaNota([r])},
+    ],
+    selActions:[
+      {l:'Registra in prima nota',primary:true,fn:l=>ammF24InPrimaNota(l)},
+      {l:'Segna versati',fn:l=>{const d=l.filter(f=>f.stato!=='Versato');
+        d.forEach(f=>{f.stato='Versato';f.dataVersamento=todayISO();});
+        if(d.length){markDirty();renderF24();}
+        toast(d.length?`${d.length} F24 segnati versati.`:'Erano già tutti versati.',!d.length);}},
+    ],
+    empty:'Nessun F24. Il previsionale propone quelli del mese; la liquidazione IVA ne crea uno col suo codice tributo.',
+  });
+}
+
+/* =====================================================================
+   PREVISIONALE F24
+   Cosa si pagherà, da dove viene e che cosa manca ancora per saperlo.
+   ===================================================================== */
+function ammPrevisione(societa,anno,mese){
+  const mm=String(mese).padStart(2,'0');
+  const dentroMese=d=>d&&d.slice(0,4)===String(anno)&&d.slice(5,7)===mm;
+  const righe=[];const mancanti=[];
+
+  /* 1. IVA: le liquidazioni che scadono nel mese */
+  const soc=societa?[societa]:S.soc.filter(socOk.tit).map(s=>s.ragione);
+  for(const s of soc){
+    const reg=S.iva.filter(r=>r.societa===s&&dentroMese(r.scadenza));
+    for(const r of reg){
+      /* se la liquidazione è già finita in un F24, il tributo arriva da
+         quello: metterla anche qui la conterebbe due volte */
+      if(r.f24&&S.f24.some(x=>x.codice===r.f24&&x.stato!=='Annullato'))continue;
+      if(+r.aVersare>0)righe.push({scadenza:r.scadenza,sezione:'Erario',
+        codice:r.codiceTributo||ammTributoIva(r.periodo,r.periodicita),
+        descrizione:`IVA ${ammPeriodoL(r.periodo)} ${r.anno} – ${s}`,
+        importo:+r.aVersare,societa:s,
+        fonte:`liquidazione ${r.codice} (${r.stato.toLowerCase()})`,
+        certo:r.stato==='Versata'?'versata':'registrata'});
+    }
+    /* periodi che scadono in questo mese ma che nessuno ha ancora calcolato */
+    for(const per of [...AMM_MESI,'T1','T2','T3','T4']){
+      const pe=/^T/.test(per)?'Trimestrale':'Mensile';
+      for(const aa of [anno-1,anno]){
+        const sc=ammScadenzaIva(aa,per,pe);
+        if(!dentroMese(sc))continue;
+        if(reg.some(r=>r.periodo===per&&+r.anno===aa&&r.periodicita===pe))continue;
+        const c=ivaCalcola(s,aa,per,pe);
+        if(!c.fatture.length&&!c.vendite.length)continue;
+        const base=r2(c.ivaVendite+c.ivaReverse-c.ivaAcquisti);
+        const inter=ivaInteressiProposti({periodicita:pe,periodo:per},base);
+        const saldo=r2(base+inter);
+        if(saldo<=0){mancanti.push(`${ammPeriodoL(per)} ${aa} di ${s}: calcolo a credito per ${eur(Math.abs(saldo))}, non va in F24`);continue;}
+        righe.push({scadenza:sc,sezione:'Erario',codice:c.codiceTributo,
+          descrizione:`IVA ${ammPeriodoL(per)} ${aa} – ${s}`,importo:saldo,societa:s,
+          fonte:`calcolata ora da ${c.fatture.length} fatture passive`,certo:'calcolata'});
+      }
+    }
+  }
+
+  /* 2. ritenute d'acconto sulle fatture passive pagate il mese prima */
+  const prec=addMonths(`${anno}-${mm}-01`,-1);
+  const scadRit=ammLavorativo(`${anno}-${mm}-16`);
+  const perCausale=new Map();
+  for(const f of S.fp){
+    if(!(+f.ritenuta>0))continue;
+    if(societa&&f.societa!==societa)continue;
+    const quando=f.dataPagamento||f.scadenza;
+    if(!quando||quando.slice(0,7)!==prec.slice(0,7))continue;
+    const cod=(String(f.causaleRitenuta||'1040').match(/\d{4}/)||['1040'])[0];
+    const k=`${f.societa||'–'}|${cod}`;
+    if(!perCausale.has(k))perCausale.set(k,{importo:0,n:0,pagate:0});
+    const v=perCausale.get(k);
+    v.importo=r2(v.importo+(+f.ritenuta||0));v.n++;
+    if(f.statoPagamento==='Pagata')v.pagate++;
+  }
+  for(const [k,v] of perCausale){
+    const [s,cod]=k.split('|');
+    righe.push({scadenza:scadRit,sezione:'Erario',codice:cod,
+      descrizione:`${ammTributoDesc(cod)||'Ritenute'} – ${s}`,importo:v.importo,societa:s,
+      fonte:`${v.n} fatture con ritenuta ${v.pagate===v.n?'pagate':`(${v.pagate} di ${v.n} pagate)`} a ${ammPeriodoL(prec.slice(5,7))}`,
+      certo:v.pagate===v.n?'registrata':'calcolata'});
+  }
+
+  /* 3. F24 già messi in calendario */
+  for(const f of S.f24){
+    if(societa&&f.societa!==societa)continue;
+    if(!dentroMese(f.scadenza)||f.stato==='Annullato')continue;
+    const rr=f24Righe(f);
+    if(!rr.length){righe.push({scadenza:f.scadenza,sezione:'Erario',codice:'',
+      descrizione:f.descrizione||`F24 ${f.codice}`,importo:+f.saldo||0,societa:f.societa,
+      fonte:`F24 ${f.codice} (${f.stato.toLowerCase()}), senza tributi`,certo:'registrata',f24:f.codice});continue;}
+    for(const r of rr)righe.push({scadenza:f.scadenza,sezione:r.sezione,codice:r.codiceTributo,
+      descrizione:r.descrizione||ammTributoDesc(r.codiceTributo),
+      importo:r2((+r.importoDebito||0)-(+r.importoCredito||0)),societa:f.societa,
+      fonte:`F24 ${f.codice} (${f.stato.toLowerCase()})`,certo:f.stato==='Versato'?'versata':'registrata',f24:f.codice});
+  }
+
+  /* 4. bolli: scadono nel mese ma non si pagano con l'F24 */
+  const bolli=S.bolli.filter(b=>dentroMese(b.scadenza)&&b.stato==='Da pagare'
+    &&(!societa||b.societa===societa));
+
+  /* doppioni: lo stesso tributo che arriva sia da un F24 sia dal calcolo o
+     da una liquidazione. Vince la riga dell'F24: è quella che si versa. */
+  const inF24=new Set(righe.filter(r=>r.f24).map(r=>`${r.societa}|${r.codice}|${r.scadenza}`));
+  const pulite=righe.filter(r=>r.f24||!inF24.has(`${r.societa}|${r.codice}|${r.scadenza}`));
+
+  pulite.sort((a,b)=>(a.scadenza||'').localeCompare(b.scadenza||'')
+    ||AMM_SEZIONI.indexOf(a.sezione)-AMM_SEZIONI.indexOf(b.sezione)
+    ||String(a.codice).localeCompare(String(b.codice)));
+  return {righe:pulite,bolli,mancanti,
+    totale:r2(pulite.filter(r=>r.certo!=='versata').reduce((a,r)=>a+r.importo,0)),
+    totaleBolli:r2(bolli.reduce((a,b)=>a+bolloDovuto(b),0))};
+}
+
+async function ammCreaF24Prev(p,societa,anno,mese){
+  if(soloLettura()||!puoScrivere('f24'))return toast('Il tuo ruolo non può creare F24.',true);
+  const da=p.righe.filter(r=>!r.f24&&r.importo>0);
+  if(!da.length)return toast('Non c’è niente di nuovo da mettere in un F24: è già tutto in un modello.',true);
+  /* un modello per società e per scadenza */
+  const gruppi=new Map();
+  for(const r of da){const k=`${r.societa}|${r.scadenza}`;
+    if(!gruppi.has(k))gruppi.set(k,[]);gruppi.get(k).push(r);}
+  if(!await confirmBox('Crea i modelli F24',
+    `Nascono ${gruppi.size} ${gruppi.size===1?'modello':'modelli'} in stato <b>Previsionale</b> con ${da.length} tributi, per ${eur(r2(da.reduce((a,r)=>a+r.importo,0)))}.
+     <br><br>Previsionale vuol dire che gli importi vanno confermati prima di versare: la liquidazione IVA calcolata ora non è ancora registrata.`,
+    `Crea ${gruppi.size===1?'il modello':'i '+gruppi.size+' modelli'}`))return;
+  let n=0;
+  for(const [k,rr] of gruppi){
+    const [s,scad]=k.split('|');
+    const f={id:uid(),codice:nextCode(MODS.f24,scad)};
+    for(const x of MODS.f24.fields)f[x.k]=x.def??'';
+    Object.assign(f,{societa:s,tipo:'F24 ordinario',scadenza:scad,stato:'Previsionale',
+      anno:+anno,periodo:String(mese).padStart(2,'0'),
+      descrizione:`Previsionale ${AMM_MESE_L[+mese-1]} ${anno} – ${s}`,
+      modalita:'Home banking',banca:S.par.contoBanca||'',
+      note:'Creato dal previsionale: importi da confermare.'});
+    S.f24.push(f);
+    for(const r of rr)S.f24r.push({id:uid(),codice:nextCode(MODS.f24r),f24:f.codice,
+      sezione:r.sezione,codiceTributo:r.codice,descrizione:r.descrizione,rateazione:'',
+      anno:+anno,periodoDa:'',periodoA:'',importoDebito:r.importo,importoCredito:'',
+      codiceSede:'',matricola:''});
+    f24Ricalcola(f);n++;
+  }
+  markDirty();S.tab='f24';render();
+  toast(`${n} ${n===1?'modello F24 creato':'modelli F24 creati'} in stato previsionale.`);
+}
+
+function renderF24Prev(){
+  const u=ui('f24prev');
+  const tit=S.soc.filter(socOk.tit).map(s=>s.ragione);
+  if(u.societa===undefined)u.societa='';
+  const base=addMonths(todayISO(),1);
+  if(!u.anno)u.anno=+base.slice(0,4);
+  if(!u.mese)u.mese=+base.slice(5,7);
+  const p=ammPrevisione(u.societa,+u.anno,+u.mese);
+  const pill=c=>c==='versata'?'<span class="pill run">già versato</span>'
+    :c==='registrata'?'<span class="pill rent">in un F24</span>'
+    :'<span class="pill end">calcolato ora</span>';
+  $('#main').innerHTML=`${pageHead('Previsionale F24',
+    'Che cosa si pagherà nel mese scelto, da quali documenti viene ogni importo e che cosa manca ancora per saperlo.',
+    `<button class="btn" data-vaif24>Vai agli F24</button><button class="btn" data-vaiiva>Liquidazione IVA</button>${p.righe.some(r=>!r.f24&&r.importo>0)&&puoScrivere('f24')?'<button class="btn primary" data-crea>Crea i modelli F24</button>':''}`)}
+  <div class="panel">
+    <div class="fgrid">
+      <div class="field s3"><label>Società</label>
+        <select class="input" data-pv="societa"><option value="">Tutte le società</option>${tit.map(s=>`<option ${s===u.societa?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+      <div class="field s2"><label>Anno</label>
+        <input class="input" type="number" step="1" data-pv="anno" value="${esc(u.anno)}"></div>
+      <div class="field s3"><label>Mese di scadenza</label>
+        <select class="input" data-pv="mese">${AMM_MESE_L.map((l,i)=>`<option value="${i+1}" ${+u.mese===i+1?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
+    </div>
+  </div>
+  <div class="ledger">
+    <div><b>${eur(p.totale)}</b><small>da versare con F24</small></div>
+    <div><b>${p.righe.length}</b><small>tributi</small></div>
+    <div><b>${eur(p.totaleBolli)}</b><small>bolli nel mese (fuori F24)</small></div>
+    <div><b class="${p.righe.filter(r=>r.certo==='calcolata').length?'warnc':''}">${p.righe.filter(r=>r.certo==='calcolata').length}</b><small>ancora da confermare</small></div>
+  </div>
+  <div class="tablewrap"><table class="grid"><thead><tr>
+    <th>Scadenza</th><th>Sezione</th><th>Codice</th><th>Descrizione</th><th>Società</th>
+    <th class="num">Importo</th><th>Da dove viene</th></tr></thead><tbody>
+  ${p.righe.map(r=>`<tr>
+    <td class="nowrap">${r.scadenza?dueCell(r.scadenza,15):'–'}</td>
+    <td>${esc(r.sezione)}</td><td><b>${esc(r.codice||'–')}</b></td>
+    <td>${esc(r.descrizione)}</td><td>${esc(r.societa||'–')}</td>
+    <td class="num"><b>${eur(r.importo)}</b></td>
+    <td>${pill(r.certo)}<span class="sub">${esc(r.fonte)}</span></td></tr>`).join('')
+    ||`<tr><td colspan="7" class="empty">Niente in scadenza a ${esc(AMM_MESE_L[+u.mese-1])} ${esc(u.anno)} con questi dati. Registra le fatture passive del periodo e ricalcola.</td></tr>`}
+  </tbody>${p.righe.length?`<tfoot><tr><th colspan="5">Totale da versare</th><th class="num">${eur(p.totale)}</th><th></th></tr></tfoot>`:''}</table></div>
+
+  ${p.bolli.length?`<div class="panel" style="margin-top:14px"><h3>Bolli in scadenza nel mese</h3>
+    <p class="muted">Non si pagano con l’F24: vanno su PagoPA, in delega bancaria o alle agenzie. Sono qui perché pesano sulla stessa cassa.</p>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Targa</th><th>Anno</th><th>Scadenza</th><th class="num">Dovuto</th><th>Società</th></tr></thead><tbody>
+    ${p.bolli.map(b=>`<tr><td>${plate(b.targa)}</td><td>${esc(b.anno)}</td><td>${dueCell(b.scadenza,15)}</td><td class="num"><b>${eur(bolloDovuto(b))}</b></td><td>${esc(b.societa||'–')}</td></tr>`).join('')}
+    </tbody><tfoot><tr><th colspan="3">Totale bolli</th><th class="num">${eur(p.totaleBolli)}</th><th></th></tr></tfoot></table></div></div>`:''}
+
+  ${p.mancanti.length?`<div class="panel" style="margin-top:14px"><h3>Periodi a credito</h3>
+    <ul class="muted">${p.mancanti.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}
+
+  <div class="panel" style="margin-top:14px"><h3>Come viene calcolato</h3>
+    <p class="muted">L’<b>IVA</b> viene dalle liquidazioni che scadono nel mese; se un periodo non è ancora stato calcolato, il previsionale lo calcola da sé e lo segna «calcolato ora».
+    Le <b>ritenute d’acconto</b> sono quelle delle fatture passive pagate o in scadenza il mese precedente, al 16 del mese.
+    I <b>tributi già messi in un F24</b> compaiono così come sono stati scritti.</p>
+    <p class="muted">Le scadenze che cadono di sabato o di domenica sono spostate al lunedì; le festività no, quelle vanno controllate.
+    I codici tributo sono quelli di uso corrente: prima di versare, conferma importi, codici e scadenze con il commercialista.</p>
+  </div>`;
+  const q=s=>$('#main').querySelector(s);
+  $('#main').querySelectorAll('[data-pv]').forEach(el=>el.onchange=()=>{
+    const k=el.dataset.pv;
+    u[k]=k==='societa'?el.value:(parseInt(el.value,10)||1);
+    renderF24Prev();});
+  q('[data-vaif24]').onclick=()=>{S.tab='f24';render();};
+  q('[data-vaiiva]').onclick=()=>{S.tab='iva';render();};
+  const c=q('[data-crea]');if(c)c.onclick=()=>ammCreaF24Prev(p,u.societa,u.anno,u.mese);
+}
+
+/* =====================================================================
+   LE SCADENZE FISCALI NEL CRUSCOTTO
+   ===================================================================== */
+const ammScadenze0=scadenzeAll;
+scadenzeAll=function(){
+  const out=ammScadenze0();
+  if(!S.wb||!puoAmm())return out;
+  const t=todayISO();const pre=+S.par.preavvisoScad||30;
+  const extra=[];
+  const add=(data,titolo,nav,key,prev)=>{if(data)extra.push({data,titolo,cat:'Fiscale e amministrativa',nav,key,prev:prev??pre});};
+  for(const f of S.fp)if(['Da pagare','Insoluta','Pagata in parte'].includes(f.statoPagamento))
+    add(f.scadenza,`Pagamento fattura ${f.numero} – ${f.fornitore} (${eur(fpResiduo(f))})`,
+      {mod:'fp',id:f.codice},`fp|${f.codice}`,10);
+  for(const b of S.bolli)if(b.stato==='Da pagare')
+    add(b.scadenza,`Bollo ${b.targa} ${b.anno} (${eur(bolloDovuto(b))})`,{mod:'bolli',id:b.codice},`bollo|${b.codice}`,30);
+  /* una liquidazione già messa in un F24 non si annuncia due volte: la
+     scadenza che conta è quella dell'F24, che è ciò che si versa */
+  for(const r of S.iva){
+    if(!['Da calcolare','Calcolata','Da versare'].includes(r.stato)||!(+r.aVersare>0))continue;
+    if(r.f24&&S.f24.some(x=>x.codice===r.f24&&x.stato!=='Annullato'))continue;
+    add(r.scadenza,`Versamento IVA ${ammPeriodoL(r.periodo)} ${r.anno} – ${r.societa} (${eur(r.aVersare)})`,
+      {mod:'iva',id:r.codice},`iva|${r.codice}`,15);
+  }
+  for(const f of S.f24)if(['Previsionale','Da versare'].includes(f.stato)&&+f.saldo>0)
+    add(f.scadenza,`F24 ${f.descrizione||f.codice} (${eur(f.saldo)})`,{mod:'f24',id:f.codice},`f24|${f.codice}`,15);
+  const fatte=new Set(S.scad.filter(s=>s.chiave&&s.stato==='Gestita').map(s=>s.chiave));
+  const nuove=extra.filter(x=>!fatte.has(x.key)).map(x=>{
+    const g=daysBetween(t,x.data);
+    return {...x,giorni:g,liv:g<0?'scaduta':g<=7?'imminente':g<=x.prev?'prossima':'futura'};});
+  return [...out,...nuove].sort((a,b)=>a.data<b.data?-1:1);
+};
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
