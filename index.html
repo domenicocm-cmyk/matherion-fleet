@@ -1013,7 +1013,7 @@ const DATEK=['inizio','fine'];
 const FORMULAS={
   H:r=>`IF(OR(F${r}="",G${r}=""),"",DATEDIF(F${r},G${r}+1,"m"))`,
   I:r=>`IF(OR(F${r}="",G${r}=""),"",MAX(0,MIN(G${r},Parametri!$B$3)-MAX(F${r},Parametri!$B$2)+1))`,
-  J:r=>`IF(OR(I${r}="",E${r}=""),"",ROUND(E${r}/Parametri!$B$4*I${r},2))`,
+  J:r=>`IF(OR(I${r}="",E${r}=""),"",ROUND(E${r}/30*IF(I${r}>=MIN(Parametri!$B$4,30),30,I${r}),2))`,
   K:r=>`IF(J${r}="","",ROUND(J${r}*Parametri!$B$5,2))`,
   L:r=>`IF(J${r}="","",J${r}+K${r})`,
   V:r=>`IF(OR(F${r}="",G${r}=""),"",IF(TODAY()<F${r},"Da iniziare",IF(TODAY()>G${r},"Concluso","In corso")))`,
@@ -1141,7 +1141,7 @@ function calc(o){
   res.mesi=monthsDiff(a,new Date(+b+DAY));
   const ms=fromISO(S.par.mese);const me=new Date(Date.UTC(ms.getUTCFullYear(),ms.getUTCMonth()+1,0));
   res.giorni=Math.max(0,Math.round((Math.min(+b,+me)-Math.max(+a,+ms))/DAY)+1);
-  if(o.canone!==''){res.importo=r2(o.canone/me.getUTCDate()*res.giorni);res.iva=r2(res.importo*(+S.par.iva||0));res.totale=r2(res.importo+res.iva);}
+  if(o.canone!==''){res.importo=quotaCanoneMese(o.canone,res.giorni,me.getUTCDate());res.iva=r2(res.importo*(+S.par.iva||0));res.totale=r2(res.importo+res.iva);}
   const t=+fromISO(todayISO());res.stato=t<+a?'Da iniziare':t>+b?'Concluso':'In corso';
   return res;
 }
@@ -1162,7 +1162,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.10';
+const APP_VERSION='2026.10.12b';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -1299,6 +1299,7 @@ function renderUtenti(){
       {l:'Permessi',v:u=>typeof permRiassunto==='function'?permRiassunto(u):''},
     ],
     rowActions:[
+      {l:'Invita',show:()=>ruoloReale()==='master',fn:u=>invitoApri(u)},
       {l:'Permessi',show:()=>ruoloReale()==='master',fn:u=>openPermessi(u)},
       {l:'Guarda come lui',show:u=>ruoloReale()==='master'&&ruoloKey(u.ruolo)&&ruoloKey(u.ruolo)!=='master',
        fn:u=>provaComeUtente(u.email)},
@@ -3075,6 +3076,7 @@ const PARAMS_EXTRA=[
  ['contoBanca',32,'Conto banca predefinito per la prima nota','Banca c/c'],
  ['bolloRegione',33,'Regione per il calcolo del bollo',''],
  ['bolloTariffaKw',34,'Bollo: tariffa unitaria predefinita (€ per kW)',''],
+ ['cartellaModelli',35,'Cartella dei modelli dei contratti (dentro la cartella del registro)','Modelli'],
 ];
 
 const MODS={
@@ -3265,7 +3267,13 @@ cp:{sheet:'Contratti fornitori',store:'cp',title:'Contratti leasing e noleggio',
    fd('stipula','Data stipula','date'),fd('inizio','Decorrenza','date',{req:true}),fd('fine','Scadenza','date',{req:true}),
    fd('durata','Durata (mesi)','int'),fd('kmTotali','Km contrattuali totali','int'),fd('kmAnnui','Km annui','int')]},
   {t:'Condizioni economiche',f:[
-   fd('canone','Canone per veicolo (€ IVA escl.)','eur'),fd('periodicita','Periodicità','sel',{opts:['Mensile','Bimestrale','Trimestrale','Semestrale']}),
+   fd('canoneModo','Il canone è','sel',{span:'s3',def:'Per veicolo',opts:['Per veicolo','Totale del contratto, da ripartire'],
+     hint:'Se il fornitore fattura un totale per tutte le targhe, scegli «da ripartire»'}),
+   fd('canone','Canone mensile (€ IVA escl.)','eur',{hint:'Per veicolo, oppure totale del contratto'}),
+   fd('ripartizione','Ripartizione sulle targhe','sel',{span:'s3',def:'In parti uguali',opts:['In parti uguali','Importi per targa'],
+     hint:'Vale solo se il canone è un totale'}),
+   fd('canoniTarga','Importi per targa','text',{span:'s6',hint:'Solo con «Importi per targa»: GA123BC=450; GB456CD=520,50'}),
+   fd('periodicita','Periodicità','sel',{opts:['Mensile','Bimestrale','Trimestrale','Semestrale']}),
    fd('anticipo','Anticipo / maxicanone (€)','eur'),fd('riscatto','Riscatto (€)','eur'),fd('tan','Tasso leasing (%)','num'),fd('deposito','Deposito (€)','eur'),
    fd('costoKmExtra','Costo km eccedente (€/km)','eur'),fd('rimborsoKm','Rimborso km non percorsi (€/km)','eur'),
    fd('frRca','Franchigia RCA (€)','eur'),fd('frKasko','Franchigia Kasko (€)','eur'),fd('frFurto','Franchigia Furto (€)','eur'),
@@ -5617,7 +5625,7 @@ function renderCp(){
   genericList('cp',{sub:'Archivio dei contratti passivi con le società di leasing e noleggio: condizioni, servizi inclusi, franchigie e veicoli coperti.',
     newLabel:'Nuovo contratto',searchPh:'Numero, fornitore, targa',search:['numero','fornitore','targhe','codice','contraente','utilizzatore'],
     filters:[{k:'fornitore',label:'Fornitore',opts:()=>[...new Set(S.cp.map(c=>c.fornitore).filter(Boolean))].sort()},{k:'tipo',label:'Tipo',opts:()=>MODS.cp.fmap.tipo.opts},{k:'stato',label:'Stato',opts:()=>MODS.cp.fmap.stato.opts}],
-    ledger:l=>{const att=l.filter(c=>c.stato==='Attivo');const v=att.reduce((a,c)=>a+cpTarghe(c).length,0);const canoni=att.reduce((a,c)=>a+(+c.canone||0)*cpTarghe(c).length,0);
+    ledger:l=>{const att=l.filter(c=>c.stato==='Attivo');const v=att.reduce((a,c)=>a+cpTarghe(c).length,0);const canoni=att.reduce((a,c)=>a+cpCanoneTotale(c),0);
       const scad=att.filter(c=>c.fine&&c.fine<=addDays(todayISO(),120)).length;
       return `<div><b>${att.length}</b><small>contratti attivi</small></div><div><b>${v}</b><small>veicoli coperti</small></div><div><b>${eur(canoni)}</b><small>canoni mensili</small></div><div><b class="${scad?'late':''}">${scad}</b><small>in scadenza entro 120 giorni</small></div>`;},
     cols:[
@@ -5625,7 +5633,7 @@ function renderCp(){
       {l:'Fornitore',v:r=>`${esc(r.fornitore)}<span class="sub">${esc([r.contraente,r.utilizzatore].filter(Boolean).join(' → '))}</span>`},
       {l:'Veicoli',v:r=>{const t=cpTarghe(r);return `${t.slice(0,3).map(plate).join(' ')}${t.length>3?`<span class="sub">+ altri ${t.length-3}</span>`:''}`;}},
       {l:'Scadenza',v:r=>`${fmtD(r.inizio)} –<br>${dueCell(r.fine,120)}`},
-      {l:'Canone',cls:'num',v:r=>eur(r.canone)},
+      {l:'Canone',cls:'num',v:r=>`${eur(r.canone)}${cpATotale(r)?`<span class="sub">totale · ${esc(cpQuoteTesto(r))} a targa</span>`:''}`},
       {l:'Servizi',v:r=>esc(['srvManutenzione','srvPneumatici','srvRca','srvKasko','srvFurto','srvAssistenza','srvSostitutivo'].filter(k=>r[k]==='Sì').map(k=>MODS.cp.fmap[k].label).join(', '))},
       {l:'Stato',v:r=>pillS(r.stato,r.stato==='Attivo'?'run':'end')},
     ],
@@ -5647,7 +5655,7 @@ function fermoCalc(r){
   const contestabili=Math.max(0,giorni-fr-sost);
   const m=mezzoBy(r.targa)||{};
   const mancato=m.costoFermo!==''&&m.costoFermo!=null?+m.costoFermo:(+S.par.costoFermoGiorno||0);
-  const canoneG=c&&c.canone!==''?r2(c.canone/30):0;
+  const canoneG=c&&c.canone!==''?r2(cpCanoneTarga(c,r.targa)/30):0;
   const costoGiorno=r.costoGiornoOverride!==''&&r.costoGiornoOverride!=null?+r.costoGiornoOverride:r2(canoneG+mancato);
   const totale=r2(contestabili*costoGiorno+(+r.costoSostitutivo||0));
   return {start,end,giorni,fr,sost,contestabili,canoneG,mancato,costoGiorno,totale,aperto:!r.dataUscita,contratto:c};
@@ -6026,7 +6034,7 @@ async function openRinotifica(list){
         base.allegati=allegati;
         if(l1){const f=await renderDocs('Rinotifica_Lettera_Cliente',[base],{file:`1_Lettera_cliente_${safe(v.numeroVerbale)}.docx`});files.push({name:f.name,data:f.blob});}
         if(l2){const f=await renderDocs('Comunicazione_Ente_Locatario',[base],{file:`2_Comunicazione_ente_${safe(v.numeroVerbale)}.docx`});files.push({name:f.name,data:f.blob});}
-        if(genC){const z=renderDocx(S.tpl||b64ToBuf(DOCX_B64),{contratti:[{...contractData(row,true)}],...contractData(row,true)});files.push({name:`3_Contratto_${safe(row.numero)}.docx`,data:z.generate({type:'blob',mimeType:DOCX_MIME})});}
+        if(genC){const z=renderDocx(await tplDa('singolo'),{contratti:[{...contractData(row,true)}],...contractData(row,true)});files.push({name:`3_Contratto_${safe(row.numero)}.docx`,data:z.generate({type:'blob',mimeType:DOCX_MIME})});}
         let k=4;for(const a of atts){try{files.push({name:`${k++}_${safe(a.tipo)}_${safe(a.file)}`,data:await getBlob(a)});}catch(e){toast(`${a.file}: ${e.message}`,true);}}
         const sub=`Rinotifiche/${safe(v.codice)}_${safe(v.numeroVerbale)}`;
         if(zipAll){for(const f of files)zipAll.file(`${safe(v.codice)}/${f.name}`,f.data instanceof Blob?new Uint8Array(await f.data.arrayBuffer()):f.data);}
@@ -6390,8 +6398,8 @@ function renderFattWizard(tabs){
     if(o.canone===''){scarti.push({n:o.numero,t:o.targa,m:'canone non indicato'});continue;}
     if(!o.locataria){scarti.push({n:o.numero,t:o.targa,m:'manca la società locataria: senza cliente la riga non può nascere'});continue;}
     if(!o.noleggiante)scarti.push({n:o.numero,t:o.targa,m:'manca la società noleggiante: la proforma esce a nome di '+(emitDef||'nessuna società')});
-    const full=g===dim;
-    lines.push({cli:o.locataria,emit:o.noleggiante||emitDef,tipo:'Canone',descrizione:`Canone di noleggio ${monthLabel(ms)} – contratto ${o.numero} – ${o.modello}${full?'':` (${g} giorni su ${dim}, canone mensile ${eur(+o.canone)})`}`,targa:o.targa,origine:o.numero,cdc:rowCdc(o),quantita:1,prezzo:full?+o.canone:r2(o.canone/dim*g),aliquota:ivaStd,natura:'',
+    const full=g>=Math.min(dim,MESE_COMMERCIALE);
+    lines.push({cli:o.locataria,emit:o.noleggiante||emitDef,tipo:'Canone',descrizione:`Canone di noleggio ${monthLabel(ms)} – contratto ${o.numero} – ${o.modello}${full?'':` (${g} giorni su 30, mese commerciale; canone mensile ${eur(+o.canone)})`}`,targa:o.targa,origine:o.numero,cdc:rowCdc(o),quantita:1,prezzo:quotaCanoneMese(o.canone,g,dim),aliquota:ivaStd,natura:'',
       dal:o.inizio>ms?o.inizio:ms,al:o.fine<me?o.fine:me,giorni:g,canoneMensile:+o.canone,modello:o.modello});}
   if(u.src.vrb)for(const v of S.vrb)if(v.cliente&&!v.proforma&&+v.speseGestione>0&&['Rinotificato','Chiuso','Pagato','Dati conducente comunicati'].includes(v.stato)&&(v.rinotificaData||v.dataNotifica)<=me)
     lines.push({cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),tipo:'Spese gestione verbale',descrizione:`Spese di gestione verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale||v.dataNotifica)} – ${v.ente}`,targa:v.targa,origine:v.codice,quantita:1,prezzo:+v.speseGestione,aliquota:ivaStd,natura:''});
@@ -8978,7 +8986,7 @@ function renderStampa(){
         <div id="tplInfo" class="muted" style="margin-bottom:8px"></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn" id="tplUp">Usa un modello personalizzato</button>
-          <button class="btn ghost ${S.tpl?'':'hidden'}" id="tplReset">Torna al predefinito</button>
+          <button class="btn ghost ${S.tpl?'':'hidden'}" id="tplReset">Togli il modello caricato a mano</button>
           <button class="btn ghost" id="tplDl">Scarica il modello predefinito</button>
         </div>
         <div id="pWarn"></div>
@@ -9003,11 +9011,12 @@ function renderStampa(){
     :saveFile('Modello_Contratto_Noleggio_Furgoni.docx',new Blob([b64ToBuf(DOCX_B64)],{type:DOCX_MIME}));
   $('#pGen').onclick=generate;
   tplInfo();
+  modelliCartella().then(()=>{try{tplInfo();}catch(e){}});
   fillStampa();
 }
 function tplInfo(){
   const m=S.docType==='multiplo';const custom=m?S.tplMulti:S.tpl;const nm=m?S.tplMultiName:S.tplName;
-  $('#tplInfo').textContent=custom?`Modello in uso: ${nm}`:(m?'Modello in uso: contratto quadro predefinito con elenco veicoli.':'Modello in uso: contratto singolo predefinito di locazione senza conducente.');
+  $('#tplInfo').textContent=tplInfoTesto(m,custom,nm);
   $('#tplReset').classList.toggle('hidden',!custom);
   $('#tplDl').textContent=m?'Scarica il contratto quadro predefinito':'Scarica il contratto singolo predefinito';
 }
@@ -9131,7 +9140,7 @@ async function generaContrattoRiga(o){
   if(!o.numero){o.numero=nextNumero(o.inizio);markDirty();toast(`Assegnato il numero ${o.numero}.`);}
   busy(true,'Generazione del contratto');
   try{
-    const tpl=S.tpl||b64ToBuf(DOCX_B64);
+    const tpl=await tplDa('singolo');
     const d=contractData(o,true);
     const z=renderDocx(tpl,{...d,contratti:[d]});
     const nome=`Contratto_${safe(o.numero)}_${safe(o.targa)}.docx`;
@@ -9163,7 +9172,7 @@ async function generate(){
     }
   }
   if(assigned){markDirty();toast('Assegnati nuovi numeri di contratto: salva il file Excel per registrarli.');}
-  const tpl=multi?(S.tplMulti||b64ToBuf(DOCX_MULTI_B64)):(S.tpl||b64ToBuf(DOCX_B64));
+  const tpl=await tplDa(multi?'multiplo':'singolo');
   let mode=S.outMode;
   if(mode==='single'&&!tplHasLoop(tpl)){mode='zip';toast('Il modello personalizzato non contiene il blocco {#contratti}…{/contratti}: genero un file per contratto.');}
   const units=multi?groups.map(g=>({rows:g.rows,name:`Contratto_quadro_${safe(g.quadro)}_${safe(g.rows[0].locataria)}.docx`}))
@@ -9674,6 +9683,8 @@ MODS.fpl={sheet:'Fatture passive righe',store:'fpl',title:'Righe delle fatture p
    fd('canone','Canone (€)','eur',{span:'s2'}),
    fd('periodoDa','Periodo dal','date'),fd('periodoA','Periodo al','date'),
    fd('categoria','Categoria di costo','sel',{span:'s3',opts:AMM_CATEGORIE}),
+   fd('ripartita','Ripartita dal contratto','text',{span:'s2',hint:'«Sì» se la quota deriva da una riga senza targa'}),
+   fd('importoOrigine','Importo della riga originale (€)','eur',{span:'s3'}),
    cdcField()]}]};
 
 /* ---------- prima nota ---------- */
@@ -12039,6 +12050,7 @@ function openLineeGeneriche(o){
       </div>
       ${Math.abs(scarto)>0.02?`<div class="alert">Le righe fanno ${eur(tot)}, l’imponibile della fattura ${eur(o.imponibileFattura())}: differenza di <b>${eur(scarto)}</b>.</div>`:''}
       ${ignote.length?`<div class="alert">${ignote.length} ${ignote.length===1?'riga ha una targa':'righe hanno targhe'} che non ${ignote.length===1?'è':'sono'} in anagrafica: ${esc([...new Set(ignote.map(r=>r.targa))].join(', '))}. Correggile o aggiungi i mezzi.</div>`:''}
+      ${!ro&&o.ripartibili&&o.ripartibili()?`<div class="alert">${o.ripartibili()} ${o.ripartibili()===1?'riga senza targa ha':'righe senza targa hanno'} un contratto con più veicoli. <button class="btn" data-rip>Ripartisci sulle targhe del contratto</button></div>`:''}
       ${ro||!rr.length?'':`<div class="acts" style="justify-content:flex-start;margin-bottom:10px">
         <div class="field" style="max-width:260px"><label for="fplTutte">Assegna una targa a tutte le righe</label>
           <select class="input" id="fplTutte"><option value="">–</option>${opt.map(t=>`<option>${esc(t)}</option>`).join('')}</select></div>
@@ -12073,6 +12085,10 @@ function openLineeGeneriche(o){
     d.querySelector('[data-edit]').onclick=()=>{close();o.apriScheda();};
     const add=d.querySelector('[data-add]');
     if(add)add.onclick=()=>{S[o.store].push(o.nuova());markDirty();paint();};
+    const rip=d.querySelector('[data-rip]');
+    if(rip)rip.onclick=()=>{const x=o.ripartisci();paint();
+      toast(x.ripartite?`${x.ripartite} ${x.ripartite===1?'riga ripartita':'righe ripartite'} in ${x.righe} quote.`:'Niente da ripartire.');
+      if(x.saltate.length)toast('Non ripartite: '+x.saltate.join('; '));};
     const tutte=d.querySelector('#fplTutte');
     if(tutte)tutte.onchange=()=>{const t=normTarga(tutte.value);if(!t)return;
       o.lista().forEach(r=>{r.targa=t;});
@@ -12110,8 +12126,9 @@ function openFpLinee(f){
       categoria:f.categoria||'',centroCosto:f.centroCosto||''}),
     apriScheda:()=>openRecord('fp',f,{onSaved:()=>renderFp()}),
     chiuso:()=>renderFp(),
+    ripartibili:()=>fplRipartibili(f),ripartisci:()=>fplRipartisciSenzaTarga(f),
     scrivibile:puoScrivere('fpl'),
-    nota:'Da queste righe la scheda economica del mezzo prende i costi: una riga senza targa resta un costo della flotta, non del veicolo.',
+    nota:'Da queste righe la scheda economica del mezzo prende i costi: una riga senza targa resta un costo della flotta, non del veicolo. Se la riga cita un contratto con più targhe, «Ripartisci» la divide fra i veicoli del contratto, e l’importo originale resta scritto.',
   });
 }
 
@@ -12833,13 +12850,15 @@ function schedaEconomica(targa,pDa,pA,fonti){
   }
   if(on.cp){
     const l=S.cp.filter(c=>cpTarghe(c).includes(t)&&c.stato!=='Chiuso');
-    let tot=0,n=0;
+    let tot=0,n=0,rip=0;
     for(const c of l){
-      const g=ecoGiorniDentro(c.inizio,c.fine,pDa,pA);
-      if(!g||!+c.canone)continue;
-      tot=r2(tot+(+c.canone)*g/30.44);n++;
+      const q=cpCanoneTarga(c,t);
+      const x=q?ecoCanoneRapportato(q,c.inizio,c.fine,pDa,pA):{giorni:0};
+      if(!x.giorni||!q)continue;
+      tot=r2(tot+x.importo);n++;if(cpATotale(c))rip++;
     }
-    add(costi,'Canoni di contratto',tot,n,'Contratti fornitori','Canone mensile rapportato ai giorni del periodo');
+    add(costi,'Canoni di contratto',tot,n,'Contratti fornitori',
+      'Canone mensile rapportato ai giorni di utilizzo, mese commerciale di 30 giorni'+(rip?`; ${rip} ${rip===1?'contratto ripartito':'contratti ripartiti'} fra le targhe coperte`:''));
   }
   if(on.man){
     const l=S.man.filter(m=>normTarga(m.targa)===t&&m.stato!=='Annullata'
@@ -12897,9 +12916,9 @@ function schedaEconomica(targa,pDa,pA,fonti){
     const l=S.rows.filter(r=>normTarga(r.targa)===t);
     let tot=0,n=0,gg=0;
     for(const r of l){
-      const g=ecoGiorniDentro(r.inizio,r.fine,pDa,pA);
-      if(!g||!+r.canone)continue;
-      tot=r2(tot+(+r.canone)*g/30.44);n++;gg+=g;
+      const x=+r.canone?ecoCanoneRapportato(+r.canone,r.inizio,r.fine,pDa,pA):{giorni:0};
+      if(!x.giorni)continue;
+      tot=r2(tot+x.importo);n++;gg+=x.giorni;
     }
     add(ricavi,'Canoni di noleggio',tot,n,'Contratti di noleggio',
       gg?`${gg} giorni di noleggio nel periodo`:'');
@@ -13178,6 +13197,350 @@ function ecoLegaCruscotto(){
   box.querySelectorAll('[data-ecosch]').forEach(b=>b.onclick=()=>apriSchedaMezzo(b.dataset.ecosch,u.pDa,u.pA));
   const t=box.querySelector('[data-ecotutti]');
   if(t)t.onclick=()=>{S.tab='margini';render();};
+}
+
+
+/* =====================================================================
+   RIPARTIZIONE DEL CANONE SULLE TARGHE
+   ---------------------------------------------------------------------
+   Un contratto di leasing o noleggio copre più veicoli. Per valutare il
+   margine del singolo mezzo l'importo va diviso: o il fornitore indica
+   un canone per veicolo, o un totale che qui si ripartisce in parti
+   uguali, o importi diversi targa per targa. I centesimi non si perdono:
+   la somma delle quote è sempre il totale.
+   ===================================================================== */
+const CP_MODO_VEICOLO='Per veicolo',CP_MODO_TOTALE='Totale del contratto, da ripartire';
+const CP_RIP_UGUALI='In parti uguali',CP_RIP_IMPORTI='Importi per targa';
+
+const cpNumero=s=>{
+  let v=String(s==null?'':s).replace(/[\s€]/g,'');
+  if(!v)return NaN;
+  if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');
+  return parseFloat(v);
+};
+/* «GA123BC=450; GB456CD=520,50» → { GA123BC:450, GB456CD:520.5 } */
+function cpImportiTarga(c){
+  const m={};
+  for(const p of String(c.canoniTarga||'').split(/[;\n]+/)){
+    const i=p.search(/[=:]/);if(i<0)continue;
+    const t=normTarga(p.slice(0,i)),n=cpNumero(p.slice(i+1));
+    if(t&&!isNaN(n))m[t]=r2(n);
+  }
+  return m;
+}
+const cpATotale=c=>/totale/i.test(c.canoneModo||'');
+const cpAImporti=c=>cpATotale(c)&&/importi/i.test(c.ripartizione||'');
+
+/* Quanto spetta a ciascuna targa, al mese. Parti uguali: il resto dei
+   centesimi va alle prime targhe, così la somma torna. */
+function cpQuote(c){
+  const t=cpTarghe(c),q=new Map();
+  if(!t.length)return q;
+  if(!cpATotale(c)){for(const x of t)q.set(x,+c.canone||0);return q;}
+  if(cpAImporti(c)){const m=cpImportiTarga(c);for(const x of t)q.set(x,m[x]||0);return q;}
+  const tot=Math.round((+c.canone||0)*100),base=Math.floor(tot/t.length);let resto=tot-base*t.length;
+  for(const x of t){q.set(x,(base+(resto>0?1:0))/100);if(resto>0)resto--;}
+  return q;
+}
+function cpCanoneTarga(c,targa){
+  const t=normTarga(targa),q=cpQuote(c);
+  if(q.has(t))return q.get(t);
+  return cpATotale(c)?0:(+c.canone||0);
+}
+const cpCanoneTotale=c=>r2([...cpQuote(c).values()].reduce((a,v)=>a+v,0));
+
+/* Che cosa non torna nella ripartizione, in parole. */
+function cpControlloRip(c){
+  const out=[];
+  if(!cpAImporti(c))return out;
+  const m=cpImportiTarga(c),t=cpTarghe(c);
+  const mancano=t.filter(x=>!(x in m)),estranee=Object.keys(m).filter(x=>!t.includes(x));
+  if(mancano.length)out.push(`mancano gli importi di ${mancano.join(', ')}`);
+  if(estranee.length)out.push(`importi per targhe non coperte dal contratto: ${estranee.join(', ')}`);
+  const somma=r2(Object.values(m).reduce((a,v)=>a+v,0));
+  if(c.canone!==''&&c.canone!=null&&Math.abs(somma-(+c.canone||0))>0.02)
+    out.push(`la somma degli importi (${eur(somma)}) non coincide con il canone totale (${eur(c.canone)})`);
+  return out;
+}
+const cpQuoteTesto=c=>{
+  const q=cpQuote(c);if(!q.size)return '';
+  const v=[...q.values()];
+  const min=Math.min(...v),max=Math.max(...v);
+  return min===max?eur(min):`da ${eur(min)} a ${eur(max)}`;
+};
+
+/* ---------- il contratto, nella scheda ---------- */
+(()=>{
+  const v0=MODS.cp.validate;
+  MODS.cp.validate=(x,errs)=>{
+    if(v0)v0(x,errs);
+    if(/totale/i.test(x.canoneModo||'')&&(x.canone===''||x.canone==null))errs.canone='Indica il canone totale da ripartire';
+    if(cpAImporti(x)){
+      if(!String(x.canoniTarga||'').trim())errs.canoniTarga='Indica gli importi: GA123BC=450; GB456CD=520';
+      else{const p=cpControlloRip(x);if(p.length)errs.canoniTarga=p[0][0].toUpperCase()+p[0].slice(1);}
+    }
+  };
+  const l0=MODS.cp.live;
+  MODS.cp.live=x=>{
+    let h=l0?l0(x):'';
+    const tot=cpCanoneTotale(x);
+    h=h.replace(/(<div><small>Costo mensile totale<\/small><b>)[^<]*(<\/b>)/,`$1${tot?eur(tot):'–'}$2`);
+    h+=`<div><small>Canone per targa</small><b>${cpQuoteTesto(x)||'–'}</b></div>`;
+    return h;
+  };
+})();
+
+/* ---------- le righe di fattura senza targa ---------- */
+function cpDellaRiga(f,l){
+  const num=String(l.contrattoLocazione||f.contrattoLocazione||'').trim().toUpperCase();
+  return (num&&S.cp.find(c=>String(c.numero||'').toUpperCase()===num))
+    ||(f.contrattoFornitore&&S.cp.find(c=>c.codice===f.contrattoFornitore))||null;
+}
+/* Divide in modo proporzionale, centesimo per centesimo. */
+function ammDividi(importo,pesi){
+  const tot=Math.round((+importo||0)*100),somma=pesi.reduce((a,p)=>a+p,0);
+  if(!pesi.length)return [];
+  const w=somma>0?pesi:pesi.map(()=>1),s=w.reduce((a,p)=>a+p,0);
+  const q=w.map(p=>Math.floor(tot*p/s));
+  let resto=tot-q.reduce((a,v)=>a+v,0);
+  for(let i=0;resto>0;i=(i+1)%q.length,resto--)q[i]++;
+  return q.map(v=>v/100);
+}
+/* Sostituisce ogni riga senza targa, di cui si conosce il contratto, con
+   una riga per veicolo. L'originale resta scritto nella descrizione e
+   nell'importo d'origine: si vede da dove viene la quota. */
+function fplRipartisciSenzaTarga(f){
+  const res={ripartite:0,righe:0,saltate:[]};
+  for(const l of fpLinee(f).filter(r=>!r.targa)){
+    const c=cpDellaRiga(f,l);
+    if(!c){res.saltate.push(`riga ${l.numeroLinea||'?'}: contratto non trovato`);continue;}
+    const q=cpQuote(c),t=[...q.keys()];
+    if(!t.length){res.saltate.push(`riga ${l.numeroLinea||'?'}: il contratto ${c.numero} non ha targhe`);continue;}
+    let pesi=t.map(x=>q.get(x));
+    /* le quote «in parti uguali» differiscono al più di un centesimo: sono pesi uguali */
+    if(Math.max(...pesi)-Math.min(...pesi)<=0.011)pesi=pesi.map(()=>1);
+    const imp=ammDividi(l.imponibile,pesi);
+    const can=l.canone!==''&&l.canone!=null?ammDividi(l.canone,pesi):null;
+    const nuove=t.map((x,i)=>Object.assign({},l,{
+      id:uid(),codice:nextCode(MODS.fpl),targa:x,
+      imponibile:imp[i],canone:can?can[i]:'',prezzo:imp[i],quantita:1,
+      contrattoLocazione:l.contrattoLocazione||c.numero,
+      descrizione:`${String(l.descrizione||'').slice(0,700)} — quota ${x} (${t.length>1?`1 di ${t.length}`:'unica'})`,
+      ripartita:'Sì',importoOrigine:+l.imponibile||0}));
+    const i=S.fpl.findIndex(x=>x.id===l.id);
+    S.fpl.splice(i,1,...nuove);
+    res.ripartite++;res.righe+=nuove.length;
+  }
+  if(res.ripartite)markDirty();
+  return res;
+}
+const fplRipartibili=f=>fpLinee(f).filter(r=>!r.targa&&cpDellaRiga(f,r)&&cpTarghe(cpDellaRiga(f,r)).length).length;
+
+/* All'importazione: se il contratto è censito, il costo arriva già diviso. */
+(()=>{
+  const orig=ammImportaUna;
+  ammImportaUna=async function(dati,file,creaFornitori){
+    const r=await orig(dati,file,creaFornitori);
+    if(r.esito==='nuova'){
+      const x=fplRipartisciSenzaTarga(r.rec);
+      if(x.ripartite){
+        const nota=`${x.ripartite===1?'Una riga era':x.ripartite+' righe erano'} senza targa: ripartit${x.ripartite===1?'a':'e'} sulle targhe del contratto in ${x.righe} quote`;
+        r.rec.note=r.rec.note?`${r.rec.note}. ${nota}`:nota;
+      }
+    }
+    return r;
+  };
+})();
+
+
+/* =====================================================================
+   L'INVITO A ENTRARE
+   ---------------------------------------------------------------------
+   Non esiste una registrazione: chi è nell'elenco Utenti entra con il
+   proprio account Microsoft 365. Quello che manca è dirglielo. Qui si
+   prepara il messaggio, con il link, l'indirizzo da usare, il profilo e
+   che cosa fare se non entra. L'invio lo fa la posta di chi lo manda:
+   il gestionale non spedisce niente da solo.
+   ===================================================================== */
+function invitoLink(){
+  const u=location.href.split('#')[0].split('?')[0];
+  return /^https?:/i.test(u)?u.replace(/index\.html$/,''):'';
+}
+function invitoTesto(u){
+  const k=ruoloKey(u.ruolo),r=RUOLI[k]||{};
+  const org=(MS.cfg&&MS.cfg.organizzazione)||'Fast Rent';
+  const link=invitoLink();
+  const sp=MS.cfg&&MS.cfg.sharepoint;
+  const nome=String(u.nome||'').trim().split(/\s+/)[0]||'';
+  const riga=[
+    `Ciao${nome?' '+nome:''},`,
+    '',
+    `ti ho abilitato al gestionale della flotta di ${org}.`,
+    '',
+    'Come si entra:',
+    `1. apri ${link||'[indirizzo del gestionale]'}`,
+    '2. premi «Accedi con Microsoft»',
+    `3. usa questo account: ${u.email}`,
+    '   (se il browser ne propone un altro, scegli «Usa un altro account»)',
+    '',
+    `Il tuo profilo è «${r.l||u.ruolo}».`,
+    ...(r.d?[`Che cosa vedi e puoi fare: ${String(r.d).replace(/\.$/,'').replace(/^./,c=>c.toLowerCase())}.`]:[]),
+  ];
+  if(u.centroCosto)riga.push(`Lavori sul centro di costo ${u.centroCosto}.`);
+  if(sp)riga.push('',`I dati stanno su SharePoint (${sp.sito||sp.host||''}): se compare un errore di accesso alla raccolta, scrivimi, va abilitata anche lì.`);
+  riga.push('',
+    'Se vedi «Questo account non è abilitato», l’indirizzo con cui sei entrato non è quello indicato sopra: scrivimi quale stai usando.',
+    '',
+    'Grazie');
+  return riga.join('\n');
+}
+function invitoApri(u){
+  if(!u||!u.email){toast('Manca l’email: senza non si sa a chi scrivere.',true);return;}
+  const subj=`Accesso al gestionale flotta`;
+  const avv=[];
+  if(u.attivo==='No')avv.push('La persona è <b>disattivata</b>: l’invito non le servirebbe, finché non la riattivi.');
+  if(!invitoLink())avv.push('Questa copia è aperta da un file, non da un indirizzo pubblicato: nel messaggio al posto del link compare un segnaposto da sostituire.');
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:640px;width:92vw">
+    <h3>Invita ${esc(u.nome||u.email)}</h3>
+    ${avv.map(a=>`<div class="alert">${a}</div>`).join('')}
+    <div class="field"><label>A</label><input class="input" value="${esc(u.email)}" readonly></div>
+    <div class="field"><label>Messaggio</label><textarea class="input" id="invTxt" rows="14" style="width:100%;font-family:inherit">${esc(invitoTesto(u))}</textarea></div>
+    <p class="muted">Il messaggio parte dalla tua posta: il gestionale lo prepara, non lo spedisce.</p>
+    <div class="acts"><button class="btn" data-a="x">Chiudi</button><button class="btn" data-a="c">Copia</button><button class="btn primary" data-a="m">Apri nella posta</button></div></div>`;
+  m.addEventListener('click',async e=>{
+    const a=e.target.closest('[data-a]');
+    if(e.target===m||(a&&a.dataset.a==='x')){m.remove();return;}
+    if(!a)return;
+    const t=m.querySelector('#invTxt').value;
+    if(a.dataset.a==='m'){mailto(u.email,subj,t);}
+    if(a.dataset.a==='c'){
+      try{await navigator.clipboard.writeText(t);toast('Messaggio copiato.');}
+      catch(_){const x=m.querySelector('#invTxt');x.select();toast('Selezionato: premi Ctrl+C per copiarlo.');}
+    }
+  });
+  document.body.appendChild(m);
+}
+
+
+/* =====================================================================
+   IL MESE COMMERCIALE
+   ---------------------------------------------------------------------
+   Il canone mensile si divide sempre per 30, in ogni mese: ottobre di 31
+   giorni, febbraio di 28, tutti uguali. Un mese intero vale il canone
+   per intero; un mese parziale vale i giorni di utilizzo effettivi su 30
+   (mai più di 30). Il giorno 31 non è un giorno in più.
+   ===================================================================== */
+const MESE_COMMERCIALE=30;
+/* g: giorni di utilizzo nel mese; dim: giorni del mese di calendario. */
+function quotaCanoneMese(canone,g,dim){
+  const gc=g>=Math.min(dim,MESE_COMMERCIALE)?MESE_COMMERCIALE:Math.max(0,g);
+  return r2((+canone||0)*gc/MESE_COMMERCIALE);
+}
+/* Il canone di un intervallo di date, mese per mese. */
+function canoneRapportato(canone,da,a){
+  const d1=fromISO(da),d2=fromISO(a);
+  if(!d1||!d2||d1>d2)return 0;
+  let tot=0,cur=d1;
+  while(cur<=d2){
+    const fine=new Date(Date.UTC(cur.getUTCFullYear(),cur.getUTCMonth()+1,0));
+    const seg=fine<d2?fine:d2;
+    tot=r2(tot+quotaCanoneMese(canone,Math.round((seg-cur)/DAY)+1,fine.getUTCDate()));
+    cur=new Date(+fine+DAY);
+  }
+  return tot;
+}
+/* Lo stesso, limitato al periodo che interessa (scheda economica). */
+function ecoCanoneRapportato(canone,da,a,pDa,pA){
+  const d1=da&&pDa?(da>pDa?da:pDa):(da||pDa),d2=a&&pA?(a<pA?a:pA):(a||pA);
+  if(!d1||!d2||d1>d2)return {importo:0,giorni:0};
+  return {importo:canoneRapportato(canone,d1,d2),giorni:daysBetween(d1,d2)+1};
+}
+
+
+/* =====================================================================
+   I MODELLI DEI CONTRATTI, DALLA CARTELLA DEL REGISTRO
+   ---------------------------------------------------------------------
+   I contratti si generano dal modello Word che sta accanto al registro
+   (su SharePoint o nella cartella sincronizzata), non da quello incluso
+   nel programma. Ordine di scelta:
+     1. un modello caricato a mano in questa sessione (pagina Stampa);
+     2. il modello nella cartella del registro;
+     3. il modello predefinito, solo se in cartella non c'è niente.
+   Si rilegge a ogni generazione: se lo correggi su SharePoint, il
+   contratto successivo esce già con la correzione.
+   ===================================================================== */
+const TPL_CERCA={
+  singolo:{nome:'Modello_Contratto_Noleggio_Furgoni',alt:/noleggio|furgon|singol/i,escl:/quadro|multipl/i},
+  multiplo:{nome:'Modello_Contratto_Quadro_Multiplo',alt:/quadro|multipl/i,escl:null}};
+function tplCartelle(){
+  const p=String(S.par.cartellaModelli||'').trim().replace(/^\/+|\/+$/g,'');
+  return [...new Set([...(p?[p]:[]),'Modelli','Modelli contratti','Contratti/Modelli','Contratti',''])];
+}
+async function tplApriCartella(percorso){
+  let d=S.dir;
+  for(const p of percorso.split('/').filter(Boolean))d=await d.getDirectoryHandle(p);
+  return d;
+}
+async function tplCerca(tipo){
+  if(!S.dir)return null;
+  const c=TPL_CERCA[tipo];
+  for(const cart of tplCartelle()){
+    let d;try{d=await tplApriCartella(cart);}catch(e){continue;}
+    let fh=null,nome=c.nome+'.docx';
+    try{fh=await d.getFileHandle(nome);}catch(e){}
+    if(!fh&&d.entries){
+      try{for await(const [n,h] of d.entries()){
+        if(h.kind!=='file'||/^~\$/.test(n)||!/\.docx$/i.test(n)||/^Contratto_/i.test(n))continue;
+        if(/^modello/i.test(n)&&c.alt.test(n)&&!(c.escl&&c.escl.test(n))){fh=h;nome=n;break;}
+      }}catch(e){}
+    }
+    if(fh){
+      const f=await fh.getFile();
+      return {buf:await f.arrayBuffer(),nome,percorso:(cart?cart+'/':'')+nome,mod:f.lastModified||0};
+    }
+  }
+  return null;
+}
+/* Un modello con un segno graffo sbagliato non deve rompere la stampa. */
+function tplErrore(buf){
+  try{
+    const z=new PizZip(buf);
+    new window.docxtemplater(z,{paragraphLoop:true,linebreaks:true});
+    return '';
+  }catch(e){
+    const er=e&&e.properties&&e.properties.errors;
+    return er&&er.length?er.slice(0,2).map(x=>x.properties&&x.properties.explanation||x.message).join('; '):(e.message||'file non valido');
+  }
+}
+async function modelliCartella(tipi){
+  S.tplCart=S.tplCart||{};
+  for(const t of (tipi||['singolo','multiplo'])){
+    try{
+      const r=await tplCerca(t);
+      if(!r){S.tplCart[t]=null;continue;}
+      const err=tplErrore(r.buf);
+      S.tplCart[t]=err?{errore:err,percorso:r.percorso}:r;
+    }catch(e){S.tplCart[t]=null;}
+  }
+}
+/* Il modello da usare adesso. */
+async function tplDa(tipo){
+  const man=tipo==='multiplo'?S.tplMulti:S.tpl;
+  if(man)return man;
+  await modelliCartella([tipo]);
+  const c=(S.tplCart||{})[tipo];
+  if(c&&c.buf){toast(`Uso il modello della cartella: ${c.percorso}`);return c.buf;}
+  if(c&&c.errore)toast(`Il modello ${c.percorso} ha un errore (${c.errore}): uso quello predefinito.`,true);
+  return b64ToBuf(tipo==='multiplo'?DOCX_MULTI_B64:DOCX_B64);
+}
+function tplInfoTesto(m,custom,nm){
+  if(custom)return `Modello in uso: ${nm} (caricato a mano, vale solo per questa sessione)`;
+  const t=m?'multiplo':'singolo',c=(S.tplCart||{})[t];
+  if(c&&c.buf)return `Modello in uso: ${c.percorso} (dalla cartella del registro)`;
+  if(c&&c.errore)return `Il modello ${c.percorso} ha un errore (${c.errore}): si usa quello predefinito finché non lo correggi.`;
+  const nome=TPL_CERCA[t].nome+'.docx';
+  return `Modello predefinito del programma: in cartella non c'è ${nome}. Salvalo nella cartella «Modelli» accanto al registro, oppure indica la cartella in Parametri.`;
 }
 
 
