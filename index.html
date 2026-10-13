@@ -881,6 +881,10 @@ details.ammdet>summary,.body details>summary{cursor:pointer;padding:6px 0;color:
 .ecodue>div{min-width:0}
 .ecodue .tablewrap{overflow-x:auto}
 @media(max-width:900px){.ecodue{grid-template-columns:1fr}}
+/* note di credito: importo negativo, in rosso */
+.nc{color:var(--danger,#b3261e);font-weight:700;white-space:nowrap}
+.grid tr.rownc td{background:color-mix(in srgb,var(--danger-soft,#fdeceb) 55%,transparent)}
+.grid tr.rownc td:first-child{box-shadow:inset 3px 0 0 var(--danger,#b3261e)}
 </style>
 </head>
 <body>
@@ -1162,7 +1166,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.12b';
+const APP_VERSION='2026.10.13';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -9269,8 +9273,9 @@ const AREE=[
  {k:'anagrafiche', l:'Anagrafiche e centri di costo',tabs:['soc','anag','cdc','capfin'],    store:['soc','cdc','cap']},
  {k:'calendario',  l:'Calendario e appuntamenti', tabs:['calendario'],                      store:['app']},
  {k:'docs',        l:'Documenti e allegati',      tabs:['docs'],                            store:['all']},
- {k:'amm',         l:'Amministrazione',           tabs:['fp','fa','pn','bolli','iva','f24','f24p'],
-  store:['fp','fpr','fpl','fa','far','fal','pn','bolli','iva','f24','f24r']},
+ {k:'amm',         l:'Amministrazione',           tabs:['fp','fa','pn','bk','bolli','iva','f24','f24p'],
+  store:['fp','fpr','fpl','fa','far','fal','pn','bk','bolli','iva','f24','f24r']},
+ {k:'notespese',   l:'Note spese dei dipendenti', tabs:['ns'],                              store:['ns','nsr']},
  {k:'margini',     l:'Margini e scheda economica',tabs:['margini'],                         store:[]},
 ];
 const AREA_DI_TAB=(()=>{const m={};for(const a of AREE)for(const t of a.tabs)m[t]=a.k;return m;})();
@@ -9349,6 +9354,7 @@ function permEffettivo(u,areaK){
   if(!vedeTab)return 'n';
   if(areaK==='amm'&&!r.amm)return 'n';
   if(areaK==='margini'&&!r.amm)return 'n';
+  if(areaK==='notespese'&&!r.amm&&!(Array.isArray(r.tabs)&&r.tabs.includes('ns')))return 'n';
   const scrive=r.scrivi===null?a.store.length>0
     :a.store.some(s=>r.scrivi.includes(s));
   return scrive?'w':'v';
@@ -9559,6 +9565,8 @@ const AMM_TRIBUTI=[
  ['6033','IVA 3° trimestre','Erario'],['6034','IVA 4° trimestre (soggetti art. 74)','Erario'],
  ['6013','Acconto IVA – contribuenti mensili','Erario'],['6035','Acconto IVA – contribuenti trimestrali','Erario'],
  ['6099','IVA – versamento annuale a saldo','Erario'],
+ ['2521','Imposta di bollo sulle fatture elettroniche – 1° trimestre','Erario'],['2522','Imposta di bollo sulle fatture elettroniche – 2° trimestre','Erario'],
+ ['2523','Imposta di bollo sulle fatture elettroniche – 3° trimestre','Erario'],['2524','Imposta di bollo sulle fatture elettroniche – 4° trimestre','Erario'],
  ['1001','Ritenute su retribuzioni e redditi assimilati','Erario'],
  ['1012','Ritenute su indennità di fine rapporto','Erario'],
  ['1040','Ritenute su redditi di lavoro autonomo','Erario'],
@@ -10349,7 +10357,7 @@ function ammLeggiFatturaPA(testo,nomeFile){
       imponibile,imposta,
       totale:ammN(dg,'ImportoTotaleDocumento')!==''?ammN(dg,'ImportoTotaleDocumento'):r2(imponibile+imposta),
       arrotondamento:ammN(dg,'Arrotondamento'),
-      bollo:bollo?(ammN(bollo,'ImportoBollo')||''):'',
+      bollo:bollo?(ammN(bollo,'ImportoBollo')||(/^SI$/i.test(ammT(bollo,'BolloVirtuale'))?BF_IMPORTO:'')):'',
       ritenuta:rit?(ammN(rit,'ImportoRitenuta')||''):'',
       causaleRitenuta:causaleRit,
       nonImponibile:nonImp||'',
@@ -10858,6 +10866,7 @@ function renderFp(){
     noExport:true,
     buttons:[
       {l:'Importa fatture',primary:true,fn:()=>ammBoxImport()},
+      {l:'Bolli di fattura',fn:()=>bfRiepilogo('p')},
       {l:'Estrai',fn:l=>ammEsportaFp(l)},
     ],
     filters:[
@@ -10866,6 +10875,7 @@ function renderFp(){
       {k:'statoPagamento',label:'Pagamento',opts:()=>MODS.fp.fmap.statoPagamento.opts},
       {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
       {k:'__per',label:'Periodo IVA',opts:ammPeriodiFp,test:(r,v)=>(r.periodoIva||fpPeriodo(r))===v},
+      bfFiltroDoc('p'),bfFiltro('p'),
       {k:'__vei',label:'Veicolo',all:'Tutti i mezzi',
        opts:()=>[...new Set([...S.fp.map(f=>f.targa),...S.fpl.map(l=>l.targa)].filter(Boolean))].sort(),
        test:(r,v)=>normTarga(r.targa)===normTarga(v)||fplTarghe(r).includes(normTarga(v))},
@@ -10883,11 +10893,13 @@ function renderFp(){
         <div><b>${eur(imp)}</b><small>imponibile</small></div>
         <div><b>${eur(det)}</b><small>IVA detraibile</small></div>
         <div><b>${eur(res)}</b><small>da pagare</small></div>
-        <div><b class="${sca?'late':''}">${sca}</b><small>scadute</small></div>`;
+        <div><b class="${sca?'late':''}">${sca}</b><small>scadute</small></div>
+        ${bfTile(l,'p')}`;
     },
+    rowClass:r=>fpSegno(r)<0?'rownc':'',
     sort:(a,b)=>(b.data||'').localeCompare(a.data||'')||String(b.codice).localeCompare(String(a.codice)),
     cols:[
-      {l:'Fattura',v:r=>`<b>${esc(r.numero)}</b><span class="sub">${esc(r.codice)} · ${fmtD(r.data)}${r.tipoDoc&&r.tipoDoc!=='TD01'?' · '+esc(r.tipoDoc):''}</span>`,
+      {l:'Fattura',v:r=>`<b>${esc(r.numero)}</b>${ncBadge(fpSegno(r))}<span class="sub">${esc(r.codice)} · ${fmtD(r.data)}${r.tipoDoc&&r.tipoDoc!=='TD01'?' · '+esc(r.tipoDoc):''}</span>`,
        s:r=>r.data+r.codice},
       {l:'Fornitore',v:r=>`${esc(r.fornitore)}<span class="sub">${esc(r.societa||'società da indicare')}</span>`},
       {l:'Oggetto',v:r=>{
@@ -10898,11 +10910,12 @@ function renderFp(){
           +`${r.contrattoLocazione?`<span class="sub">contratto ${esc(r.contrattoLocazione)}</span>`:''}`
           +`${per||r.canone?`<span class="sub">${esc(per)}${+r.canone?` · canone ${eur(r.canone)}`:''}</span>`:''}`
           +`${n?`<span class="sub">${n} ${n===1?'riga':'righe'}${fplSenzaTarga(r).length?` · ${fplSenzaTarga(r).length} senza targa`:''}</span>`:''}`;}},
-      {l:'Imponibile',cls:'num',v:r=>eur(fpImponibile(r)),s:r=>fpImponibile(r)},
-      {l:'IVA',cls:'num',v:r=>{const i=fpImposta(r),d=fpIvaDetraibile(r);
-        return `${eur(i)}${i&&r2(i-d)?`<span class="sub">detraibile ${eur(d)}</span>`:''}${r.reverseCharge==='Sì'?'<span class="sub">inversione contabile</span>':''}`;},s:r=>fpImposta(r)},
+      {l:'Imponibile',cls:'num',v:r=>ncEur(fpImponibile(r),fpSegno(r)),s:r=>fpSegno(r)*fpImponibile(r)},
+      {l:'IVA',cls:'num',v:r=>{const i=fpImposta(r),d=fpIvaDetraibile(r),sg=fpSegno(r);
+        return `${ncEur(i,sg)}${i&&r2(i-d)?`<span class="sub">detraibile ${ncEur(d,sg)}</span>`:''}${r.reverseCharge==='Sì'?'<span class="sub">inversione contabile</span>':''}`;},s:r=>fpSegno(r)*fpImposta(r)},
+      {l:'Bollo',cls:'num',v:r=>bfCella(r,'p'),s:r=>+r.bollo||0},
       {l:'Totale',cls:'num',v:r=>{const q=fpQuadra(r);
-        return `<b>${eur(r.totale)}</b>${q!=null?`<span class="sub late">non quadra di ${eur(q)}</span>`:''}`;},s:r=>+r.totale||0},
+        return `<b>${ncEur(r.totale,fpSegno(r))}</b>${q!=null?`<span class="sub late">non quadra di ${eur(q)}</span>`:''}`;},s:r=>fpSegno(r)*(+r.totale||0)},
       {l:'Pagamento',v:r=>`${pillS(r.statoPagamento,AMM_PAGPILL[r.statoPagamento]||'end')}<span class="sub">${r.scadenza?dueCell(r.scadenza,10):'senza scadenza'}</span>`},
       {l:'In prima nota',v:r=>r.registrata==='Sì'
         ?'<span class="cfok">sì</span>'
@@ -11064,7 +11077,7 @@ function ammBoxPagamento(quante,tot,rit,inPn,modo){
         <div class="field s3"><label for="pgMezzo">Mezzo</label>
           <select class="input" id="pgMezzo">${['Bonifico','Banca','RID/SDD','Carta','Cassa','Assegno','Compensazione'].map(x=>`<option>${x}</option>`).join('')}</select></div>
         <div class="field s3"><label for="pgBanca">Conto</label>
-          <input class="input" id="pgBanca" value="${esc(S.par.contoBanca||'Banca c/c')}"></div>
+          ${typeof bkSelectConto==='function'?bkSelectConto('pgBanca',inc):`<input class="input" id="pgBanca" value="${esc(S.par.contoBanca||'Banca c/c')}">`}</div>
       </div>
       ${inPn?`<label class="check" style="margin-top:10px"><input type="checkbox" id="pgPn" checked>
         Registra ${inc?'l’incasso':'il pagamento'} anche in prima nota</label>
@@ -11129,10 +11142,12 @@ function renderPn(){
         await saveInFolder('Amministrazione/Estrazioni',
           [{name:`Prima_nota_${stampNow()}.pdf`,data:ammPnPdf(l)}]);
         toast(`Prima nota in PDF: ${l.length} righe.`);}},
+      {l:'Banca e carte',fn:()=>{S.tab='bk';render();}},
       {l:'Vai alle fatture passive',fn:()=>{S.tab='fp';render();}},
     ],
     filters:[
       {k:'tipo',label:'Tipo',opts:()=>MODS.pn.fmap.tipo.opts},
+      {k:'riconciliata',label:'Riconciliazione',opts:()=>['Sì','No'],test:(r,v)=>(r.riconciliata==='Sì')===(v==='Sì')},
       {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
       {k:'conto',label:'Conto',opts:()=>[...new Set(S.pn.map(r=>r.conto).filter(Boolean))].sort()},
       {k:'__mese',label:'Mese',opts:()=>[...new Set(S.pn.map(r=>ammMeseDi(r.data)).filter(Boolean))].sort().reverse(),
@@ -11587,7 +11602,7 @@ async function ammF24DaIva(r){
     scadenza:r.scadenza||ammScadenzaIva(r.anno,r.periodo,r.periodicita),
     stato:'Da versare',anno:r.anno,periodo:r.periodo,
     descrizione:`IVA ${ammPeriodoL(r.periodo)} ${r.anno} – ${r.societa}`,
-    modalita:'Home banking',banca:S.par.contoBanca||''});
+    modalita:'Home banking',banca:bkDefaultNome()});
   S.f24.push(f);
   const cod=r.codiceTributo||ammTributoIva(r.periodo,r.periodicita);
   S.f24r.push({id:uid(),codice:nextCode(MODS.f24r),f24:f.codice,sezione:'Erario',
@@ -11695,15 +11710,15 @@ async function ammF24InPrimaNota(list){
         registrazione:f.codice,riga:++i,
         descrizione:`${r.codiceTributo} ${r.descrizione||ammTributoDesc(r.codiceTributo)} – F24 ${fmtD(f.scadenza)}`,
         conto:r.sezione==='INPS'?'INPS c/contributi':(/^6\d/.test(r.codiceTributo)?'Erario c/IVA':'Erario c/imposte'),
-        dare:d,avere:'',contropartita:f.banca||S.par.contoBanca||'Banca c/c',
-        mezzoPagamento:'Banca',banca:f.banca||S.par.contoBanca||'',
+        dare:d,avere:'',contropartita:f.banca||bkNomeDefault(),
+        mezzoPagamento:'Banca',banca:f.banca||bkDefaultNome(),
         documento:f.codice,riferimento:f.codice,targa:'',centroCosto:'',note:''});
     }
     S.pn.push({id:uid(),codice:nextCode(MODS.pn,f.dataVersamento||f.scadenza),
       data:f.dataVersamento||f.scadenza,societa:f.societa,tipo:'Versamento F24',
       registrazione:f.codice,riga:++i,descrizione:`Versamento F24 ${f.codice}`,
-      conto:f.banca||S.par.contoBanca||'Banca c/c',dare:'',avere:+f.saldo||0,contropartita:'',
-      mezzoPagamento:'Banca',banca:f.banca||S.par.contoBanca||'',
+      conto:f.banca||bkNomeDefault(),dare:'',avere:+f.saldo||0,contropartita:'',
+      mezzoPagamento:'Banca',banca:f.banca||bkDefaultNome(),
       documento:f.codice,riferimento:f.codice,targa:'',centroCosto:'',note:''});
   }
   markDirty();renderF24();
@@ -11892,7 +11907,7 @@ async function ammCreaF24Prev(p,societa,anno,mese){
     Object.assign(f,{societa:s,tipo:'F24 ordinario',scadenza:scad,stato:'Previsionale',
       anno:+anno,periodo:String(mese).padStart(2,'0'),
       descrizione:`Previsionale ${AMM_MESE_L[+mese-1]} ${anno} – ${s}`,
-      modalita:'Home banking',banca:S.par.contoBanca||'',
+      modalita:'Home banking',banca:bkDefaultNome(),
       note:'Creato dal previsionale: importi da confermare.'});
     S.f24.push(f);
     for(const r of rr)S.f24r.push({id:uid(),codice:nextCode(MODS.f24r),f24:f.codice,
@@ -12664,6 +12679,7 @@ function renderFa(){
     buttons:[
       {l:'Importa fatture',primary:true,fn:()=>ammBoxImportAttive()},
       {l:'Estrai',fn:l=>ammEsportaFa(l)},
+      {l:'Bolli di fattura',fn:()=>bfRiepilogo('a')},
       {l:'Vai alle proforma',fn:()=>{S.tab='fatturazione';render();}},
     ],
     filters:[
@@ -12674,6 +12690,7 @@ function renderFa(){
       {k:'__per',label:'Periodo IVA',
        opts:()=>[...new Set(S.fa.map(f=>f.periodoIva||faPeriodo(f)).filter(Boolean))].sort().reverse(),
        test:(r,v)=>(r.periodoIva||faPeriodo(r))===v},
+      bfFiltroDoc('a'),bfFiltro('a'),
       {k:'__vei',label:'Veicolo',all:'Tutti i mezzi',
        opts:()=>[...new Set([...S.fa.map(f=>f.targa),...S.fal.map(l=>l.targa)].filter(Boolean))].sort(),
        test:(r,v)=>normTarga(r.targa)===normTarga(v)||faTarghe(r).includes(normTarga(v))},
@@ -12689,11 +12706,13 @@ function renderFa(){
         <div><b>${eur(imp)}</b><small>imponibile</small></div>
         <div><b>${eur(iva)}</b><small>IVA a debito</small></div>
         <div><b>${eur(res)}</b><small>da incassare</small></div>
-        <div><b class="${sca?'late':''}">${sca}</b><small>scadute</small></div>`;
+        <div><b class="${sca?'late':''}">${sca}</b><small>scadute</small></div>
+        ${bfTile(l,'a')}`;
     },
+    rowClass:r=>faSegno(r)<0?'rownc':'',
     sort:(a,b)=>(b.data||'').localeCompare(a.data||'')||String(b.codice).localeCompare(String(a.codice)),
     cols:[
-      {l:'Fattura',v:r=>`<b>${esc(r.numero)}</b><span class="sub">${esc(r.codice)} · ${fmtD(r.data)}${r.tipoDoc&&r.tipoDoc!=='TD01'?' · '+esc(r.tipoDoc):''}</span>`,s:r=>r.data+r.codice},
+      {l:'Fattura',v:r=>`<b>${esc(r.numero)}</b>${ncBadge(faSegno(r))}<span class="sub">${esc(r.codice)} · ${fmtD(r.data)}${r.tipoDoc&&r.tipoDoc!=='TD01'?' · '+esc(r.tipoDoc):''}</span>`,s:r=>r.data+r.codice},
       {l:'Cliente',v:r=>`${esc(r.cliente)}<span class="sub">${esc(r.societa||'società da indicare')}</span>`},
       {l:'Oggetto',v:r=>{
         const n=faLinee(r).length,tg=faTarghe(r);
@@ -12703,10 +12722,11 @@ function renderFa(){
           +`${r.contrattoLocazione?`<span class="sub">contratto ${esc(r.contrattoLocazione)}</span>`:''}`
           +`${per?`<span class="sub">${esc(per)}</span>`:''}`
           +`${n?`<span class="sub">${n} ${n===1?'riga':'righe'}</span>`:''}`;}},
-      {l:'Imponibile',cls:'num',v:r=>eur(faImponibile(r)),s:r=>faImponibile(r)},
-      {l:'IVA',cls:'num',v:r=>`${eur(faImposta(r))}${r.splitPayment==='Sì'?'<span class="sub">scissione dei pagamenti</span>':''}`,s:r=>faImposta(r)},
+      {l:'Imponibile',cls:'num',v:r=>ncEur(faImponibile(r),faSegno(r)),s:r=>faSegno(r)*faImponibile(r)},
+      {l:'IVA',cls:'num',v:r=>`${ncEur(faImposta(r),faSegno(r))}${r.splitPayment==='Sì'?'<span class="sub">scissione dei pagamenti</span>':''}`,s:r=>faSegno(r)*faImposta(r)},
+      {l:'Bollo',cls:'num',v:r=>bfCella(r,'a'),s:r=>+r.bollo||0},
       {l:'Totale',cls:'num',v:r=>{const q=faQuadra(r);
-        return `<b>${eur(r.totale)}</b>${q!=null?`<span class="sub late">non quadra di ${eur(q)}</span>`:''}`;},s:r=>+r.totale||0},
+        return `<b>${ncEur(r.totale,faSegno(r))}</b>${q!=null?`<span class="sub late">non quadra di ${eur(q)}</span>`:''}`;},s:r=>faSegno(r)*(+r.totale||0)},
       {l:'Incasso',v:r=>`${pillS(r.statoIncasso,AMM_INCPILL[r.statoIncasso]||'end')}<span class="sub">${r.scadenza?dueCell(r.scadenza,10):'senza scadenza'}</span>`},
       {l:'In prima nota',v:r=>r.registrata==='Sì'?'<span class="cfok">sì</span>':'<span class="muted">no</span>'},
       {l:'Proforma',v:r=>r.proforma?`<span class="sub">${esc(r.proforma)}</span>`:'<span class="muted">–</span>'},
@@ -12835,6 +12855,9 @@ function schedaEconomica(targa,pDa,pA,fonti){
     const netto=x=>r2((+x.importo||0)-(+x.iva||0))||(+x.importo||0);
     add(costi,'Carburante',r2(carb.reduce((a,m)=>a+netto(m),0)),carb.length,'Movimenti carte');
     add(costi,'Pedaggi e transiti',r2(ped.reduce((a,m)=>a+netto(m),0)),ped.length,'Movimenti Telepass');
+  }
+  if(on.ns&&typeof nsCostiMezzo==='function'){
+    for(const [c,v] of nsCostiMezzo(t,pDa,pA))add(costi,c,v.i,v.n,'Note spese');
   }
   if(on.bolli){
     const l=S.bolli.filter(b=>normTarga(b.targa)===t&&b.stato!=='Non dovuto'
@@ -13542,6 +13565,926 @@ function tplInfoTesto(m,custom,nm){
   const nome=TPL_CERCA[t].nome+'.docx';
   return `Modello predefinito del programma: in cartella non c'è ${nome}. Salvalo nella cartella «Modelli» accanto al registro, oppure indica la cartella in Parametri.`;
 }
+
+
+/* =====================================================================
+   BANCA E CARTE
+   ---------------------------------------------------------------------
+   La prima nota si divide per conto: ogni conto corrente, ogni carta di
+   credito, la cassa. Qui si censiscono, si sceglie su quale si paga e si
+   incassa, e per ciascuno si legge l'estratto con il saldo progressivo.
+
+   Un conto è il suo nome: il nome compare nella colonna «Conto» della
+   prima nota, e per questo non si cambia dopo che ci sono movimenti. Per
+   un conto corrente il saldo cresce con il dare; per una carta di credito
+   il saldo è il debito verso l'emittente, e cresce con l'avere.
+   ===================================================================== */
+const BK_TIPI=['Conto corrente','Carta di credito','Carta prepagata','Conto postale','Cassa contanti'];
+const bkCarta=b=>/carta di credito/i.test(b&&b.tipo||'');
+const bkAttivi=()=>S.bk.filter(b=>b.stato!=='Chiuso');
+const bkNomi=f=>bkAttivi().filter(f||(()=>true)).map(b=>b.conto||b.nome);
+const bkPerConto=nome=>S.bk.find(b=>(b.conto||b.nome)===nome)||null;
+
+/* il conto che si propone per primo nei pagamenti */
+function bkDefault(){
+  const a=bkAttivi();
+  return a.find(b=>b.predefinito==='Sì')||a.find(b=>/conto corrente|postale/i.test(b.tipo||''))||a[0]||null;
+}
+const bkDefaultNome=()=>{const b=bkDefault();return b?(b.conto||b.nome):'';};
+const bkNomeDefault=()=>bkDefaultNome()||S.par.contoBanca||'Banca c/c';
+
+/* conti contabili che un conto bancario non può imitare */
+const BK_RISERVATI=()=>AMM_PDC_FISSI.filter(c=>!['Banca c/c','Cassa'].includes(c));
+
+MODS.bk={sheet:'Banca e carte',store:'bk',title:'Banca e carte',code:'BK',attach:true,wide:true,
+ groups:[
+  {t:'Conto o carta',f:[
+   fd('nome','Nome','text',{req:true,span:'s4',hint:'È il nome che compare in prima nota: per esempio «Intesa c/c 1234». Non si cambia dopo i primi movimenti.'}),
+   fd('tipo','Tipo','sel',{req:true,span:'s3',def:'Conto corrente',opts:BK_TIPI}),
+   fd('stato','Stato','sel',{span:'s2',def:'Attivo',opts:['Attivo','Chiuso']}),
+   fd('societa','Società','ref',{ref:'soc',flt:'tit',span:'s4'}),
+   fd('istituto','Banca o emittente','text',{span:'s4'}),
+   fd('iban','IBAN','up',{span:'s4'}),
+   fd('ultime4','Ultime cifre della carta','text',{span:'s2'}),
+   fd('intestatario','Intestatario o titolare della carta','text',{span:'s4'}),
+   fd('predefinito','Proposto per i pagamenti','bool',{def:'No',span:'s3'}),
+   fd('conto','Conto in prima nota','text',{hidden:true})]},
+  {t:'Saldi e addebiti',f:[
+   fd('saldoIniziale','Saldo iniziale (€)','eur',{hint:'Conto corrente: il saldo. Carta di credito: quanto si deve all’emittente.'}),
+   fd('dataSaldo','Alla data','date',{hint:'I movimenti precedenti non entrano nel saldo'}),
+   fd('fido','Fido o plafond (€)','eur'),
+   fd('contoAddebito','Conto su cui si addebita la carta','text',{span:'s4',listOf:()=>bkNomi(b=>!bkCarta(b))}),
+   fd('giornoAddebito','Giorno dell’addebito','int',{span:'s2'}),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+
+/* i moduli nuovi vanno normalizzati come gli altri */
+function ammRegistraModuli(keys){
+  for(const k of keys){
+    const m=MODS[k];m.id=k;
+    m.fields=m.groups.flatMap(g=>g.f);
+    m.fmap=Object.fromEntries(m.fields.map(f=>[f.k,f]));
+    if(!Array.isArray(S[m.store]))S[m.store]=[];
+    if(!SHEET_ORDER.includes(m.sheet))SHEET_ORDER.push(m.sheet);
+  }
+}
+
+/* nella prima nota: quale riga è stata verificata sull'estratto della banca */
+(()=>{
+  const g=MODS.pn.groups[MODS.pn.groups.length-1];
+  const f1=fd('riconciliata','Riconciliata con l’estratto','sel',{span:'s3',def:'No',opts:['No','Sì']});
+  const f2=fd('dataRiconciliazione','Riconciliata il','date',{span:'s3'});
+  g.f.push(f1,f2);
+  MODS.pn.fields.push(f1,f2);MODS.pn.fmap.riconciliata=f1;MODS.pn.fmap.dataRiconciliazione=f2;
+  const b=MODS.pn.fmap.banca;if(b)b.listOf=()=>bkNomi();
+})();
+ammRegistraModuli(['bk']);
+AMM_PDC_FISSI.push('Debiti verso dipendenti','Commissioni bancarie','Interessi passivi','Interessi attivi',
+  'Stipendi e salari','Anticipi a dipendenti');
+try{MODS.f24.fmap.banca.listOf=()=>bkNomi();}catch(e){}
+
+MODS.bk.validate=(x,errs)=>{
+  const nome=String(x.nome||'').trim();
+  const orig=S.bk.find(b=>b.id===x.id);
+  if(orig&&orig.conto&&orig.conto!==nome&&S.pn.some(r=>r.conto===orig.conto))
+    errs.nome='Ci sono già movimenti su questo conto: il nome non si cambia, altrimenti la prima nota perde il collegamento.';
+  else{
+    if(S.bk.some(b=>b.id!==x.id&&(b.conto||b.nome).toLowerCase()===nome.toLowerCase()))errs.nome='Esiste già un conto con questo nome.';
+    if(BK_RISERVATI().some(c=>c.toLowerCase()===nome.toLowerCase()))errs.nome='Questo nome è già un conto della contabilità: scegline un altro.';
+  }
+  if(!orig||!orig.conto)x.conto=nome;
+  else x.conto=orig.conto;
+  if(/carta di credito/i.test(x.tipo||'')&&x.contoAddebito&&x.contoAddebito===x.conto)errs.contoAddebito='Non può addebitarsi su sé stessa';
+  if(x.iban&&!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(String(x.iban).replace(/\s/g,'').toUpperCase()))errs.iban='IBAN non valido';
+};
+MODS.bk.afterSave=b=>{
+  if(!b.conto)b.conto=b.nome;
+  if(b.predefinito==='Sì')for(const o of S.bk)if(o.id!==b.id&&o.predefinito==='Sì')o.predefinito='No';
+};
+MODS.bk.live=x=>{
+  const b=S.bk.find(y=>y.id===x.id);
+  if(!b)return `<div><small>Movimenti</small><b>nessuno</b></div>`;
+  const s=bkSaldo(b),n=bkMovimenti(b).length;
+  return `<div><small>${bkCarta(b)?'Da addebitare':'Saldo contabile'}</small><b>${eur(s)}</b></div>
+    <div><small>Movimenti</small><b>${n}</b></div>
+    <div><small>Da riconciliare</small><b>${bkMovimenti(b).filter(r=>r.riconciliata!=='Sì').length}</b></div>`;
+};
+
+/* ---------- i movimenti e i saldi ---------- */
+function bkMovimenti(b,da,a){
+  const nome=b.conto||b.nome;
+  return S.pn.filter(r=>r.conto===nome&&(!b.dataSaldo||(r.data||'')>=b.dataSaldo)
+      &&(!da||(r.data||'')>=da)&&(!a||(r.data||'')<=a))
+    .sort((x,y)=>(x.data||'').localeCompare(y.data||'')||String(x.registrazione||'').localeCompare(String(y.registrazione||''))
+      ||(+x.riga||0)-(+y.riga||0));
+}
+/* Effetto di una riga sul saldo: conto → dare aumenta; carta → avere aumenta il debito. */
+const bkEffetto=(b,r)=>r2(bkCarta(b)?(+r.avere||0)-(+r.dare||0):(+r.dare||0)-(+r.avere||0));
+function bkSaldo(b,alla,soloRiconciliate){
+  let s=+b.saldoIniziale||0;
+  for(const r of bkMovimenti(b,'',alla)){
+    if(soloRiconciliate&&r.riconciliata!=='Sì')continue;
+    s=r2(s+bkEffetto(b,r));
+  }
+  return r2(s);
+}
+const bkDisponibile=b=>b.fido!==''&&b.fido!=null?r2((+b.fido||0)-(bkCarta(b)?bkSaldo(b):-bkSaldo(b))):null;
+
+/* ---------- le scritture a più conti ---------- */
+function bkNumeroReg(pre,data){
+  const y=String(data||todayISO()).slice(0,4);
+  const p=`${pre}-${y}-`;
+  let max=0;
+  for(const r of S.pn){const g=String(r.registrazione||'');
+    if(g.startsWith(p)){const n=parseInt(g.slice(p.length),10);if(n>max)max=n;}}
+  return p+String(max+1).padStart(4,'0');
+}
+function bkScrivi(reg,tipo,data,righe,extra){
+  righe.forEach((r,i)=>S.pn.push({id:uid(),codice:nextCode(MODS.pn,data),data,
+    societa:(extra&&extra.societa)||'',tipo,registrazione:reg,riga:i+1,
+    descrizione:r.descrizione,conto:r.conto,dare:r.dare||'',avere:r.avere||'',
+    contropartita:r.contropartita||'',mezzoPagamento:(extra&&extra.mezzo)||'',banca:r.banca||'',
+    documento:(extra&&extra.documento)||'',riferimento:reg,targa:(extra&&extra.targa)||'',
+    centroCosto:(extra&&extra.centroCosto)||'',note:'',riconciliata:'No'}));
+}
+const BK_CAUSALI=[
+ ['Commissioni e spese bancarie','Commissioni bancarie','Uscita'],
+ ['Interessi passivi','Interessi passivi','Uscita'],
+ ['Interessi attivi','Interessi attivi','Entrata'],
+ ['Stipendi','Stipendi e salari','Uscita'],
+ ['Prelievo contanti','Cassa','Uscita'],
+ ['Versamento contanti','Cassa','Entrata'],
+ ['Altro (indico io il conto)','','']];
+
+function bkBox(titolo,corpo,okLabel,leggi){
+  return new Promise(res=>{
+    const m=document.createElement('div');m.className='modal';
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:560px;width:94vw">
+      <h3>${titolo}</h3><div class="fgrid">${corpo}</div>
+      <div class="ferr" id="bkErr" style="margin-top:8px"></div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">${okLabel}</button></div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click',e=>{
+      const a=e.target.closest('[data-a]');
+      if(!a&&e.target!==m)return;
+      if(!a||a.dataset.a==='0'){m.remove();res(null);return;}
+      const out=leggi(m);
+      if(typeof out==='string'){m.querySelector('#bkErr').textContent=out;return;}
+      m.remove();res(out);
+    });
+    const p=m.querySelector('input,select');if(p)p.focus();
+    m.__q=s=>m.querySelector(s);
+  });
+}
+/* il campo «Conto» dei pagamenti: i conti censiti, oppure il nome libero se non ce n'è nessuno */
+function bkSelectConto(id,incasso){
+  const nomi=bkNomi(b=>!incasso||!bkCarta(b));
+  if(!nomi.length)return `<input class="input" id="${id}" value="${esc(S.par.contoBanca||'Banca c/c')}">`;
+  return `<select class="input" id="${id}">${bkOpt(nomi,bkDefaultNome())}</select>`;
+}
+const bkOpt=(lista,sel)=>lista.map(n=>`<option ${n===sel?'selected':''}>${esc(n)}</option>`).join('');
+
+/* Movimento di banca o di cassa che non nasce da una fattura. */
+async function bkNuovoMovimento(conto){
+  if(soloLettura()||!puoScrivere('pn'))return toast('Il tuo ruolo non può scrivere in prima nota.',true);
+  const nomi=bkNomi();
+  if(!nomi.length)return toast('Prima inserisci almeno un conto: dal pulsante «Nuovo conto».',true);
+  const pdc=ammPdc();
+  const r=await bkBox('Nuovo movimento',
+    `<div class="field s2"><label>Data</label><input class="input" type="date" id="mvData" value="${todayISO()}"></div>
+     <div class="field s4"><label>Conto o carta</label><select class="input" id="mvConto">${bkOpt(nomi,conto||nomi[0])}</select></div>
+     <div class="field s2"><label>Verso</label><select class="input" id="mvVerso"><option>Uscita</option><option>Entrata</option></select></div>
+     <div class="field s2"><label>Importo (€)</label><input class="input" type="number" step="0.01" min="0" id="mvImp"></div>
+     <div class="field s4"><label>Causale</label><select class="input" id="mvCaus">${BK_CAUSALI.map(c=>`<option>${esc(c[0])}</option>`).join('')}</select></div>
+     <div class="field s4"><label>Contropartita</label><input class="input" id="mvCtr" list="mvPdc" value="${esc(BK_CAUSALI[0][1])}">
+       <datalist id="mvPdc">${pdc.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+     <div class="field s6"><label>Descrizione</label><input class="input" id="mvDes"></div>
+     <div class="field s3"><label>Documento</label><input class="input" id="mvDoc"></div>
+     <div class="field s3"><label>Targa (se riguarda un mezzo)</label><input class="input upc" id="mvTarga" list="mvTg">
+       <datalist id="mvTg">${S.mezzi.filter(m=>!ARCH(m)).map(m=>`<option value="${esc(m.targa)}">`).join('')}</datalist></div>`,
+    'Registra',
+    m=>{
+      const q=s=>m.querySelector(s).value;
+      const imp=r2(parseFloat(q('#mvImp'))||0),ctr=q('#mvCtr').trim();
+      if(imp<=0)return 'Indica l’importo.';
+      if(!ctr)return 'Indica la contropartita.';
+      if(!q('#mvData'))return 'Indica la data.';
+      return {data:q('#mvData'),conto:q('#mvConto'),verso:q('#mvVerso'),imp,ctr,caus:q('#mvCaus'),
+        des:q('#mvDes').trim(),doc:q('#mvDoc').trim(),targa:normTarga(q('#mvTarga'))};
+    });
+  if(!r)return;
+  const b=bkPerConto(r.conto);
+  const desc=r.des||r.caus;
+  const mezzo=b&&bkCarta(b)?'Carta':(b&&/cassa/i.test(b.tipo)?'Cassa':'Banca');
+  const reg=bkNumeroReg('MB',r.data);
+  const dare=r.verso==='Entrata'?r.conto:r.ctr,avere=r.verso==='Entrata'?r.ctr:r.conto;
+  bkScrivi(reg,'Banca',r.data,[
+    {conto:dare,dare:r.imp,descrizione:desc,contropartita:avere,banca:dare===r.conto?r.conto:''},
+    {conto:avere,avere:r.imp,descrizione:desc,contropartita:dare,banca:avere===r.conto?r.conto:''}],
+    {mezzo,documento:r.doc,targa:r.targa,societa:b&&b.societa||''});
+  markDirty();render();
+  toast(`Movimento registrato (${reg}): ${r.verso==='Entrata'?'entrata':'uscita'} di ${eur(r.imp)} su ${r.conto}.`);
+}
+
+/* Trasferimento da un conto a un altro; con una carta di credito come
+   destinazione è l'addebito dell'estratto. */
+async function bkGiroconto(preset){
+  if(soloLettura()||!puoScrivere('pn'))return toast('Il tuo ruolo non può scrivere in prima nota.',true);
+  const nomi=bkNomi();
+  if(nomi.length<2)return toast('Servono almeno due conti per un giroconto.',true);
+  const p=preset||{};
+  const r=await bkBox('Giroconto o addebito estratto carta',
+    `<div class="field s2"><label>Data</label><input class="input" type="date" id="gcData" value="${p.data||todayISO()}"></div>
+     <div class="field s4"><label>Da (esce)</label><select class="input" id="gcDa">${bkOpt(nomi.filter(n=>!(bkPerConto(n)&&bkCarta(bkPerConto(n)))),p.da)}</select></div>
+     <div class="field s4"><label>A (entra)</label><select class="input" id="gcA">${bkOpt(nomi,p.a)}</select></div>
+     <div class="field s2"><label>Importo (€)</label><input class="input" type="number" step="0.01" min="0" id="gcImp" value="${p.importo||''}"></div>
+     <div class="field s6"><label>Descrizione</label><input class="input" id="gcDes" value="${esc(p.descrizione||'')}"></div>
+     <p class="muted s6" style="font-size:12.5px;margin:0">Verso una carta di credito è il pagamento dell’estratto: riduce il debito della carta.</p>`,
+    'Registra',
+    m=>{
+      const q=s=>m.querySelector(s).value;
+      const imp=r2(parseFloat(q('#gcImp'))||0);
+      if(q('#gcDa')===q('#gcA'))return 'Origine e destinazione sono lo stesso conto.';
+      if(imp<=0)return 'Indica l’importo.';
+      return {data:q('#gcData'),da:q('#gcDa'),a:q('#gcA'),imp,des:q('#gcDes').trim()};
+    });
+  if(!r)return;
+  const dest=bkPerConto(r.a);
+  const desc=r.des||(dest&&bkCarta(dest)?`Addebito estratto carta ${r.a}`:`Giroconto da ${r.da} a ${r.a}`);
+  const reg=bkNumeroReg('GC',r.data);
+  bkScrivi(reg,'Giroconto',r.data,[
+    {conto:r.a,dare:r.imp,descrizione:desc,contropartita:r.da,banca:r.a},
+    {conto:r.da,avere:r.imp,descrizione:desc,contropartita:r.a,banca:r.da}],{mezzo:'Giroconto'});
+  markDirty();render();
+  toast(`Giroconto registrato (${reg}): ${eur(r.imp)} da ${r.da} a ${r.a}.`);
+}
+function bkAddebitaCarta(b){
+  const dovuto=bkSaldo(b);
+  const da=b.contoAddebito&&bkPerConto(b.contoAddebito)?b.contoAddebito:bkNomi(x=>!bkCarta(x))[0];
+  const g=+b.giornoAddebito||0;
+  let data=todayISO();
+  if(g>0){const d=fromISO(data);data=toISO(new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),Math.min(g,28))));}
+  return bkGiroconto({da,a:b.conto||b.nome,importo:dovuto>0?dovuto:'',descrizione:`Addebito estratto carta ${b.nome}`,data});
+}
+
+/* ---------- l'estratto conto ---------- */
+function bkRigheEstratto(b,da,a){
+  let s=r2((+b.saldoIniziale||0)+bkMovimenti(b,'',da?addDays(da,-1):'').reduce((t,r)=>t+bkEffetto(b,r),0));
+  if(!da)s=+b.saldoIniziale||0;
+  const apertura=s;
+  const righe=bkMovimenti(b,da,a).map(r=>{s=r2(s+bkEffetto(b,r));return {r,saldo:s};});
+  return {apertura,righe,chiusura:s};
+}
+function openEstrattoBk(b){
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const carta=bkCarta(b);
+  const U={da:b.dataSaldo||'',a:todayISO(),solo:''};
+  const lab=carta?{dare:'Rimborsi e addebiti',avere:'Spese con carta'}:{dare:'Entrate',avere:'Uscite'};
+  const paint=()=>{
+    const e=bkRigheEstratto(b,U.da,U.a);
+    const vis=e.righe.filter(x=>!U.solo||x.r.riconciliata!=='Sì');
+    const tutte=bkMovimenti(b);
+    const daRic=tutte.filter(r=>r.riconciliata!=='Sì').length;
+    const rico=bkSaldo(b,'',true);
+    const scrive=puoScrivere('pn')&&!soloLettura();
+    d.innerHTML=`<header><h2>${esc(b.nome)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <p class="muted">${esc(b.tipo)}${b.iban?` · ${esc(b.iban)}`:''}${b.ultime4?` · carta •••• ${esc(b.ultime4)}`:''}${b.istituto?` · ${esc(b.istituto)}`:''}</p>
+      <div class="calcbox">
+        <div><small>${carta?'Da addebitare':'Saldo contabile'}</small><b>${eur(bkSaldo(b))}</b></div>
+        <div><small>Saldo riconciliato</small><b>${eur(rico)}</b></div>
+        <div><small>Righe da riconciliare</small><b class="${daRic?'warnc':'cfok'}">${daRic}</b></div>
+        ${bkDisponibile(b)!=null?`<div><small>Disponibile</small><b>${eur(bkDisponibile(b))}</b></div>`:''}
+      </div>
+      <div class="acts" style="justify-content:flex-start;margin:10px 0">
+        <div class="field" style="max-width:150px"><label>Dal</label><input class="input" type="date" id="esDa" value="${U.da}"></div>
+        <div class="field" style="max-width:150px"><label>Al</label><input class="input" type="date" id="esA" value="${U.a}"></div>
+        <label class="check" style="align-self:end"><input type="checkbox" id="esSolo" ${U.solo?'checked':''}> Solo da riconciliare</label>
+      </div>
+      <div class="tablewrap" style="max-height:430px;overflow:auto"><table class="grid mini"><thead><tr>
+        <th>Data</th><th>Registrazione</th><th>Descrizione</th><th class="num">${lab.dare}</th><th class="num">${lab.avere}</th>
+        <th class="num">Saldo</th><th>Riconc.</th></tr></thead><tbody>
+        <tr><td colspan="5" class="muted">Saldo ${U.da?`al ${fmtD(addDays(U.da,-1))}`:'iniziale'}</td><td class="num"><b>${eur(e.apertura)}</b></td><td></td></tr>
+        ${vis.map(({r,saldo})=>`<tr>
+          <td class="nowrap">${fmtD(r.data)}</td><td>${esc(r.registrazione||'')}</td>
+          <td>${esc(r.descrizione||'')}${r.contropartita?`<span class="sub">contro ${esc(r.contropartita)}</span>`:''}</td>
+          <td class="num">${+r.dare?eur(r.dare):''}</td><td class="num">${+r.avere?eur(r.avere):''}</td>
+          <td class="num"><b>${eur(saldo)}</b></td>
+          <td>${scrive?`<input type="checkbox" data-ric="${r.id}" ${r.riconciliata==='Sì'?'checked':''} aria-label="Riconciliata">`:(r.riconciliata==='Sì'?'sì':'')}</td></tr>`).join('')
+          ||'<tr><td colspan="7" class="empty">Nessun movimento nel periodo.</td></tr>'}
+        <tr><td colspan="5"><b>Saldo finale</b></td><td class="num"><b>${eur(e.chiusura)}</b></td><td></td></tr>
+      </tbody></table></div>
+      <p class="muted" style="margin-top:8px">Il saldo parte da ${eur(b.saldoIniziale||0)}${b.dataSaldo?` al ${fmtD(b.dataSaldo)}`:''}. Spunta «Riconc.» sulle righe che hai verificato sull’estratto della banca: il saldo riconciliato deve coincidere con quello della banca.</p>
+    </div>
+    <footer><button class="btn" data-pdf>PDF</button><button class="btn" data-xls>Excel</button>
+      ${scrive?`<button class="btn" data-mov>Nuovo movimento</button><button class="btn" data-gc>${carta?'Addebita l’estratto':'Giroconto'}</button>`:''}
+      <button class="btn primary" data-x>Fatto</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(x=>x.onclick=close);
+    d.querySelector('#esDa').onchange=e=>{U.da=e.target.value;paint();};
+    d.querySelector('#esA').onchange=e=>{U.a=e.target.value;paint();};
+    d.querySelector('#esSolo').onchange=e=>{U.solo=e.target.checked?'1':'';paint();};
+    d.querySelectorAll('[data-ric]').forEach(c=>c.onchange=()=>{
+      const r=S.pn.find(x=>x.id===c.dataset.ric);if(!r)return;
+      r.riconciliata=c.checked?'Sì':'No';r.dataRiconciliazione=c.checked?todayISO():'';
+      markDirty();paint();});
+    d.querySelector('[data-pdf]').onclick=async()=>{
+      await saveInFolder('Amministrazione/Estrazioni',[{name:`Estratto_${safe(b.nome)}_${stampNow()}.pdf`,data:bkPdf(b,e,lab)}]);
+      toast('Estratto conto in PDF.');};
+    d.querySelector('[data-xls]').onclick=()=>bkExcel(b,e,lab);
+    const mv=d.querySelector('[data-mov]');if(mv)mv.onclick=async()=>{close();await bkNuovoMovimento(b.conto||b.nome);};
+    const gc=d.querySelector('[data-gc]');if(gc)gc.onclick=async()=>{close();if(carta)await bkAddebitaCarta(b);else await bkGiroconto({da:b.conto||b.nome});};
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);if(S.tab==='bk'||S.tab==='pn')render();};
+  const kd=ev=>{if(ev.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);sc.onclick=close;document.body.append(sc,d);paint();
+}
+function bkPdf(b,e,lab){
+  return ammPdf({
+    titolo:`Estratto conto – ${b.nome}`,
+    sottotitolo:`${b.tipo}${b.iban?' · '+b.iban:''} · saldo iniziale ${ammEuroPdf(e.apertura)} · saldo finale ${ammEuroPdf(e.chiusura)}`,
+    colonne:[{l:'Data',w:48},{l:'Registrazione',w:84},{l:'Descrizione',w:240},{l:'Documento',w:66},
+      {l:lab.dare,w:66,num:true},{l:lab.avere,w:66,num:true},{l:'Saldo',w:70,num:true}],
+    righe:e.righe.map(({r,saldo})=>[fmtD(r.data),r.registrazione||'',r.descrizione||'',r.documento||'',
+      ammEuroPdf(r.dare),ammEuroPdf(r.avere),ammEuroPdf(saldo)]),
+    piede:['','','','Totali',ammEuroPdf(pnDare(e.righe.map(x=>x.r))),ammEuroPdf(pnAvere(e.righe.map(x=>x.r))),ammEuroPdf(e.chiusura)],
+  });
+}
+async function bkExcel(b,e,lab){
+  const wb=new ExcelJS.Workbook();
+  const ws=wb.addWorksheet('Estratto conto');
+  ws.addRow([`Estratto conto – ${b.nome}`]);ws.addRow([b.tipo,b.iban||'',`Saldo iniziale ${e.apertura}`]);
+  ws.addRow([]);
+  const h=ws.addRow(['Data','Registrazione','Descrizione','Documento','Contropartita',lab.dare,lab.avere,'Saldo','Riconciliata']);
+  h.font={bold:true};
+  for(const {r,saldo} of e.righe)
+    ws.addRow([r.data?fromISO(r.data):null,r.registrazione||'',r.descrizione||'',r.documento||'',r.contropartita||'',
+      +r.dare||null,+r.avere||null,saldo,r.riconciliata==='Sì'?'Sì':'No']);
+  ws.addRow(['','','','','Saldo finale','','',e.chiusura,'']).font={bold:true};
+  ws.getColumn(1).numFmt='dd/mm/yyyy';
+  [6,7,8].forEach(i=>ws.getColumn(i).numFmt='#,##0.00');
+  [12,16,50,16,24,14,14,14,12].forEach((w,i)=>ws.getColumn(i+1).width=w);
+  const buf=await wb.xlsx.writeBuffer();
+  await saveInFolder('Amministrazione/Estrazioni',[{name:`Estratto_${safe(b.nome)}_${stampNow()}.xlsx`,data:new Blob([buf],{type:XLSX_MIME})}]);
+  toast('Estratto conto in Excel.');
+}
+
+/* ---------- l'elenco ---------- */
+function renderBk(){
+  genericList('bk',{
+    sub:'I conti correnti, le carte di credito e la cassa. Ogni pagamento e ogni incasso si registra su uno di questi: la prima nota si legge per conto, con il saldo progressivo.',
+    newLabel:'Nuovo conto',searchPh:'Nome, banca, IBAN, carta',
+    search:['nome','istituto','iban','ultime4','intestatario','tipo'],
+    buttons:[
+      {l:'Nuovo movimento',fn:()=>bkNuovoMovimento()},
+      {l:'Giroconto o addebito carta',fn:()=>bkGiroconto()},
+      {l:'Vai alla prima nota',fn:()=>{S.tab='pn';render();}},
+    ],
+    filters:[
+      {k:'tipo',label:'Tipo',opts:()=>BK_TIPI},
+      {k:'stato',label:'Stato',opts:()=>['Attivo','Chiuso']},
+      {k:'societa',label:'Società',opts:()=>S.soc.filter(socOk.tit).map(s=>s.ragione)},
+    ],
+    ledger:l=>{
+      const liq=r2(l.filter(b=>!bkCarta(b)&&b.stato!=='Chiuso').reduce((a,b)=>a+bkSaldo(b),0));
+      const deb=r2(l.filter(b=>bkCarta(b)&&b.stato!=='Chiuso').reduce((a,b)=>a+bkSaldo(b),0));
+      const ric=l.reduce((a,b)=>a+bkMovimenti(b).filter(r=>r.riconciliata!=='Sì').length,0);
+      return `<div><b>${l.length}</b><small>conti e carte</small></div>
+        <div><b>${eur(liq)}</b><small>liquidità (conti e cassa)</small></div>
+        <div><b>${eur(deb)}</b><small>da addebitare sulle carte</small></div>
+        <div><b class="${ric?'warnc':'cfok'}">${ric}</b><small>righe da riconciliare</small></div>`;
+    },
+    sort:(a,b)=>(a.stato==='Chiuso')-(b.stato==='Chiuso')||String(a.nome).localeCompare(String(b.nome)),
+    cols:[
+      {l:'Conto',v:r=>`<b>${esc(r.nome)}</b>${r.predefinito==='Sì'?' <span class="pill run">proposto</span>':''}<span class="sub">${esc(r.tipo)}${r.iban?' · '+esc(r.iban):''}${r.ultime4?' · •••• '+esc(r.ultime4):''}</span>`,s:r=>r.nome},
+      {l:'Società',v:r=>esc(r.societa||'–')},
+      {l:'Saldo',cls:'num',v:r=>{const s=bkSaldo(r);const dsp=bkDisponibile(r);
+        return `<b>${eur(s)}</b><span class="sub">${bkCarta(r)?'da addebitare':'saldo contabile'}${dsp!=null?` · disponibile ${eur(dsp)}`:''}</span>`;},s:r=>bkSaldo(r)},
+      {l:'Movimenti',v:r=>{const m=bkMovimenti(r);const nr=m.filter(x=>x.riconciliata!=='Sì').length;
+        return `${m.length}<span class="sub">${m.length?'ultimo '+fmtD(m[m.length-1].data):'nessuno'}${nr?` · ${nr} da riconciliare`:''}</span>`;}},
+      {l:'Addebito',v:r=>bkCarta(r)?`${esc(r.contoAddebito||'conto da indicare')}<span class="sub">${r.giornoAddebito?'il '+r.giornoAddebito+' del mese':''}</span>`:''},
+      {l:'Stato',v:r=>pillS(r.stato,r.stato==='Chiuso'?'end':'run')},
+    ],
+    rowActions:[
+      {l:'Estratto conto',fn:openEstrattoBk},
+      {l:'Nuovo movimento',show:()=>puoScrivere('pn'),fn:r=>bkNuovoMovimento(r.conto||r.nome)},
+      {l:'Addebita l’estratto',show:r=>bkCarta(r)&&puoScrivere('pn'),fn:bkAddebitaCarta},
+      {l:'Giroconto',show:r=>!bkCarta(r)&&puoScrivere('pn'),fn:r=>bkGiroconto({da:r.conto||r.nome})},
+    ],
+    empty:'Nessun conto. Inserisci i conti correnti e le carte di credito: da qui in poi pagamenti e incassi si registrano sul conto giusto.',
+    after:`<p class="muted" style="margin-top:12px">Il saldo è quello contabile: parte dal saldo iniziale e segue la prima nota. Non è collegato alla banca: per il confronto con l’estratto si usa la spunta «Riconc.» nell’estratto conto.</p>`,
+  });
+}
+VIEWS.bk=()=>renderBk();
+AMM_TABS.push('bk');
+{ const a=RUOLI.amministrazione;
+  if(a){ if(!a.tabs.includes('bk'))a.tabs.push('bk'); if(!a.scrivi.includes('bk'))a.scrivi.push('bk'); } }
+{
+  const g=MENU.find(x=>x.g==='Amministrazione');
+  if(g&&!g.items.some(([k])=>k==='bk')){
+    const i=g.items.findIndex(([k])=>k==='pn');
+    g.items.splice(i<0?g.items.length:i+1,0,['bk','Banca e carte']);
+  }
+}
+
+
+/* =====================================================================
+   NOTE DI CREDITO E BOLLI DI FATTURA
+   ---------------------------------------------------------------------
+   Una nota di credito (TD04) riduce costi, ricavi e IVA: nell'elenco si
+   legge con il segno meno e in rosso, e i totali la sottraggono.
+
+   Il bollo di fattura è l'imposta di 2 € che si applica ai documenti con
+   operazioni escluse, non soggette, non imponibili o esenti da IVA per
+   più di 77,47 €. È un'altra cosa dal «bollo auto» della sezione Bolli e
+   tasse. Qui si vede dove c'è, dove sarebbe dovuto e non è indicato, e si
+   riepiloga per trimestre: quello delle fatture emesse si versa con F24.
+   ===================================================================== */
+const BF_SOGLIA=77.47;
+const BF_NATURE=['N1','N21','N22','N31','N32','N33','N34','N35','N36','N4'];
+const BF_IMPORTO=2;
+
+/* importo firmato: negativo e rosso per una nota di credito */
+function ncEur(v,segno){
+  const n=r2((+v||0)*(segno<0?-1:1));
+  return segno<0&&n?`<span class="nc">${eur(n)}</span>`:eur(n);
+}
+const ncBadge=(segno)=>segno<0?' <span class="pill bad">Nota di credito</span>':'';
+
+/* La base che sconta il bollo: l'imponibile delle righe senza IVA nelle nature che lo prevedono. */
+function bfBase(f,lato){
+  const rr=lato==='a'?faRighe(f):fpRighe(f);
+  if(rr.length)return r2(rr.filter(r=>BF_NATURE.includes(ammNat(r.natura))).reduce((a,r)=>a+(+r.imponibile||0),0));
+  return +f.nonImponibile||0;
+}
+const bfDovuto=(f,lato)=>bfBase(f,lato)>BF_SOGLIA;
+function bfStato(f,lato){
+  if((+f.bollo||0)>0)return 'Presente';
+  return bfDovuto(f,lato)?'Dovuto non indicato':'Nessuno';
+}
+function bfCella(f,lato){
+  const s=bfStato(f,lato);
+  if(s==='Presente')return `${eur(f.bollo)}<span class="sub">imposta di bollo</span>`;
+  if(s==='Dovuto non indicato')return `<span class="late">dovuto, non indicato</span><span class="sub">su ${eur(bfBase(f,lato))} senza IVA</span>`;
+  return '<span class="muted">–</span>';
+}
+const bfFiltro=lato=>({k:'__bollo',label:'Bollo',all:'Tutti',
+  opts:()=>['Con bollo','Dovuto non indicato','Senza bollo'],
+  test:(r,v)=>{const s=bfStato(r,lato);return v==='Con bollo'?s==='Presente':v==='Dovuto non indicato'?s==='Dovuto non indicato':s==='Nessuno';}});
+const bfFiltroDoc=lato=>({k:'__doc',label:'Documento',all:'Tutti i documenti',
+  opts:()=>['Fatture','Note di credito'],
+  test:(r,v)=>v==='Note di credito'?(r.tipoDoc==='TD04'):(r.tipoDoc!=='TD04')});
+function bfTile(l,lato){
+  const tot=r2(l.reduce((a,f)=>a+(+f.bollo||0),0));
+  const nd=l.filter(f=>bfStato(f,lato)==='Dovuto non indicato').length;
+  return `<div><b>${eur(tot)}</b><small>bolli${nd?` · <span class="late">${nd} dovuti non indicati</span>`:''}</small></div>`;
+}
+
+/* ---------- il riepilogo per trimestre ---------- */
+const BF_TRIBUTI={1:'2521',2:'2522',3:'2523',4:'2524'};
+function bfRiepilogoDati(lista,lato){
+  const m={};
+  for(const f of lista){
+    const d=f.data||'';if(!d)continue;
+    const a=d.slice(0,4),t=Math.ceil(+d.slice(5,7)/3);if(!a||!t)continue;
+    const k=`${a}-T${t}`;
+    const x=m[k]=m[k]||{k,anno:+a,t,n:0,tot:0,nd:0,ndImp:0};
+    const s=bfStato(f,lato);
+    if(s==='Presente'){x.n++;x.tot=r2(x.tot+(+f.bollo||0));}
+    else if(s==='Dovuto non indicato'){x.nd++;x.ndImp=r2(x.ndImp+BF_IMPORTO);}
+  }
+  const righe=Object.values(m).sort((a,b)=>b.k.localeCompare(a.k));
+  /* scadenze: 31/5, 30/9, 30/11, 28/2; fino a 250 € si slitta al trimestre dopo */
+  for(const x of righe){
+    const t=(a,n)=>(m[`${a}-T${n}`]||{tot:0}).tot;
+    const t1=t(x.anno,1),t2=t(x.anno,2);
+    let s;
+    if(x.t===1)s=t1<=250?`${x.anno}-09-30`:`${x.anno}-05-31`;
+    else if(x.t===2)s=r2(t1+t2)<=250?`${x.anno}-11-30`:`${x.anno}-09-30`;
+    else if(x.t===3)s=`${x.anno}-11-30`;
+    else s=toISO(new Date(Date.UTC(x.anno+1,2,0)));
+    x.scadenza=ammLavorativo(s);
+    x.tributo=BF_TRIBUTI[x.t];
+    x.rinviato=(x.t===1&&t1<=250)||(x.t===2&&r2(t1+t2)<=250);
+  }
+  return righe;
+}
+function bfRiepilogo(lato){
+  const lista=lato==='a'?S.fa:S.fp;
+  const righe=bfRiepilogoDati(lista,lato);
+  const m=document.createElement('div');m.className='modal';
+  const att=lato==='a';
+  m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:820px;width:96vw">
+    <h3>Bolli di fattura – ${att?'fatture emesse':'fatture ricevute'}</h3>
+    <p class="muted" style="margin-top:0">${att
+      ?'Il bollo virtuale delle fatture emesse si versa con F24 ogni trimestre. Fino a 250 € il versamento slitta al trimestre dopo.'
+      :'Il bollo delle fatture ricevute lo ha già versato il fornitore e lo ritrovi nel totale della fattura: qui serve a controllarlo.'}</p>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Trimestre</th><th class="num">Fatture con bollo</th><th class="num">Bollo</th>
+      <th class="num">Dovuti non indicati</th>${att?'<th>Tributo F24</th><th>Scadenza</th>':''}</tr></thead><tbody>
+      ${righe.map(x=>`<tr><td><b>${x.anno} T${x.t}</b></td><td class="num">${x.n}</td><td class="num"><b>${eur(x.tot)}</b></td>
+        <td class="num">${x.nd?`<span class="late">${x.nd}</span><span class="sub">${eur(x.ndImp)} da verificare</span>`:'0'}</td>
+        ${att?`<td>${x.tot?x.tributo:'–'}</td><td>${x.tot?fmtD(x.scadenza)+(x.rinviato?'<span class="sub">rinviato: totale ≤ 250 €</span>':''):'–'}</td>`:''}</tr>`).join('')
+        ||`<tr><td colspan="${att?6:4}" class="empty">Nessun documento.</td></tr>`}
+    </tbody></table></div>
+    <p class="muted" style="font-size:12.5px">«Dovuto non indicato» segnala le fatture con più di ${BF_SOGLIA.toString().replace('.',',')} € di operazioni senza IVA (nature N1–N4) e nessun bollo: è un controllo da fare con il commercialista, non una certezza.</p>
+    <div class="acts"><button class="btn primary" data-a="0">Chiudi</button></div></div>`;
+  document.body.appendChild(m);
+  m.addEventListener('click',e=>{if(e.target===m||e.target.closest('[data-a]'))m.remove();});
+}
+
+
+/* =====================================================================
+   NOTE SPESE DEI DIPENDENTI
+   ---------------------------------------------------------------------
+   Il dipendente raccoglie in una nota le spese fatte per l'azienda —
+   carburante, pedaggi, parcheggi, vitto, alloggio — con gli scontrini
+   allegati, e la presenta. L'amministrazione la approva o la respinge;
+   all'approvazione nasce la scrittura di prima nota, e il rimborso si
+   registra sul conto da cui esce.
+
+   Chi non fa parte dell'amministrazione vede e modifica soltanto le sue
+   note, e finché sono in bozza o respinte. Il confine vero resta
+   SharePoint: questo è l'ordine del gestionale, non una serratura.
+   ===================================================================== */
+const NS_STATI=['Bozza','Presentata','Approvata','Respinta','Rimborsata'];
+const NS_PILL={Bozza:'end',Presentata:'rent',Approvata:'run',Respinta:'bad',Rimborsata:'run'};
+const NS_CAT=['Carburante','Pedaggi','Parcheggio','Lavaggio','Vitto','Alloggio','Viaggio e trasporti',
+  'Rappresentanza','Materiale di consumo','Altro'];
+const NS_PDC={'Carburante':'Carburanti e lubrificanti','Pedaggi':'Pedaggi e transiti','Parcheggio':'Servizi vari',
+  'Lavaggio':'Lavaggi e rimessaggio','Vitto':'Spese di vitto e alloggio','Alloggio':'Spese di vitto e alloggio',
+  'Viaggio e trasporti':'Spese di viaggio e trasferta','Rappresentanza':'Spese di rappresentanza',
+  'Materiale di consumo':'Cancelleria e materiale di consumo','Altro':'Costi diversi di gestione'};
+const NS_PAGATO=['Anticipo del dipendente','Carta aziendale','Contanti aziendali'];
+
+MODS.ns={sheet:'Note spese',store:'ns',title:'Note spese',code:'NS',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'La nota',f:[
+   fd('dipendente','Dipendente','ref',{ref:'dip',req:true,span:'s3'}),
+   fd('motivo','Motivo o trasferta','text',{req:true,span:'s4'}),
+   fd('stato','Stato','sel',{span:'s2',def:'Bozza',opts:NS_STATI}),
+   fd('dal','Dal','date',{span:'s2'}),fd('al','Al','date',{span:'s2'}),
+   fd('societa','Società','ref',{ref:'soc',flt:'tit',span:'s4'}),
+   cdcField(),
+   fd('totale','Totale della nota (€)','eur',{hint:'Si calcola dalle righe'}),
+   fd('daRimborsare','Da rimborsare (€)','eur',{hint:'Le sole spese anticipate dal dipendente'}),
+   fd('note','Note','area',{span:'s6'})]},
+  {t:'Approvazione e rimborso',f:[
+   fd('presentataIl','Presentata il','date',{span:'s2'}),
+   fd('approvataDa','Approvata o respinta da','text',{span:'s3'}),
+   fd('approvataIl','Il','date',{span:'s2'}),
+   fd('motivoRifiuto','Motivo del rifiuto','text',{span:'s6'}),
+   fd('rimborsoModo','Rimborso','sel',{span:'s2',opts:['','Bonifico','Contanti','In busta paga']}),
+   fd('rimborsoConto','Dal conto','text',{span:'s3',listOf:()=>bkNomi()}),
+   fd('rimborsatoIl','Rimborsata il','date',{span:'s2'}),
+   fd('creatoDa','Creata da','text',{hidden:true})]},
+ ]};
+MODS.nsr={sheet:'Righe note spese',store:'nsr',title:'Righe delle note spese',code:'NR',attach:false,wide:true,
+ groups:[{t:'Riga',f:[
+   fd('nota','Nota','text',{req:true,span:'s2'}),fd('data','Data','date',{req:true,span:'s2'}),
+   fd('categoria','Categoria','sel',{span:'s3',opts:NS_CAT}),
+   fd('descrizione','Descrizione','text',{span:'s6'}),
+   fd('fornitore','Fornitore o esercente','text',{span:'s3'}),fd('documento','N. scontrino o fattura','text',{span:'s3'}),
+   fd('importo','Importo (€, IVA compresa)','eur',{span:'s2'}),fd('iva','di cui IVA (€)','eur',{span:'s2'}),
+   fd('ivaDetr','IVA detraibile','sel',{span:'s2',def:'No',opts:['No','Sì']}),
+   fd('pagatoCon','Pagata con','sel',{span:'s3',def:NS_PAGATO[0],opts:NS_PAGATO}),
+   fd('contoCarta','Carta aziendale','text',{span:'s3',listOf:()=>bkNomi(b=>bkCarta(b))}),
+   fd('targa','Targa','text',{span:'s2'})]}]};
+ammRegistraModuli(['ns','nsr']);
+try{MODS.pn.fmap.tipo.opts.push('Nota spese');}catch(e){}
+AMM_PDC_FISSI.push('Spese di vitto e alloggio','Spese di viaggio e trasferta','Spese di rappresentanza',
+  'Cancelleria e materiale di consumo');
+ECO_FONTI.push({k:'ns',lato:'costo',doc:true,l:'Note spese',
+  d:'Le spese dei dipendenti con la targa del mezzo, nelle note approvate. IVA compresa se non detraibile.'});
+
+/* ---------- chi è chi ---------- */
+function nsEmail(){
+  if(typeof inProva==='function'&&inProva())return S.comeUtente||'';
+  return (typeof SESSIONE!=='undefined'&&SESSIONE&&SESSIONE.email)||'';
+}
+const nsAmm=()=>puoAmm();
+const nsMioDip=()=>{const e=nsEmail();return e?S.dip.find(d=>emailEq(d.email,e)&&d.stato!=='Cessato')||null:null;};
+function nsMia(n){
+  if(nsAmm())return true;
+  const e=nsEmail();if(!e)return false;
+  if(n.creatoDa&&emailEq(n.creatoDa,e))return true;
+  const d=S.dip.find(x=>x.codice===n.dipendente);
+  return !!(d&&d.email&&emailEq(d.email,e));
+}
+const nsRighe=n=>n?S.nsr.filter(r=>r.nota===n.codice).sort((a,b)=>(a.data||'').localeCompare(b.data||'')||String(a.codice).localeCompare(String(b.codice))):[];
+const nsDipNome=n=>dipName(S.dip.find(d=>d.codice===n.dipendente))||n.dipendente||'';
+const nsIvaDetr=l=>l.ivaDetr==='Sì'?r2(Math.min(+l.iva||0,+l.importo||0)):0;
+const nsCosto=l=>r2((+l.importo||0)-nsIvaDetr(l));
+function nsRicalcola(n){
+  const rr=nsRighe(n);
+  n.totale=r2(rr.reduce((a,l)=>a+(+l.importo||0),0))||'';
+  n.daRimborsare=r2(rr.filter(l=>l.pagatoCon===NS_PAGATO[0]).reduce((a,l)=>a+(+l.importo||0),0))||'';
+  return n;
+}
+const nsModificabile=n=>{
+  if(soloLettura()||!puoScrivere('ns'))return false;
+  if(nsAmm())return ['Bozza','Presentata','Respinta'].includes(n.stato);
+  return nsMia(n)&&['Bozza','Respinta'].includes(n.stato);
+};
+MODS.ns.validate=(x,errs,rec)=>{
+  if(nsAmm())return;
+  if(rec&&!['Bozza','Respinta'].includes(rec.stato))return 'Questa nota è già stata presentata: non si modifica più. Se serve una correzione, chiedi all’amministrazione di respingerla.';
+  if(!['Bozza','Presentata'].includes(x.stato))errs.stato='Approvare o rimborsare spetta all’amministrazione';
+  const mio=nsMioDip();
+  if(mio&&x.dipendente&&x.dipendente!==mio.codice)errs.dipendente='Puoi presentare solo note intestate a te';
+};
+MODS.ns.afterSave=(n,nuovo)=>{
+  if(!n.creatoDa){const e=nsEmail();if(e)n.creatoDa=e;}
+  nsRicalcola(n);
+};
+MODS.ns.canDelete=n=>{
+  if(!nsMia(n))return 'Puoi eliminare solo le tue note.';
+  if(['Approvata','Rimborsata'].includes(n.stato))return 'La nota ha già scritture in prima nota: annullale prima dalla riga.';
+  if(!nsAmm()&&!['Bozza','Respinta'].includes(n.stato))return 'La nota è già stata presentata.';
+  return '';
+};
+MODS.ns.onDelete=n=>{S.nsr=S.nsr.filter(r=>r.nota!==n.codice);};
+MODS.ns.live=x=>{
+  const n=S.ns.find(y=>y.id===x.id);if(!n)return '';
+  const rr=nsRighe(n);
+  return `<div><small>Righe</small><b>${rr.length}</b></div><div><small>Totale</small><b>${eur(rr.reduce((a,l)=>a+(+l.importo||0),0))}</b></div>`;
+};
+
+/* ---------- le righe della nota ---------- */
+function openNsRighe(n){
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const paint=()=>{
+    const ro=!nsModificabile(n);
+    const rr=nsRighe(n);
+    nsRicalcola(n);
+    const carte=bkNomi(b=>bkCarta(b));
+    const opt=S.mezzi.filter(m=>!ARCH(m)).map(m=>m.targa);
+    const senzaCarta=rr.filter(l=>l.pagatoCon===NS_PAGATO[1]&&!l.contoCarta).length;
+    d.innerHTML=`<header><h2>Righe della nota ${esc(n.codice)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <p class="muted" style="margin-top:0">${esc(nsDipNome(n))} · ${esc(n.motivo||'')} · ${pillS(n.stato,NS_PILL[n.stato]||'end')}${ro?' · <b>non modificabile</b>':''}</p>
+      <div class="calcbox">
+        <div><small>Righe</small><b>${rr.length}</b></div>
+        <div><small>Totale</small><b>${eur(n.totale||0)}</b></div>
+        <div><small>Da rimborsare al dipendente</small><b>${eur(n.daRimborsare||0)}</b></div>
+        <div><small>Allegati (scontrini)</small><b>${attachFor('ns',n.codice).length}</b></div>
+      </div>
+      ${senzaCarta?`<div class="alert">${senzaCarta} ${senzaCarta===1?'riga è pagata':'righe sono pagate'} con carta aziendale ma senza la carta indicata.</div>`:''}
+      <div class="tablewrap" style="max-height:420px;overflow:auto"><table class="grid mini"><thead><tr>
+        <th>Data</th><th>Categoria</th><th>Descrizione ed esercente</th><th>Targa</th>
+        <th class="num">Importo</th><th class="num">IVA</th><th>IVA detr.</th><th>Pagata con</th><th></th></tr></thead><tbody>
+      ${rr.map(l=>`<tr data-r="${l.id}">
+        <td>${ro?fmtD(l.data):`<input class="input" style="width:122px;padding-inline:6px" type="date" data-k="data" value="${esc(l.data||'')}">`}</td>
+        <td>${ro?esc(l.categoria||''):`<select class="input" style="width:116px;padding-inline:6px" data-k="categoria">${NS_CAT.map(c=>`<option ${c===l.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>`}</td>
+        <td>${ro?`${esc(l.descrizione||'')}${l.fornitore?`<span class="sub">${esc(l.fornitore)}</span>`:''}`
+          :`<input class="input" style="min-width:110px;width:100%" data-k="descrizione" placeholder="Descrizione" value="${esc(l.descrizione||'')}">
+            <input class="input" style="min-width:110px;width:100%;margin-top:4px" data-k="fornitore" placeholder="Esercente" value="${esc(l.fornitore||'')}">`}</td>
+        <td>${ro?plate(l.targa):`<input class="input upc" style="width:84px;padding-inline:8px" data-k="targa" value="${esc(l.targa||'')}" list="nsTarghe">`}</td>
+        <td class="num">${ro?eur(l.importo):`<input class="input" style="width:74px;text-align:right;padding-inline:8px" type="number" step="0.01" min="0" data-k="importo" value="${l.importo}">`}</td>
+        <td class="num">${ro?eur(l.iva):`<input class="input" style="width:62px;text-align:right;padding-inline:8px" type="number" step="0.01" min="0" data-k="iva" value="${l.iva}">`}</td>
+        <td>${ro?esc(l.ivaDetr||'No'):`<select class="input" style="width:62px;padding-inline:6px" data-k="ivaDetr"><option ${l.ivaDetr!=='Sì'?'selected':''}>No</option><option ${l.ivaDetr==='Sì'?'selected':''}>Sì</option></select>`}</td>
+        <td>${ro?esc(l.pagatoCon+(l.contoCarta?' – '+l.contoCarta:'')):`<select class="input" style="width:136px;padding-inline:6px" data-k="pagatoCon">${NS_PAGATO.map(c=>`<option ${c===l.pagatoCon?'selected':''}>${esc(c)}</option>`).join('')}</select>
+          ${l.pagatoCon===NS_PAGATO[1]?`<select class="input" style="width:136px;margin-top:4px;padding-inline:6px" data-k="contoCarta"><option value="">scegli la carta…</option>${carte.map(c=>`<option ${c===l.contoCarta?'selected':''}>${esc(c)}</option>`).join('')}</select>`:''}`}</td>
+        <td>${ro?'':`<button class="btn ghost danger" data-del="${l.id}" title="Togli la riga" aria-label="Togli la riga">✕</button>`}</td></tr>`).join('')
+        ||'<tr><td colspan="9" class="empty">Nessuna riga. Aggiungi le spese, una per scontrino.</td></tr>'}
+      </tbody></table></div>
+      <datalist id="nsTarghe">${opt.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+      ${ro?'':'<button class="btn" data-add style="margin-top:8px">Aggiungi una spesa</button>'}
+      <p class="muted" style="margin-top:10px">Gli scontrini si allegano dalla scheda della nota. L’IVA si considera detraibile solo se la scegli tu e se hai la fattura: nel dubbio lascia «No», entra nel costo. Con la targa la spesa finisce nella scheda economica del mezzo.</p>
+    </div>
+    <footer><button class="btn" data-pdf>PDF</button><button class="btn" data-edit>Scheda e allegati</button>
+      ${!ro&&['Bozza','Respinta'].includes(n.stato)?'<button class="btn primary" data-pres>Presenta la nota</button>':''}
+      <button class="btn ${ro||!['Bozza','Respinta'].includes(n.stato)?'primary':''}" data-x>Fatto</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+    d.querySelector('[data-edit]').onclick=()=>{close();openRecord('ns',n,{onSaved:()=>renderNs()});};
+    d.querySelector('[data-pdf]').onclick=async()=>{
+      await saveInFolder('Amministrazione/Estrazioni',[{name:`Nota_spese_${safe(n.codice)}.pdf`,data:nsPdf(n)}]);toast('Nota spese in PDF.');};
+    const pres=d.querySelector('[data-pres]');if(pres)pres.onclick=async()=>{close();await nsPresenta(n);};
+    const add=d.querySelector('[data-add]');
+    if(add)add.onclick=()=>{
+      const ultima=rr[rr.length-1];
+      S.nsr.push({id:uid(),codice:nextCode(MODS.nsr),nota:n.codice,data:ultima?ultima.data:todayISO(),categoria:'Carburante',
+        descrizione:'',fornitore:'',documento:'',importo:'',iva:'',ivaDetr:'No',pagatoCon:NS_PAGATO[0],contoCarta:'',targa:''});
+      markDirty();paint();};
+    d.querySelectorAll('tr[data-r] input,tr[data-r] select').forEach(i=>i.onchange=()=>{
+      const l=S.nsr.find(x=>x.id===i.closest('tr').dataset.r);if(!l)return;
+      const k=i.dataset.k;
+      l[k]=['importo','iva'].includes(k)?(i.value===''?'':(parseFloat(i.value)||0)):i.value.trim();
+      if(k==='targa')l.targa=normTarga(l.targa);
+      if(k==='pagatoCon'&&l.pagatoCon!==NS_PAGATO[1])l.contoCarta='';
+      markDirty();paint();});
+    d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{S.nsr=S.nsr.filter(x=>x.id!==b.dataset.del);markDirty();paint();});
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);renderNs();};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);sc.onclick=close;document.body.append(sc,d);paint();
+}
+function nsPdf(n){
+  const rr=nsRighe(n);
+  return ammPdf({
+    titolo:`Nota spese ${n.codice}`,
+    sottotitolo:`${nsDipNome(n)} · ${n.motivo||''}${n.dal?` · dal ${fmtD(n.dal)}${n.al?' al '+fmtD(n.al):''}`:''} · ${n.stato}`,
+    colonne:[{l:'Data',w:48},{l:'Categoria',w:90},{l:'Descrizione',w:200},{l:'Esercente',w:110},{l:'Targa',w:52},
+      {l:'Pagata con',w:100},{l:'Importo',w:62,num:true}],
+    righe:rr.map(l=>[fmtD(l.data),l.categoria||'',l.descrizione||'',l.fornitore||'',l.targa||'',
+      (l.pagatoCon||'')+(l.contoCarta?' – '+l.contoCarta:''),ammEuroPdf(l.importo)]),
+    piede:['','','','','','Totale',ammEuroPdf(n.totale||0)],
+  });
+}
+
+/* ---------- il percorso della nota ---------- */
+async function nsPresenta(n){
+  if(!nsModificabile(n))return toast('Questa nota non si può presentare.',true);
+  const rr=nsRighe(n);
+  if(!rr.length)return toast('La nota non ha righe.',true);
+  const mancanti=rr.filter(l=>!(+l.importo>0)||!l.data);
+  if(mancanti.length)return toast(`${mancanti.length} ${mancanti.length===1?'riga è':'righe sono'} senza importo o data.`,true);
+  if(rr.some(l=>l.pagatoCon===NS_PAGATO[1]&&!l.contoCarta))return toast('Indica la carta aziendale sulle righe pagate con carta.',true);
+  if(!attachFor('ns',n.codice).length&&!await confirmBox('Presenta la nota',
+    'Non c’è nessuno scontrino allegato. Vuoi presentarla lo stesso?','Presenta',false))return;
+  n.stato='Presentata';n.presentataIl=todayISO();n.motivoRifiuto='';
+  nsRicalcola(n);markDirty();renderNs();
+  toast(`Nota ${n.codice} presentata: ${eur(n.totale||0)}.`);
+}
+function nsRighePn(n){
+  const righe=[];
+  const nome=nsDipNome(n);
+  const avere={};
+  for(const l of nsRighe(n)){
+    const costo=nsCosto(l),det=nsIvaDetr(l);
+    const des=`${l.categoria}${l.descrizione?': '+l.descrizione:''}${l.fornitore?' – '+l.fornitore:''} (${nome})`;
+    righe.push({conto:NS_PDC[l.categoria]||'Costi diversi di gestione',dare:costo,avere:'',descrizione:des,targa:l.targa||'',documento:l.documento||'',data:l.data});
+    if(det)righe.push({conto:'IVA a credito',dare:det,avere:'',descrizione:`IVA detraibile – ${des}`,targa:'',documento:l.documento||'',data:l.data});
+    const k=l.pagatoCon===NS_PAGATO[1]?(l.contoCarta||'Carta aziendale'):l.pagatoCon===NS_PAGATO[2]?'Cassa':'Debiti verso dipendenti';
+    avere[k]=r2((avere[k]||0)+(+l.importo||0));
+  }
+  for(const [conto,imp] of Object.entries(avere))
+    righe.push({conto,dare:'',avere:imp,descrizione:`Nota spese ${n.codice} – ${nome}`,targa:'',documento:'',data:''});
+  return righe;
+}
+function nsScrivi(reg,data,n,righe,mezzo){
+  righe.forEach((r,i)=>S.pn.push({id:uid(),codice:nextCode(MODS.pn,data),data,
+    societa:n.societa||'',tipo:'Nota spese',registrazione:reg,riga:i+1,descrizione:r.descrizione,
+    conto:r.conto,dare:r.dare||'',avere:r.avere||'',contropartita:'',mezzoPagamento:mezzo||'',
+    banca:bkPerConto(r.conto)?r.conto:'',documento:r.documento||n.codice,riferimento:n.codice,
+    targa:r.targa||'',centroCosto:n.centroCosto||'',note:'',riconciliata:'No'}));
+}
+async function nsApprova(n){
+  if(!nsAmm()||soloLettura())return toast('Approvare le note spese spetta all’amministrazione.',true);
+  if(n.stato!=='Presentata')return toast('Si approvano le note presentate.',true);
+  const rr=nsRighe(n);
+  if(rr.some(l=>l.pagatoCon===NS_PAGATO[1]&&!l.contoCarta))return toast('Indica la carta aziendale sulle righe pagate con carta.',true);
+  const r=await bkBox('Approva la nota '+esc(n.codice),
+    `<p class="muted s6" style="margin:0">${esc(nsDipNome(n))}: ${eur(n.totale||0)} in ${rr.length} ${rr.length===1?'riga':'righe'}, di cui da rimborsare ${eur(n.daRimborsare||0)}.
+      Nasce la scrittura di prima nota: costi in dare, e in avere il debito verso il dipendente, la carta o la cassa.</p>
+     <div class="field s3"><label>Data di registrazione</label><input class="input" type="date" id="apData" value="${todayISO()}"></div>`,
+    'Approva e registra',m=>({data:m.querySelector('#apData').value||todayISO()}));
+  if(!r)return;
+  if(!S.pn.some(x=>x.registrazione===n.codice))nsScrivi(n.codice,r.data,n,nsRighePn(n),'');
+  n.stato='Approvata';n.approvataDa=typeof chiSono==='function'?chiSono():'';n.approvataIl=todayISO();n.motivoRifiuto='';
+  if(!(+n.daRimborsare>0)){n.stato='Rimborsata';n.rimborsoModo='';n.rimborsatoIl=r.data;}
+  markDirty();renderNs();
+  toast(+n.daRimborsare>0?`Nota ${n.codice} approvata: ${eur(n.daRimborsare)} da rimborsare.`:`Nota ${n.codice} approvata: niente da rimborsare, chiusa.`);
+}
+async function nsRespingi(n){
+  if(!nsAmm()||soloLettura())return toast('Spetta all’amministrazione.',true);
+  const r=await bkBox('Respingi la nota '+esc(n.codice),
+    `<div class="field s6"><label>Motivo (lo leggerà il dipendente)</label><input class="input" id="rsMot"></div>`,
+    'Respingi',m=>{const v=m.querySelector('#rsMot').value.trim();return v?{mot:v}:'Scrivi il motivo.';});
+  if(!r)return;
+  n.stato='Respinta';n.motivoRifiuto=r.mot;n.approvataDa=chiSono();n.approvataIl=todayISO();
+  markDirty();renderNs();toast(`Nota ${n.codice} respinta.`);
+}
+async function nsRimborsa(n){
+  if(!nsAmm()||soloLettura()||!puoScrivere('pn'))return toast('Registrare il rimborso spetta all’amministrazione.',true);
+  if(n.stato!=='Approvata')return toast('Si rimborsano le note approvate.',true);
+  const conti=bkNomi();
+  const r=await bkBox('Rimborso della nota '+esc(n.codice),
+    `<p class="muted s6" style="margin:0">Da rimborsare a ${esc(nsDipNome(n))}: <b>${eur(n.daRimborsare||0)}</b>.</p>
+     <div class="field s2"><label>Data</label><input class="input" type="date" id="rmData" value="${todayISO()}"></div>
+     <div class="field s2"><label>Come</label><select class="input" id="rmModo"><option>Bonifico</option><option>Contanti</option><option>In busta paga</option></select></div>
+     <div class="field s4"><label>Dal conto</label><select class="input" id="rmConto">${bkOpt(conti,bkDefaultNome())}</select></div>
+     <p class="muted s6" style="font-size:12.5px;margin:0">In busta paga non si registra nessuna uscita: il debito verso il dipendente resta aperto finché non lo chiude il cedolino.</p>`,
+    'Registra il rimborso',m=>({data:m.querySelector('#rmData').value||todayISO(),modo:m.querySelector('#rmModo').value,conto:m.querySelector('#rmConto').value}));
+  if(!r)return;
+  if(r.modo!=='In busta paga'){
+    const conto=r.modo==='Contanti'?'Cassa':r.conto;
+    if(!conto)return toast('Indica il conto da cui esce il rimborso.',true);
+    const imp=+n.daRimborsare||0;
+    const des=`Rimborso nota spese ${n.codice} – ${nsDipNome(n)}`;
+    nsScrivi(`${n.codice}/RIM`,r.data,n,[
+      {conto:'Debiti verso dipendenti',dare:imp,avere:'',descrizione:des},
+      {conto,dare:'',avere:imp,descrizione:des}],r.modo==='Contanti'?'Cassa':'Bonifico');
+    n.rimborsoConto=conto;
+  }else n.rimborsoConto='';
+  n.rimborsoModo=r.modo;n.rimborsatoIl=r.data;n.stato='Rimborsata';
+  markDirty();renderNs();toast(`Rimborso registrato: ${eur(n.daRimborsare||0)} (${r.modo.toLowerCase()}).`);
+}
+async function nsAnnullaScritture(n){
+  if(!nsAmm()||soloLettura()||!puoScrivere('pn'))return toast('Spetta all’amministrazione.',true);
+  const reg=S.pn.filter(x=>x.riferimento===n.codice&&x.tipo==='Nota spese');
+  if(!reg.length)return toast('Questa nota non ha scritture.',true);
+  if(!await confirmBox('Annulla le scritture',
+    `Vengono tolte le ${reg.length} righe di prima nota della nota ${esc(n.codice)}, rimborso compreso, e la nota torna «Presentata».`,'Annulla le scritture',true))return;
+  S.pn=S.pn.filter(x=>!(x.riferimento===n.codice&&x.tipo==='Nota spese'));
+  n.stato='Presentata';n.rimborsoModo='';n.rimborsoConto='';n.rimborsatoIl='';
+  markDirty();renderNs();toast(`Scritture della nota ${n.codice} annullate.`);
+}
+
+/* ---------- il costo per veicolo ---------- */
+function nsCostiMezzo(targa,pDa,pA){
+  const t=normTarga(targa);
+  const m=new Map();
+  for(const l of S.nsr){
+    if(normTarga(l.targa)!==t)continue;
+    const n=S.ns.find(x=>x.codice===l.nota);
+    if(!n||!['Approvata','Rimborsata'].includes(n.stato))continue;
+    if(!ecoDentro(l.data,pDa,pA))continue;
+    const c=l.categoria||'Altro';
+    const v=m.get(c)||{i:0,n:0};v.i=r2(v.i+nsCosto(l));v.n++;m.set(c,v);
+  }
+  return m;
+}
+
+/* ---------- l'elenco ---------- */
+function renderNs(){
+  const mio=nsMioDip();
+  genericList('ns',{
+    sub:nsAmm()
+      ?'Le note spese dei dipendenti: si approvano, si registrano in prima nota e si rimborsano dal conto o dalla cassa.'
+      :'Le tue note spese: raccogli le spese con gli scontrini, poi presenta la nota all’amministrazione.',
+    newLabel:'Nuova nota spese',searchPh:'Codice, dipendente, motivo',
+    search:['codice','motivo','dipendente'],
+    noImport:true,
+    preset:{dipendente:mio?mio.codice:'',societa:mio?mio.societa||'':'',creatoDa:nsEmail()},
+    rowFilter:nsMia,
+    filters:[
+      {k:'stato',label:'Stato',opts:()=>NS_STATI},
+      ...(nsAmm()?[{k:'__dip',label:'Dipendente',opts:()=>[...new Set(S.ns.map(nsDipNome).filter(Boolean))].sort(),
+        test:(r,v)=>nsDipNome(r)===v}]:[]),
+      {k:'__mese',label:'Mese',opts:()=>[...new Set(S.ns.map(n=>String(n.dal||n.presentataIl||'').slice(0,7)).filter(Boolean))].sort().reverse(),
+       test:(r,v)=>String(r.dal||r.presentataIl||'').slice(0,7)===v},
+    ],
+    ledger:l=>{
+      const da=l.filter(n=>n.stato==='Presentata');
+      const rimb=l.filter(n=>n.stato==='Approvata');
+      return `<div><b>${l.length}</b><small>note</small></div>
+        <div><b>${eur(r2(l.reduce((a,n)=>a+(+n.totale||0),0)))}</b><small>totale</small></div>
+        <div><b class="${da.length?'warnc':''}">${da.length}</b><small>da approvare</small></div>
+        <div><b>${eur(r2(rimb.reduce((a,n)=>a+(+n.daRimborsare||0),0)))}</b><small>da rimborsare</small></div>`;
+    },
+    sort:(a,b)=>(b.dal||b.presentataIl||'').localeCompare(a.dal||a.presentataIl||'')||String(b.codice).localeCompare(String(a.codice)),
+    cols:[
+      {l:'Nota',v:r=>`<b>${esc(r.codice)}</b><span class="sub">${esc(r.motivo||'')}</span>`,s:r=>r.codice},
+      {l:'Dipendente',v:r=>`${esc(nsDipNome(r))}<span class="sub">${r.dal?fmtD(r.dal)+(r.al?' – '+fmtD(r.al):''):''}</span>`},
+      {l:'Righe',v:r=>{const n=nsRighe(r).length;return `${n}<span class="sub">${attachFor('ns',r.codice).length} allegati</span>`;}},
+      {l:'Totale',cls:'num',v:r=>`<b>${eur(r.totale||0)}</b>${+r.daRimborsare?`<span class="sub">da rimborsare ${eur(r.daRimborsare)}</span>`:''}`,s:r=>+r.totale||0},
+      {l:'Stato',v:r=>`${pillS(r.stato,NS_PILL[r.stato]||'end')}${r.stato==='Respinta'&&r.motivoRifiuto?`<span class="sub late">${esc(r.motivoRifiuto)}</span>`:''}${r.rimborsatoIl&&r.stato==='Rimborsata'?`<span class="sub">${esc(r.rimborsoModo||'')} il ${fmtD(r.rimborsatoIl)}</span>`:''}`},
+    ],
+    rowActions:[
+      {l:'Righe e scontrini',fn:openNsRighe},
+      {l:'Presenta',show:r=>nsModificabile(r)&&['Bozza','Respinta'].includes(r.stato),fn:nsPresenta},
+      {l:'Approva',show:r=>nsAmm()&&puoScrivere('ns')&&r.stato==='Presentata',fn:nsApprova},
+      {l:'Respingi',show:r=>nsAmm()&&puoScrivere('ns')&&r.stato==='Presentata',fn:nsRespingi},
+      {l:'Rimborsa',show:r=>nsAmm()&&puoScrivere('ns')&&r.stato==='Approvata'&&+r.daRimborsare>0,fn:nsRimborsa},
+      {l:'Annulla le scritture',show:r=>nsAmm()&&['Approvata','Rimborsata'].includes(r.stato),fn:nsAnnullaScritture},
+      {l:'PDF',fn:async r=>{await saveInFolder('Amministrazione/Estrazioni',[{name:`Nota_spese_${safe(r.codice)}.pdf`,data:nsPdf(r)}]);toast('Nota spese in PDF.');}},
+    ],
+    empty:mio||nsAmm()?'Nessuna nota spese. Crea la prima: aggiungi le righe e allega gli scontrini.'
+      :'Nessuna nota. Per creare una nota la tua email deve comparire nell’anagrafica dei dipendenti: chiedi all’amministrazione.',
+    after:`<p class="muted" style="margin-top:12px">${nsAmm()?'Vedi tutte le note.':'Vedi solo le note intestate a te.'} Le spese anticipate dal dipendente vanno a «Debiti verso dipendenti» fino al rimborso; quelle con carta aziendale scendono sul conto della carta, che si legge in «Banca e carte».</p>`,
+  });
+}
+VIEWS.ns=()=>renderNs();
+{
+  const g=MENU.find(x=>x.g==='Amministrazione');
+  if(g&&!g.items.some(([k])=>k==='ns')){
+    const i=g.items.findIndex(([k])=>k==='bk');
+    g.items.splice(i<0?g.items.length:i+1,0,['ns','Note spese']);
+  }
+  for(const k of ['flotta','operativo','amministrazione']){
+    const r=RUOLI[k];if(!r)continue;
+    if(r.tabs&&!r.tabs.includes('ns'))r.tabs.push('ns');
+    if(Array.isArray(r.scrivi)){for(const s of ['ns','nsr'])if(!r.scrivi.includes(s))r.scrivi.push(s);}
+  }
+}
+const nsBadges0=badges;
+badges=function(){
+  const b=nsBadges0();
+  if(nsAmm())b.ns=S.ns.filter(n=>n.stato==='Presentata').length;
+  return b;
+};
+
+/* Note spese: la sola lettura, che vede tutto il resto, qui non entra.
+   Serve il permesso espresso nel ruolo (o nel permesso per modulo). */
+const nsTabOk0=tabOk;
+tabOk=function(k){
+  if(k!=='ns')return nsTabOk0(k);
+  const p=typeof tabOkPerm==='function'?tabOkPerm(k):null;
+  if(p!==null)return p;
+  const r=RUOLI[ruolo()];
+  return !!(r&&(r.amm||(Array.isArray(r.tabs)&&r.tabs.includes('ns'))));
+};
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
