@@ -60,3 +60,57 @@
   mostra il gestionale com'è per quella persona. Utenti e Parametri restano
   solo del Master e l'ultimo Master non si può togliere. Vedi ACCESSI.md.
 - **2026.10.10** — pubblicata il 09/10/2026
+- **2026.10.10b** — pubblicata il 09/10/2026 — contratti con più targhe: il
+  canone può essere **per veicolo**, oppure un **totale da ripartire** in parti
+  uguali o per importi indicati targa per targa (i centesimi non si perdono);
+  la scheda economica del mezzo prende la sua quota. Le righe di fattura
+  passiva senza targa che citano un contratto con più veicoli si dividono fra
+  le targhe del contratto, all'importazione o con il pulsante «Ripartisci»; la
+  riga originale resta scritta nella quota. Vedi AMMINISTRAZIONE.md.
+- **2026.10.10b** — pubblicata il 09/10/2026
+- **2026.10.10c** — pubblicata il 09/10/2026 — in **Utenti e accessi** il
+  pulsante **Invita** prepara il messaggio per la persona: link al gestionale,
+  account Microsoft da usare, profilo, che cosa fare se non entra. Si apre
+  nella posta o si copia; il gestionale non spedisce niente da solo.
+- **2026.10.10c** — pubblicata il 09/10/2026
+- **2026.10.12** — pubblicata il 12/10/2026 — **mese commerciale**: il canone
+  si divide sempre per 30, in ogni mese. Un mese intero vale il canone per
+  intero (anche ottobre di 31 giorni e febbraio di 28); un mese parziale vale i
+  giorni di utilizzo effettivi su 30, mai più di 30. Vale per il canone del
+  mese di riferimento nel registro (colonna Da fatturare e formula del foglio),
+  per le proforma, per la scheda economica del mezzo e per i margini; prima
+  si divideva per i giorni del mese di calendario, e nei margini per 30,44.
+- **2026.10.12** — pubblicata il 12/10/2026
+- **2026.10.12b** — pubblicata il 12/10/2026 — i contratti si generano dal
+  **modello Word che sta nella cartella del registro** (su SharePoint o
+  sincronizzata), non da quello incluso nel programma: cerca
+  `Modello_Contratto_Noleggio_Furgoni.docx` e `Modello_Contratto_Quadro_Multiplo.docx`
+  nella cartella «Modelli» (o in quella indicata in Parametri), poi in
+  «Contratti» e nella cartella principale. Si rilegge a ogni generazione; un
+  modello con un errore di segnaposto non blocca la stampa e viene segnalato.
+  Il modello caricato a mano dalla pagina Stampa resta prioritario.
+- **2026.10.12b** — pubblicata il 12/10/2026
+- **2026.10.13** — pubblicata il 13/10/2026 — fatture: le **note di credito**
+  si leggono con importi negativi e in rosso (passive e attive), con filtro
+  Documento; i **bolli di fattura** hanno colonna, filtro, controllo «dovuto
+  non indicato» e riepilogo trimestrale con codici F24 2521–2524; nuova
+  sezione **Banca e carte** (conti, carte, cassa, saldi, estratto conto,
+  giroconti e addebito carta, riconciliazione) con scelta del conto nei
+  pagamenti e negli incassi; nuova sezione **Note spese** dei dipendenti con
+  approvazione, prima nota, rimborso e costo per veicolo. Vedi AMMINISTRAZIONE.md.
+- **2026.10.13** — pubblicata il 13/10/2026
+- **2026.10.16** — pubblicata il 16/10/2026 — l'**Ufficio flotta** genera e
+  stampa i contratti di noleggio; nuova sezione **Mancati pedaggi** sotto i
+  Verbali (pratiche con le targhe e gli importi per targa) e riaddebito in
+  fatturazione alla società che aveva il mezzo, più 20 € di gestione pratica
+  per pratica e società (parametro); per ogni verbale si sceglie la voce
+  **Rinotifica** o **Gestione amministrativa**, anche dal riepilogo; **riaddebito
+  carburante** con prima il costo e poi l'importo da addebitare. Vedi RIADDEBITI.md.
+- **2026.10.16** — pubblicata il 16/10/2026
+- **2026.10.17** — pubblicata il 16/10/2026 — **Note spese**: l'importo si salva a
+  ogni battuta e il totale si aggiorna subito (prima si perdeva chiudendo con Esc
+  o cliccando «Fatto» appena scritto); il riepilogo «da rimborsare» conta anche
+  le note presentate. Nuova pagina **Grafici e analisi** con grafici interattivi
+  (flotta, scadenze, occupazione dei mezzi, fatturato, ricavi e costi, verbali,
+  mancati pedaggi, note spese). Vedi GRAFICI.md.
+- **2026.10.17** — pubblicata il 16/10/2026

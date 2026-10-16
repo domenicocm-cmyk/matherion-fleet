@@ -1166,7 +1166,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.13';
+const APP_VERSION='2026.10.17';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -3092,6 +3092,7 @@ const PARAMS_EXTRA=[
  ['bolloRegione',33,'Regione per il calcolo del bollo',''],
  ['bolloTariffaKw',34,'Bollo: tariffa unitaria predefinita (€ per kW)',''],
  ['cartellaModelli',35,'Cartella dei modelli dei contratti (dentro la cartella del registro)','Modelli'],
+ ['gestioneMancatiPedaggi',36,'Gestione pratica mancati pedaggi: importo per società (€)',20],
 ];
 
 const MODS={
@@ -6214,7 +6215,7 @@ function renderCap(){
 /* ---------- FATTURAZIONE E PROFORMA ---------- */
 MODS.fat.onDelete=f=>{
   S.righe=S.righe.filter(r=>r.proforma!==f.codice);
-  for(const st of ['vrb','sin','mov'])for(const r of S[st])if(r.proforma===f.codice)r.proforma='';
+  for(const st of ['vrb','sin','mov','mpt'])for(const r of S[st])if(r.proforma===f.codice)r.proforma='';
 };
 function fatDocData(f){
   const cli=socBy(f.cliente)||{};const t=titData(f.emittente);const tit=socBy(f.emittente)||titolareDefault()||{};
@@ -6349,10 +6350,11 @@ function openRighe(f){
     d.innerHTML=`<header><h2>Proforma ${esc(f.codice)} – ${esc(f.cliente)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
     <div class="body"><div class="calcbox"><div><small>Imponibile</small><b>${eur(f.imponibile)}</b></div><div><small>IVA</small><b>${eur(f.iva)}</b></div><div><small>Totale</small><b>${eur(f.totale)}</b></div><div><small>Stato</small><b>${esc(f.stato)}</b></div></div>
     ${righeTable(rr,f.stato!=='Bozza')}
-    ${f.stato==='Bozza'?'<button class="btn" data-add style="margin-top:8px">Aggiungi riga</button>':'<p class="muted">Le righe si modificano solo sulle proforma in bozza.</p>'}</div>
+    ${f.stato==='Bozza'?'<button class="btn" data-add style="margin-top:8px">Aggiungi riga</button> <button class="btn" data-carb style="margin-top:8px">Riaddebito carburante</button>':'<p class="muted">Le righe si modificano solo sulle proforma in bozza.</p>'}</div>
     <footer><button class="btn" data-edit>Dati proforma e fattura SDI</button><button class="btn primary" data-x>Fatto</button></footer>`;
     d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
     d.querySelector('[data-edit]').onclick=()=>{close();openRecord('fat',f,{onSaved:()=>renderFatt()});};
+    const carb=d.querySelector('[data-carb]');if(carb)carb.onclick=()=>fatCarburante(f,paint);
     const add=d.querySelector('[data-add]');if(add)add.onclick=()=>{S.righe.push({id:uid(),codice:nextCode(MODS.righe),proforma:f.codice,tipo:'Altro',descrizione:'Nuova riga',targa:'',origine:'',quantita:1,prezzo:0,aliquota:(+S.par.iva||0)*100,natura:'',imponibile:0});markDirty();paint();};
     bindRighe(d,paint);
   };
@@ -6374,10 +6376,10 @@ function bindRighe(d,paint){
   d.querySelectorAll('tr[data-r] input').forEach(i=>i.onchange=()=>{const r=S.righe.find(x=>x.id===i.closest('tr').dataset.r);const k=i.dataset.k;
     r[k]=['quantita','prezzo','aliquota'].includes(k)?(parseFloat(i.value)||0):i.value.trim();if(k==='natura'&&r.natura)r.aliquota=0;r.imponibile=r2((+r.quantita||0)*(+r.prezzo||0));markDirty();paint();});
   d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const r=S.righe.find(x=>x.id===b.dataset.del);S.righe=S.righe.filter(x=>x!==r);
-    const src=r.origine&&(S.vrb.find(x=>x.codice===r.origine)||S.sin.find(x=>x.codice===r.origine)||S.mov.find(x=>x.codice===r.origine));if(src&&src.proforma===r.proforma)src.proforma='';markDirty();paint();});
+    const src=r.origine&&(S.vrb.find(x=>x.codice===r.origine)||S.sin.find(x=>x.codice===r.origine)||S.mov.find(x=>x.codice===r.origine)||S.mpt.find(x=>x.codice===r.origine));if(src&&src.proforma===r.proforma)src.proforma='';markDirty();paint();});
 }
 function renderFattWizard(tabs){
-  const u=ui('fatW');u.mese=u.mese||S.par.mese.slice(0,7);u.src=u.src||{can:true,vrb:true,sin:true,mov:true};if(u.split===undefined)u.split=true;
+  const u=ui('fatW');u.mese=u.mese||S.par.mese.slice(0,7);u.src=u.src||{can:true,vrb:true,sin:true,mov:true,mp:true};if(u.src.mp===undefined)u.src.mp=true;if(u.split===undefined)u.split=true;
   const tit=S.soc.filter(socOk.tit);
   const titN=[...new Set(tit.map(t=>t.ragione).filter(Boolean))].sort();
   if(u.emit&&!titN.includes(u.emit))u.emit='';
@@ -6417,11 +6419,12 @@ function renderFattWizard(tabs){
     lines.push({cli:o.locataria,emit:o.noleggiante||emitDef,tipo:'Canone',descrizione:`Canone di noleggio ${monthLabel(ms)} – contratto ${o.numero} – ${o.modello}${full?'':` (${g} giorni su 30, mese commerciale; canone mensile ${eur(+o.canone)})`}`,targa:o.targa,origine:o.numero,cdc:rowCdc(o),quantita:1,prezzo:quotaCanoneMese(o.canone,g,dim),aliquota:ivaStd,natura:'',
       dal:o.inizio>ms?o.inizio:ms,al:o.fine<me?o.fine:me,giorni:g,canoneMensile:+o.canone,modello:o.modello});}
   if(u.src.vrb)for(const v of S.vrb)if(v.cliente&&!v.proforma&&+v.speseGestione>0&&['Rinotificato','Chiuso','Pagato','Dati conducente comunicati'].includes(v.stato)&&(v.rinotificaData||v.dataNotifica)<=me)
-    lines.push({cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),tipo:'Spese gestione verbale',descrizione:`Spese di gestione verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale||v.dataNotifica)} – ${v.ente}`,targa:v.targa,origine:v.codice,quantita:1,prezzo:+v.speseGestione,aliquota:ivaStd,natura:''});
+    lines.push({cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),tipo:(v.voceAddebito==='Rinotifica'?'Rinotifica verbale':'Gestione amministrativa verbale'),descrizione:`${v.voceAddebito==='Rinotifica'?'Rinotifica':'Gestione amministrativa'} verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale||v.dataNotifica)} – ${v.ente}`,targa:v.targa,origine:v.codice,vrb:v.codice,quantita:1,prezzo:+v.speseGestione,aliquota:ivaStd,natura:''});
   if(u.src.sin)for(const s of S.sin)if(s.riaddebitoA==='Cliente'&&s.cliente&&!s.proforma&&+s.importoRiaddebito>0)
     lines.push({cli:s.cliente,emit:emitDi(s.targa,s.data),cdc:s.centroCosto||cdcFor(s.targa,s.data),tipo:'Franchigia sinistro',descrizione:`Addebito franchigia/danni sinistro ${s.codice} del ${fmtD(s.data)}`,targa:s.targa,origine:s.codice,quantita:1,prezzo:+s.importoRiaddebito,aliquota:ivaStd,natura:''});
   if(u.src.mov)for(const m of S.mov)if(m.riaddebita==='Sì'&&m.cliente&&!m.proforma&&m.data<=me)
-    lines.push({cli:m.cliente,emit:emitDi(m.targa,m.data),cdc:m.centroCosto||cdcFor(m.targa,m.data),tipo:'Pedaggi e carburante',descrizione:`${m.tipo} del ${fmtD(m.data)}${m.luogo?' – '+m.luogo:''}${m.uscita?' → '+m.uscita:''}`,targa:m.targa,origine:m.codice,quantita:1,prezzo:r2((+m.importo||0)-(+m.iva||0)),aliquota:m.tipo==='Pedaggio'?0:ivaStd,natura:m.tipo==='Pedaggio'?'N1':''});
+    lines.push({cli:m.cliente,emit:emitDi(m.targa,m.data),cdc:m.centroCosto||cdcFor(m.targa,m.data),tipo:m.tipo==='Rifornimento'?'Riaddebito carburante':'Pedaggi e carburante',mov:m.codice,costo:m.tipo==='Rifornimento'?r2((+m.importo||0)-(+m.iva||0)):'',descrizione:`${m.tipo==='Rifornimento'?'Riaddebito carburante':m.tipo} del ${fmtD(m.data)}${m.luogo?' – '+m.luogo:''}${m.uscita?' → '+m.uscita:''}`,targa:m.targa,origine:m.codice,quantita:1,prezzo:movAddebito(m),aliquota:m.tipo==='Pedaggio'?0:ivaStd,natura:m.tipo==='Pedaggio'?'N1':''});
+  if(u.src.mp&&typeof mpRigheFatturazione==='function')mpRigheFatturazione({me,ivaStd,emitDi,lines,scarti});
   for(const x of lines){const cc=cdcBy(x.cdc);if(!cc||cc.societa!==x.cli)x.cdc='';
     x.emit=x.emit||emitDef;x.key=x.cli+'||'+(u.split&&x.cdc?x.cdc:'')+'||'+x.emit;}
   // il filtro per emittente è un filtro di vista, non uno scarto silenzioso:
@@ -6446,7 +6449,7 @@ function renderFattWizard(tabs){
     <div class="field"><label>Cliente</label><select class="input" data-fcli><option value="">Tutti i clienti (${cliAll.length})</option>${cliAll.map(c=>`<option ${c===u.cli?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
     ${cdcAll.length?`<div class="field"><label>Centro di costo</label><select class="input" data-fcdc><option value="">Tutti</option>${cdcAll.map(c=>`<option value="${esc(c)}" ${c===u.fcdc?'selected':''}>${esc(cdcNome(c))}</option>`).join('')}</select></div>`:''}
     <label class="check" style="align-self:end"><input type="checkbox" data-split ${u.split?'checked':''}> Una proforma per centro di costo</label>
-    ${[['can','Canoni'],['vrb','Spese verbali'],['sin','Riaddebiti sinistri'],['mov','Pedaggi e carburante']].map(([k,l])=>`<label class="check" style="align-self:end"><input type="checkbox" data-src="${k}" ${u.src[k]?'checked':''}> ${l}</label>`).join('')}
+    ${[['can','Canoni'],['vrb','Spese verbali'],['sin','Riaddebiti sinistri'],['mov','Pedaggi e carburante'],['mp','Mancati pedaggi']].map(([k,l])=>`<label class="check" style="align-self:end"><input type="checkbox" data-src="${k}" ${u.src[k]?'checked':''}> ${l}</label>`).join('')}
    </div>
    ${nascoste.length?`<p class="muted" style="margin:-4px 0 8px;font-size:13px">Il filtro <b>${esc(u.emit)}</b> sta nascondendo ${nascoste.length} rig${nascoste.length===1?'a':'he'} di ${[...new Set(nascoste.map(x=>x.cli))].length} client${[...new Set(nascoste.map(x=>x.cli))].length===1?'e':'i'} intestate ad altre società. Scegli <b>Tutte le società</b> per vedere tutto.</p>`:''}
    ${scarti.length?`<div class="panel" style="border-left:3px solid var(--warn,#8A5A00)"><b>${scarti.length} contratt${scarti.length===1?'o':'i'} da sistemare in anagrafica</b><table class="grid mini"><tbody>${scarti.map(x=>`<tr><td>${esc(x.n||'(senza numero)')}</td><td>${x.t?plate(x.t):''}</td><td>${esc(x.m)}</td></tr>`).join('')}</tbody></table></div>`:''}
@@ -6463,7 +6466,7 @@ function renderFattWizard(tabs){
    <p class="muted" style="margin-top:-4px;font-size:13px">IVA proposta: ${ivaStd}% su canoni, spese e franchigie; pedaggi come anticipazioni escluse (natura N1, art. 15 DPR 633/72). Verifica il trattamento con l’amministrazione e correggi le righe dopo la creazione, se serve.</p>
    ${vis.length?vis.map(c=>{const l=lines.filter(x=>x.key===c);const imp=l.reduce((a,x)=>a+r2(x.quantita*x.prezzo),0);const iva=l.reduce((a,x)=>a+r2(r2(x.quantita*x.prezzo)*x.aliquota/100),0);const s=socBy(keyCli(c))||{};
      return `<div class="panel fatcli"><label class="check"><input type="checkbox" data-c="${esc(c)}" ${u.excl.has(c)?'':'checked'}><b>${esc(keyCli(c))}${keyCdc(c)?' – centro di costo '+esc(cdcNome(keyCdc(c))):''}</b><span class="muted">${esc(keyEmit(c)?'da '+keyEmit(c):'emittente da definire')} · ${esc(s.sdi?'SDI '+s.sdi:'codice SDI mancante')} · ${esc(s.piva?'P.IVA '+s.piva:'P.IVA mancante')}</span><span class="grow"></span><b>${eur(imp+iva)}</b></label>
-      <table class="grid mini"><tbody>${l.map(x=>`<tr><td>${esc(x.tipo)}</td><td>${esc(x.descrizione)}</td><td>${x.targa?plate(x.targa):''}</td><td class="num">${numF.format(x.quantita)} × ${eur(x.prezzo)}</td><td class="num">${x.natura||x.aliquota+'%'}</td><td class="num"><b>${eur(r2(x.quantita*x.prezzo))}</b></td></tr>`).join('')}</tbody></table></div>`;}).join('')
+      <table class="grid mini"><tbody>${l.map(x=>`<tr><td>${esc(x.tipo)}</td><td>${esc(x.descrizione)}${fatRigaExtra(x)}</td><td>${x.targa?plate(x.targa):''}</td><td class="num">${numF.format(x.quantita)} × ${eur(x.prezzo)}</td><td class="num">${x.natura||x.aliquota+'%'}</td><td class="num"><b>${eur(r2(x.quantita*x.prezzo))}</b></td></tr>`).join('')}</tbody></table></div>`;}).join('')
      :'<div class="panel empty">Nessun importo da fatturare per il mese e le fonti selezionate.</div>'}
    ${vis.length?`<div class="selbar card"><span class="selcount">${daCreare.length} proforma da creare${u.cli?' per '+esc(u.cli):''} · ${eur(daCreare.reduce((a,k)=>a+totOf(k),0))} IVA inclusa</span><button class="btn" data-create>Crea proforma in bozza</button><button class="btn primary" data-send>Crea e invia ad amministrazione</button></div>`:''}`;
   const m=$('#main');
@@ -6474,6 +6477,7 @@ function renderFattWizard(tabs){
   const fcc=m.querySelector('[data-fcdc]');if(fcc)fcc.onchange=()=>{u.fcdc=fcc.value;renderFatt();};
   const sp=m.querySelector('[data-split]');if(sp)sp.onchange=()=>{u.split=sp.checked;u.excl.clear();renderFatt();};
   m.querySelectorAll('[data-c]').forEach(c=>c.onchange=()=>{c.checked?u.excl.delete(c.dataset.c):u.excl.add(c.dataset.c);renderFatt();});
+  fatLegaRiaddebiti(m,()=>renderFatt());
   const create=()=>{
     const out=[];
     for(const c of daCreare){
@@ -6481,8 +6485,8 @@ function renderFattWizard(tabs){
       const f={id:uid(),codice:nextPF(d),cliente:keyCli(c),centroCosto:keyCdc(c),emittente:keyEmit(c)||u.emit||emitDef,data:d,periodoDa:ms,periodoA:me,imponibile:0,iva:0,totale:0,stato:'Bozza',dataInvio:'',numeroFattura:'',dataFattura:'',scadenzaPagamento:addDays(d,+S.par.termine||30),dataPagamento:'',note:''};
       S.fat.push(f);
       for(const x of l){S.righe.push({id:uid(),codice:nextCode(MODS.righe),proforma:f.codice,tipo:x.tipo,descrizione:x.descrizione,targa:x.targa,origine:x.origine,centroCosto:x.cdc||'',quantita:x.quantita,prezzo:x.prezzo,aliquota:x.aliquota,natura:x.natura,imponibile:r2(x.quantita*x.prezzo),
-          dal:x.dal||'',al:x.al||'',giorni:x.giorni??'',canoneMensile:x.canoneMensile??'',modello:x.modello||(mezzoBy(x.targa)?mezzoName(mezzoBy(x.targa)):'')});
-        const src=S.vrb.find(v=>v.codice===x.origine)||S.sin.find(v=>v.codice===x.origine)||S.mov.find(v=>v.codice===x.origine);if(src)src.proforma=f.codice;}
+          dal:x.dal||'',al:x.al||'',giorni:x.giorni??'',canoneMensile:x.canoneMensile??'',modello:x.modello||(mezzoBy(x.targa)?mezzoName(mezzoBy(x.targa)):''),costoSostenuto:x.costo??''});
+        const src=S.vrb.find(v=>v.codice===x.origine)||S.sin.find(v=>v.codice===x.origine)||S.mov.find(v=>v.codice===x.origine)||S.mpt.find(v=>v.codice===x.origine);if(src)src.proforma=f.codice;}
       recalcFat(f);out.push(f);
     }
     u.excl.clear();markDirty();renderSide();toast(`${out.length} proforma create in bozza.`);return out;
@@ -9255,8 +9259,8 @@ async function generate(){
 if(!RUOLI.flotta)RUOLI.flotta={l:'Ufficio flotta',
   d:'Tutta la flotta e i noleggi ai clienti: mezzi, contratti, manutenzioni, sinistri, verbali, dotazioni, dispositivi, dipendenti e anagrafiche. Non vede l’amministrazione.',
   tabs:['cruscotto','calendario','contratti','stampa','mezzi','gio','cp','man','sin','vrb',
-        'rinotifiche','disp','dot','dip','archivio','soc','anag','cdc','capfin','docs'],
-  scrivi:['mezzi','gio','cp','man','sin','vrb','disp','mov','dot','dota','dip','ass',
+        'rinotifiche','mp','disp','dot','dip','archivio','soc','anag','cdc','capfin','docs'],
+  scrivi:['noleggi','mp','mpt','mezzi','gio','cp','man','sin','vrb','disp','mov','dot','dota','dip','ass',
           'all','scad','app','soc','cap','cdc','rows','righe']};
 if(!RUOLI.operativo)RUOLI.operativo={l:'Operativo',
   d:'Il giorno per giorno: giornaliere, assegnazioni, consegne e riconsegne, segnalazione guasti e dotazioni. Vede i mezzi, non li modifica.',
@@ -9281,7 +9285,7 @@ const AREE=[
  {k:'cp',          l:'Contratti leasing e noleggio',tabs:['cp'],                            store:['cp']},
  {k:'man',         l:'Manutenzioni',              tabs:['man'],                             store:['man']},
  {k:'sin',         l:'Sinistri',                  tabs:['sin'],                             store:['sin']},
- {k:'vrb',         l:'Verbali e rinotifiche',     tabs:['vrb','rinotifiche'],               store:['vrb']},
+ {k:'vrb',         l:'Verbali e mancati pedaggi',  tabs:['vrb','rinotifiche','mp'],          store:['vrb','mp','mpt']},
  {k:'disp',        l:'Telepass e carte carburante',tabs:['disp'],                           store:['disp','mov']},
  {k:'dot',         l:'Dotazioni e attrezzature',  tabs:['dot'],                             store:['dot','dota']},
  {k:'dip',         l:'Dipendenti e assegnazioni', tabs:['dip'],                             store:['dip','ass']},
@@ -9292,6 +9296,7 @@ const AREE=[
   store:['fp','fpr','fpl','fa','far','fal','pn','bk','bolli','iva','f24','f24r']},
  {k:'notespese',   l:'Note spese dei dipendenti', tabs:['ns'],                              store:['ns','nsr']},
  {k:'margini',     l:'Margini e scheda economica',tabs:['margini'],                         store:[]},
+ {k:'grafici',     l:'Grafici e analisi',          tabs:['grafici'],                         store:[]},
 ];
 const AREA_DI_TAB=(()=>{const m={};for(const a of AREE)for(const t of a.tabs)m[t]=a.k;return m;})();
 const AREE_DI_STORE=(()=>{const m={};for(const a of AREE)for(const s of a.store)(m[s]=m[s]||[]).push(a.k);return m;})();
@@ -12943,7 +12948,7 @@ function schedaEconomica(targa,pDa,pA,fonti){
   if(on.riadd){
     const mv=S.mov.filter(m=>normTarga(m.targa)===t&&m.riaddebita==='Sì'&&!m.proforma
       &&ecoDentro(m.data,pDa,pA));
-    add(ricavi,'Riaddebiti da movimenti',r2(mv.reduce((a,m)=>a+((+m.importo||0)-(+m.iva||0)),0)),
+    add(ricavi,'Riaddebiti da movimenti',r2(mv.reduce((a,m)=>a+movAddebito(m),0)),
       mv.length,'Movimenti da riaddebitare');
     const sn=S.sin.filter(s=>normTarga(s.targa)===t&&+s.importoRiaddebito>0&&!s.proforma
       &&ecoDentro(s.data,pDa,pA));
@@ -14238,10 +14243,10 @@ function openNsRighe(n){
     d.innerHTML=`<header><h2>Righe della nota ${esc(n.codice)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
     <div class="body">
       <p class="muted" style="margin-top:0">${esc(nsDipNome(n))} · ${esc(n.motivo||'')} · ${pillS(n.stato,NS_PILL[n.stato]||'end')}${ro?' · <b>non modificabile</b>':''}</p>
-      <div class="calcbox">
-        <div><small>Righe</small><b>${rr.length}</b></div>
-        <div><small>Totale</small><b>${eur(n.totale||0)}</b></div>
-        <div><small>Da rimborsare al dipendente</small><b>${eur(n.daRimborsare||0)}</b></div>
+      <div class="calcbox" data-calc>
+        <div><small>Righe</small><b data-c="n">${rr.length}</b></div>
+        <div><small>Totale</small><b data-c="tot">${eur(n.totale||0)}</b></div>
+        <div><small>Da rimborsare al dipendente</small><b data-c="rimb">${eur(n.daRimborsare||0)}</b></div>
         <div><small>Allegati (scontrini)</small><b>${attachFor('ns',n.codice).length}</b></div>
       </div>
       ${senzaCarta?`<div class="alert">${senzaCarta} ${senzaCarta===1?'riga è pagata':'righe sono pagate'} con carta aziendale ma senza la carta indicata.</div>`:''}
@@ -14281,16 +14286,26 @@ function openNsRighe(n){
       S.nsr.push({id:uid(),codice:nextCode(MODS.nsr),nota:n.codice,data:ultima?ultima.data:todayISO(),categoria:'Carburante',
         descrizione:'',fornitore:'',documento:'',importo:'',iva:'',ivaDetr:'No',pagatoCon:NS_PAGATO[0],contoCarta:'',targa:''});
       markDirty();paint();};
-    d.querySelectorAll('tr[data-r] input,tr[data-r] select').forEach(i=>i.onchange=()=>{
-      const l=S.nsr.find(x=>x.id===i.closest('tr').dataset.r);if(!l)return;
+    /* ogni battuta si salva subito (senza ridisegnare): chiudere con Esc o cliccare
+       «Fatto» subito dopo aver scritto non fa più perdere l'importo */
+    const leggi=i=>{
+      const l=S.nsr.find(x=>x.id===i.closest('tr').dataset.r);if(!l)return null;
       const k=i.dataset.k;
       l[k]=['importo','iva'].includes(k)?(i.value===''?'':(parseFloat(i.value)||0)):i.value.trim();
-      if(k==='targa')l.targa=normTarga(l.targa);
-      if(k==='pagatoCon'&&l.pagatoCon!==NS_PAGATO[1])l.contoCarta='';
-      markDirty();paint();});
+      markDirty();nsRicalcola(n);
+      const set=(c,v)=>{const e=d.querySelector(`[data-c="${c}"]`);if(e)e.textContent=v;};
+      set('tot',eur(n.totale||0));set('rimb',eur(n.daRimborsare||0));
+      return l;};
+    d.querySelectorAll('tr[data-r] input').forEach(i=>{
+      i.oninput=()=>leggi(i);
+      i.onchange=()=>{const l=leggi(i);if(l&&i.dataset.k==='targa'){l.targa=normTarga(l.targa);i.value=l.targa;}};});
+    d.querySelectorAll('tr[data-r] select').forEach(i=>i.onchange=()=>{
+      const l=leggi(i);if(!l)return;
+      if(i.dataset.k==='pagatoCon'&&l.pagatoCon!==NS_PAGATO[1])l.contoCarta='';
+      paint();});
     d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{S.nsr=S.nsr.filter(x=>x.id!==b.dataset.del);markDirty();paint();});
   };
-  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);renderNs();};
+  const close=()=>{const a=document.activeElement;if(a&&d.contains(a)&&a.oninput)a.oninput();nsRicalcola(n);sc.remove();d.remove();document.removeEventListener('keydown',kd);renderNs();};
   const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
   document.addEventListener('keydown',kd);sc.onclick=close;document.body.append(sc,d);paint();
 }
@@ -14442,7 +14457,7 @@ function renderNs(){
     ],
     ledger:l=>{
       const da=l.filter(n=>n.stato==='Presentata');
-      const rimb=l.filter(n=>n.stato==='Approvata');
+      const rimb=l.filter(n=>['Presentata','Approvata'].includes(n.stato));
       return `<div><b>${l.length}</b><small>note</small></div>
         <div><b>${eur(r2(l.reduce((a,n)=>a+(+n.totale||0),0)))}</b><small>totale</small></div>
         <div><b class="${da.length?'warnc':''}">${da.length}</b><small>da approvare</small></div>
@@ -14500,6 +14515,645 @@ tabOk=function(k){
   const r=RUOLI[ruolo()];
   return !!(r&&(r.amm||(Array.isArray(r.tabs)&&r.tabs.includes('ns'))));
 };
+
+
+/* =====================================================================
+   MANCATI PEDAGGI
+   ---------------------------------------------------------------------
+   Il concessionario autostradale scrive per un pedaggio non pagato: una
+   pratica, con un numero e un importo, che riguarda più transiti su più
+   targhe. Qui si registra la pratica e, soprattutto, le targhe che ne
+   fanno parte, ciascuna con il suo importo e la sua data.
+
+   Alla preparazione della fatturazione ogni importo va alla società che
+   in quella data aveva il mezzo a noleggio. Per ogni pratica e per ogni
+   società coinvolta si aggiunge una sola volta la gestione della pratica
+   (20 € di default, si cambia in Parametri).
+   ===================================================================== */
+const MP_STATI=['Ricevuta','In lavorazione','Pagata','Contestata','Chiusa','Annullata'];
+const MP_PILL={Ricevuta:'rent','In lavorazione':'rent',Pagata:'run',Contestata:'bad',Chiusa:'end',Annullata:'end'};
+
+MODS.mp={sheet:'Mancati pedaggi',store:'mp',title:'Mancati pedaggi',code:'MP',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'La pratica',f:[
+   fd('numeroPratica','Numero di pratica','up',{req:true,span:'s3'}),
+   fd('ente','Concessionario o ente','text',{span:'s3',hint:'Per esempio Autostrade per l’Italia'}),
+   fd('stato','Stato','sel',{req:true,span:'s2',def:'Ricevuta',opts:MP_STATI}),
+   fd('dataRicezione','Ricevuta il','date',{span:'s2'}),
+   fd('periodoDal','Periodo dal','date',{span:'s2'}),fd('periodoAl','Periodo al','date',{span:'s2'}),
+   fd('importoPratica','Importo della pratica (€)','eur',{span:'s3',hint:'Quello richiesto dal concessionario, spese comprese'}),
+   fd('societaTitolare','Società a cui è intestata','ref',{ref:'soc',flt:'tit',span:'s3'}),
+   fd('protocollo','Protocollo o riferimento','up',{span:'s3'}),
+   fd('scadenza','Scadenza di pagamento','date',{span:'s3'}),
+   fd('addebita','Da riaddebitare ai clienti','bool',{def:'Sì',span:'s3',hint:'Togli per una pratica che resta a nostro carico'})]},
+  {t:'Pagamento',f:[
+   fd('pagatoIl','Pagata il','date',{span:'s3'}),fd('importoPagato','Importo pagato (€)','eur',{span:'s3'}),
+   fd('note','Note','area',{span:'s6'})]},
+ ]};
+MODS.mpt={sheet:'Targhe mancati pedaggi',store:'mpt',title:'Targhe dei mancati pedaggi',code:'MT',wide:true,
+ groups:[{t:'Targa della pratica',f:[
+   fd('pratica','Pratica','text',{req:true,span:'s2'}),
+   fd('targa','Targa','up',{req:true,span:'s2'}),
+   fd('dal','Data del transito, o dal','date',{req:true,span:'s2'}),fd('al','Al (se è un periodo)','date',{span:'s2'}),
+   fd('tratta','Tratta o casello','text',{span:'s4'}),
+   fd('importo','Importo (€)','eur',{req:true,span:'s2'}),
+   fd('cliente','Società a cui addebitare','ref',{ref:'soc',flt:'cli',span:'s4',hint:'Vuoto = la società che aveva il mezzo a noleggio'}),
+   fd('proforma','Proforma','text',{span:'s2',hint:'Compilato dalla fatturazione'}),
+   fd('note','Note','text',{span:'s6'})]}]};
+ammRegistraModuli(['mp','mpt']);
+if(typeof PARAMS_EXTRA!=='undefined'&&!PARAMS_EXTRA.some(p=>p[0]==='gestioneMancatiPedaggi'))
+  PARAMS_EXTRA.push(['gestioneMancatiPedaggi',36,'Gestione pratica mancati pedaggi: importo per società (€)',20]);
+
+/* ---------- le targhe di una pratica ---------- */
+const mpRighe=p=>p?S.mpt.filter(l=>l.pratica===p.codice).sort((a,b)=>(a.dal||'').localeCompare(b.dal||'')||String(a.targa).localeCompare(String(b.targa))):[];
+const mpTotale=p=>r2(mpRighe(p).reduce((a,l)=>a+(+l.importo||0),0));
+const mpAddebitabile=p=>!!p&&p.addebita!=='No'&&!['Contestata','Annullata'].includes(p.stato);
+const mpGestione=()=>{const v=S.par&&S.par.gestioneMancatiPedaggi;const n=parseFloat(v);return v===''||v==null||isNaN(n)?20:n;};
+/* La società a cui va l'importo: quella indicata a mano, oppure l'unica che
+   in quel periodo aveva il mezzo a noleggio. Se sono più d'una, o nessuna,
+   lo dice invece di scegliere. */
+function mpCliente(l){
+  if(l.cliente)return {cliente:l.cliente,manuale:true,motivo:''};
+  const t=normTarga(l.targa),a=l.dal||'',b=l.al||l.dal||'';
+  if(!t||!a)return {cliente:'',motivo:'mancano targa o data'};
+  const c=[...new Set(S.rows.filter(r=>normTarga(r.targa)===t&&r.inizio&&r.fine&&r.inizio<=b&&r.fine>=a&&r.locataria).map(r=>r.locataria))];
+  if(c.length===1)return {cliente:c[0],motivo:''};
+  if(!c.length)return {cliente:'',motivo:`nessuna società aveva ${t} a noleggio il ${fmtD(a)}${l.al&&l.al!==a?' – '+fmtD(l.al):''}`};
+  return {cliente:'',motivo:`${c.length} società (${c.join(', ')}) nel periodo di ${t}: indica a mano a chi addebitare`};
+}
+const mpPerSocieta=p=>{
+  const m=new Map();
+  for(const l of mpRighe(p)){const c=mpCliente(l).cliente||'(da indicare)';
+    const o=m.get(c)||{cliente:c,importo:0,n:0};o.importo=r2(o.importo+(+l.importo||0));o.n++;m.set(c,o);}
+  return [...m.values()];
+};
+MODS.mp.afterSave=p=>{if(!p.importoPratica&&mpTotale(p))p.importoPratica=mpTotale(p);};
+MODS.mp.onDelete=p=>{S.mpt=S.mpt.filter(l=>l.pratica!==p.codice);};
+MODS.mp.canDelete=p=>mpRighe(p).some(l=>l.proforma)?'Ci sono importi già in una proforma: annulla prima la proforma.':'';
+MODS.mp.live=x=>{
+  const p=S.mp.find(y=>y.id===x.id);if(!p)return '';
+  const t=mpTotale(p),s=mpPerSocieta(p);
+  return `<div><small>Targhe</small><b>${mpRighe(p).length}</b></div><div><small>Totale targhe</small><b>${eur(t)}</b></div>
+    <div><small>Società coinvolte</small><b>${s.filter(x=>x.cliente!=='(da indicare)').length}</b></div>`;
+};
+
+function openMpTarghe(p){
+  const sc=document.createElement('div');sc.className='scrim';
+  const d=document.createElement('aside');d.className='drawer wide';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');
+  const paint=()=>{
+    const ro=soloLettura()||!puoScrivere('mpt')||(p.stato==='Annullata');
+    const rr=mpRighe(p),tot=mpTotale(p);
+    const diff=p.importoPratica!==''&&p.importoPratica!=null?r2((+p.importoPratica||0)-tot):0;
+    const soc=mpPerSocieta(p);
+    const gest=mpGestione();
+    const opt=S.mezzi.filter(m=>!ARCH(m)).map(m=>m.targa);
+    const clienti=S.soc.filter(socOk.cli).map(s=>s.ragione).sort();
+    const ignote=rr.filter(l=>l.targa&&!mezzoBy(normTarga(l.targa)));
+    d.innerHTML=`<header><h2>Targhe della pratica ${esc(p.numeroPratica||p.codice)}</h2><button class="btn ghost" data-x>Chiudi</button></header>
+    <div class="body">
+      <p class="muted" style="margin-top:0">${esc(p.ente||'')} · ${pillS(p.stato,MP_PILL[p.stato]||'end')}${mpAddebitabile(p)?'':' · <b>non si riaddebita</b>'}</p>
+      <div class="calcbox">
+        <div><small>Targhe</small><b>${rr.length}</b></div>
+        <div><small>Totale delle targhe</small><b>${eur(tot)}</b></div>
+        <div><small>Importo della pratica</small><b>${p.importoPratica!==''?eur(p.importoPratica):'–'}</b></div>
+        <div><small>Società da addebitare</small><b>${soc.filter(x=>x.cliente!=='(da indicare)').length}</b></div>
+      </div>
+      ${Math.abs(diff)>0.005?`<div class="alert">L’importo della pratica (${eur(p.importoPratica)}) e il totale delle targhe (${eur(tot)}) differiscono di <b>${eur(diff)}</b>: spese o sanzioni non attribuite a una targa restano a nostro carico.</div>`:''}
+      ${ignote.length?`<div class="alert">${esc([...new Set(ignote.map(l=>l.targa))].join(', '))}: targa non in anagrafica.</div>`:''}
+      <div class="tablewrap" style="max-height:380px;overflow:auto"><table class="grid mini"><thead><tr>
+        <th>Targa</th><th>Transito dal</th><th>Al</th><th>Tratta</th><th class="num">Importo</th><th>Si addebita a</th><th></th></tr></thead><tbody>
+      ${rr.map(l=>{const c=mpCliente(l);
+        return `<tr data-r="${l.id}" class="${c.cliente?'':'rowwarn'}">
+        <td>${ro?plate(l.targa):`<input class="input upc" style="width:108px;padding-inline:8px" data-k="targa" value="${esc(l.targa||'')}" list="mpTg">`}</td>
+        <td>${ro?fmtD(l.dal):`<input class="input" style="width:128px;padding-inline:6px" type="date" data-k="dal" value="${esc(l.dal||'')}">`}</td>
+        <td>${ro?fmtD(l.al):`<input class="input" style="width:128px;padding-inline:6px" type="date" data-k="al" value="${esc(l.al||'')}">`}</td>
+        <td>${ro?esc(l.tratta||''):`<input class="input" style="min-width:130px" data-k="tratta" value="${esc(l.tratta||'')}">`}</td>
+        <td class="num">${ro?eur(l.importo):`<input class="input" style="width:90px;text-align:right" type="number" step="0.01" min="0" data-k="importo" value="${l.importo}">`}</td>
+        <td>${ro?esc(c.cliente||'—'):`<select class="input" style="min-width:170px" data-k="cliente"><option value="">${esc(c.cliente&&!c.manuale?c.cliente+' (dal noleggio)':'da noleggio…')}</option>${clienti.map(x=>`<option ${x===l.cliente?'selected':''}>${esc(x)}</option>`).join('')}</select>`}
+          ${c.cliente?'':`<span class="sub late">${esc(c.motivo)}</span>`}${l.proforma?`<span class="sub">in proforma ${esc(l.proforma)}</span>`:''}</td>
+        <td>${ro||l.proforma?'':`<button class="btn ghost danger" data-del="${l.id}" title="Togli" aria-label="Togli">✕</button>`}</td></tr>`;}).join('')
+        ||'<tr><td colspan="7" class="empty">Nessuna targa. Aggiungi i veicoli della pratica, ciascuno col suo importo.</td></tr>'}
+      </tbody></table></div>
+      <datalist id="mpTg">${opt.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+      ${ro?'':'<button class="btn" data-add style="margin-top:8px">Aggiungi una targa</button>'}
+      <div class="panel" style="margin-top:14px"><h3>Cosa si addebita</h3>
+        ${soc.length?`<table class="grid mini"><thead><tr><th>Società</th><th class="num">Targhe</th><th class="num">Pedaggi</th><th class="num">Gestione pratica</th><th class="num">Totale</th></tr></thead><tbody>
+        ${soc.map(x=>{const g=x.cliente==='(da indicare)'?0:gest;return `<tr><td>${esc(x.cliente)}</td><td class="num">${x.n}</td><td class="num">${eur(x.importo)}</td><td class="num">${g?eur(g):'–'}</td><td class="num"><b>${eur(r2(x.importo+g))}</b></td></tr>`;}).join('')}
+        </tbody></table>`:'<p class="muted">Aggiungi le targhe per vedere gli importi per società.</p>'}
+        <p class="muted" style="margin:8px 0 0;font-size:12.5px">La gestione della pratica (${eur(gest)}, da Parametri) si addebita una volta per ogni società interessata. I pedaggi non hanno IVA (anticipazioni, art. 15); la gestione sì.</p></div>
+    </div>
+    <footer><button class="btn" data-edit>Dati della pratica e allegati</button><button class="btn primary" data-x>Fatto</button></footer>`;
+    d.querySelectorAll('[data-x]').forEach(b=>b.onclick=close);
+    d.querySelector('[data-edit]').onclick=()=>{close();openRecord('mp',p,{onSaved:()=>renderMp()});};
+    const add=d.querySelector('[data-add]');
+    if(add)add.onclick=()=>{const u=rr[rr.length-1];
+      S.mpt.push({id:uid(),codice:nextCode(MODS.mpt),pratica:p.codice,targa:'',dal:u?u.dal:(p.periodoDal||''),al:'',tratta:'',importo:'',cliente:'',proforma:'',note:''});
+      markDirty();paint();};
+    d.querySelectorAll('tr[data-r] input,tr[data-r] select').forEach(i=>i.onchange=()=>{
+      const l=S.mpt.find(x=>x.id===i.closest('tr').dataset.r);if(!l)return;
+      const k=i.dataset.k;
+      l[k]=k==='importo'?(i.value===''?'':(parseFloat(i.value)||0)):i.value.trim();
+      if(k==='targa')l.targa=normTarga(l.targa);
+      markDirty();paint();});
+    d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{S.mpt=S.mpt.filter(x=>x.id!==b.dataset.del);markDirty();paint();});
+  };
+  const close=()=>{sc.remove();d.remove();document.removeEventListener('keydown',kd);renderMp();};
+  const kd=e=>{if(e.key==='Escape'&&!document.querySelector('.modal'))close();};
+  document.addEventListener('keydown',kd);sc.onclick=close;document.body.append(sc,d);paint();
+}
+
+function renderMp(){
+  genericList('mp',{
+    sub:'Le pratiche di mancato pagamento del pedaggio: ciascuna con le sue targhe e i loro importi. Alla fatturazione ogni importo va alla società che aveva il mezzo a noleggio, con la gestione della pratica.',
+    newLabel:'Nuova pratica',searchPh:'Numero di pratica, ente, protocollo',
+    search:['numeroPratica','ente','protocollo','codice'],
+    filters:[
+      {k:'stato',label:'Stato',opts:()=>MP_STATI},
+      {k:'__fat',label:'Fatturazione',all:'Tutte',opts:()=>['Da riaddebitare','Riaddebitata','Non si riaddebita'],
+       test:(r,v)=>{const l=mpRighe(r);const ok=mpAddebitabile(r);
+         return v==='Non si riaddebita'?!ok:ok&&(v==='Riaddebitata'?l.length>0&&l.every(x=>x.proforma):l.some(x=>!x.proforma));}},
+    ],
+    ledger:l=>{
+      const righe=l.flatMap(mpRighe);
+      const da=l.filter(mpAddebitabile).flatMap(mpRighe).filter(x=>!x.proforma);
+      return `<div><b>${l.length}</b><small>pratiche</small></div>
+        <div><b>${eur(r2(righe.reduce((a,x)=>a+(+x.importo||0),0)))}</b><small>importo delle targhe</small></div>
+        <div><b>${eur(r2(da.reduce((a,x)=>a+(+x.importo||0),0)))}</b><small>da riaddebitare</small></div>
+        <div><b class="${righe.some(x=>!mpCliente(x).cliente)?'warnc':'cfok'}">${righe.filter(x=>!mpCliente(x).cliente).length}</b><small>targhe senza società</small></div>`;
+    },
+    sort:(a,b)=>(b.dataRicezione||'').localeCompare(a.dataRicezione||'')||String(b.codice).localeCompare(String(a.codice)),
+    cols:[
+      {l:'Pratica',v:r=>`<b>${esc(r.numeroPratica)}</b><span class="sub">${esc(r.codice)}${r.ente?' · '+esc(r.ente):''}</span>`,s:r=>r.numeroPratica},
+      {l:'Ricevuta',v:r=>`${fmtD(r.dataRicezione)}${r.scadenza?`<span class="sub">scade ${dueCell(r.scadenza,10)}</span>`:''}`},
+      {l:'Targhe',v:r=>{const l=mpRighe(r),s=mpPerSocieta(r).filter(x=>x.cliente!=='(da indicare)');
+        return `${l.length}<span class="sub">${s.length} ${s.length===1?'società':'società'}${l.some(x=>!mpCliente(x).cliente)?' · <span class="late">alcune da indicare</span>':''}</span>`;}},
+      {l:'Importo',cls:'num',v:r=>{const t=mpTotale(r);return `<b>${eur(r.importoPratica!==''?r.importoPratica:t)}</b><span class="sub">targhe ${eur(t)}</span>`;},s:r=>+r.importoPratica||0},
+      {l:'Stato',v:r=>pillS(r.stato,MP_PILL[r.stato]||'end')},
+      {l:'Riaddebito',v:r=>{if(!mpAddebitabile(r))return '<span class="muted">no</span>';const l=mpRighe(r);
+        const f=l.filter(x=>x.proforma).length;
+        return l.length?(f===l.length?'<span class="cfok">fatturato</span>':`${f}/${l.length} in proforma`):'<span class="muted">senza targhe</span>';}},
+    ],
+    rowActions:[
+      {l:'Targhe e importi',fn:openMpTarghe},
+      {l:'Vai alla fatturazione',show:r=>mpAddebitabile(r)&&tabOk('fatturazione'),fn:()=>{S.tab='fatturazione';render();}},
+    ],
+    empty:'Nessuna pratica. Registra la prima e aggiungi le targhe con i loro importi.',
+  });
+}
+VIEWS.mp=()=>renderMp();
+{
+  const g=MENU.find(x=>x.items.some(([k])=>k==='vrb'));
+  if(g&&!g.items.some(([k])=>k==='mp')){
+    const i=g.items.findIndex(([k])=>k==='rinotifiche');
+    const j=i<0?g.items.findIndex(([k])=>k==='vrb'):i;
+    g.items.splice(j+1,0,['mp','Mancati pedaggi']);
+  }
+  for(const k of ['flotta','amministrazione']){
+    const r=RUOLI[k];if(r&&r.tabs&&!r.tabs.includes('mp'))r.tabs.push('mp');}
+  if(RUOLI.flotta&&Array.isArray(RUOLI.flotta.scrivi))
+    for(const s of ['mp','mpt','noleggi'])if(!RUOLI.flotta.scrivi.includes(s))RUOLI.flotta.scrivi.push(s);
+}
+
+/* ---------- la fatturazione ----------
+   Aggiunge alle righe della preparazione i mancati pedaggi per società e,
+   una volta per pratica e per società, la gestione della pratica. */
+function mpRigheFatturazione(c){
+  const attive=new Set(S.fat.filter(f=>f.stato!=='Annullata').map(f=>f.codice));
+  const gi=new Set(S.righe.filter(r=>r.tipo==='Gestione pratica mancati pedaggi'&&attive.has(r.proforma)).map(r=>r.origine));
+  const prime=new Map();
+  for(const l of S.mpt){
+    if(l.proforma||!(+l.importo>0)||(l.dal||'')>c.me)continue;
+    const p=S.mp.find(x=>x.codice===l.pratica);
+    if(!mpAddebitabile(p))continue;
+    const r=mpCliente(l);
+    if(!r.cliente){c.scarti.push({n:'Pratica '+p.numeroPratica,t:l.targa,m:r.motivo});continue;}
+    const emit=c.emitDi(l.targa,l.dal),cdc=cdcFor(l.targa,l.dal);
+    c.lines.push({cli:r.cliente,emit,cdc,tipo:'Mancato pedaggio',
+      descrizione:`Mancato pagamento pedaggio – pratica ${p.numeroPratica}${p.ente?' '+p.ente:''}${l.tratta?' – '+l.tratta:''} del ${fmtD(l.dal)}${l.al&&l.al!==l.dal?' – '+fmtD(l.al):''}`,
+      targa:l.targa,origine:l.codice,quantita:1,prezzo:+l.importo,aliquota:0,natura:'N1'});
+    const k=p.codice+'|'+r.cliente;
+    if(!prime.has(k))prime.set(k,{p,cli:r.cliente,emit,cdc,targa:l.targa});
+  }
+  const g=mpGestione();
+  if(g>0)for(const [k,x] of prime){
+    if(gi.has(k))continue;
+    c.lines.push({cli:x.cli,emit:x.emit,cdc:x.cdc,tipo:'Gestione pratica mancati pedaggi',
+      descrizione:`Gestione pratica mancati pedaggi autostradali – pratica ${x.p.numeroPratica}`,
+      targa:'',origine:k,quantita:1,prezzo:g,aliquota:c.ivaStd,natura:''});
+  }
+}
+
+
+/* =====================================================================
+   RIADDEBITI: VOCE DEL VERBALE E CARBURANTE
+   ---------------------------------------------------------------------
+   Verbali: da cliente a cliente cambia il nome della voce con cui si
+   addebita la spesa. Ogni verbale sceglie fra «Gestione amministrativa» e
+   «Rinotifica», e la scelta si può cambiare anche nel riepilogo della
+   fatturazione, sulla riga.
+
+   Carburante: prima si indica quanto abbiamo pagato, poi quanto si
+   addebita. Il costo resta scritto sulla riga, così il margine sul
+   carburante si legge.
+   ===================================================================== */
+const VRB_VOCI=['Gestione amministrativa','Rinotifica'];
+function ammCampi(m){
+  m.fields=m.groups.flatMap(g=>g.f);
+  m.fmap=Object.fromEntries(m.fields.map(f=>[f.k,f]));
+}
+{
+  const g=MODS.vrb.groups.find(x=>x.f.some(f=>f.k==='speseGestione')).f;
+  if(!g.some(f=>f.k==='voceAddebito')){
+    const i=g.findIndex(f=>f.k==='speseGestione');
+    g.splice(i,0,fd('voceAddebito','Voce da addebitare al cliente','sel',{span:'s3',def:VRB_VOCI[0],opts:VRB_VOCI,
+      hint:'Il nome della spesa in fattura: alcuni clienti vogliono l’una, altri l’altra'}));
+    ammCampi(MODS.vrb);
+  }
+  const m=MODS.mov.groups[0].f;
+  if(!m.some(f=>f.k==='importoAddebito')){
+    const i=m.findIndex(f=>f.k==='riaddebita');
+    m.splice(i+1,0,fd('importoAddebito','Importo da addebitare (€, IVA esclusa)','eur',
+      {hint:'Rifornimento: l’importo sopra è quello che paghiamo; qui quello che si addebita. Vuoto = il costo senza IVA'}));
+    ammCampi(MODS.mov);
+  }
+  const r=MODS.righe.groups[0].f;
+  const t=r.find(f=>f.k==='tipo');
+  for(const o of ['Riaddebito carburante','Mancato pedaggio','Gestione pratica mancati pedaggi','Gestione amministrativa verbale','Rinotifica verbale'])
+    if(t&&t.opts&&!t.opts.includes(o))t.opts.splice(t.opts.length-1,0,o);
+  if(!r.some(f=>f.k==='costoSostenuto')){r.push(fd('costoSostenuto','Costo sostenuto (€)','eur',{hint:'Per i riaddebiti: quanto è costato a noi'}));ammCampi(MODS.righe);}
+  const v0=MODS.mov.validate;
+  MODS.mov.validate=(x,errs,rec)=>{
+    const r0=v0?v0(x,errs,rec):'';
+    if(x.riaddebita==='Sì'&&x.tipo==='Rifornimento'){
+      if(!(+x.importo>0))errs.importo='Per riaddebitare il carburante indica prima quanto abbiamo pagato';
+      else if(x.importoAddebito===''||x.importoAddebito==null)errs.importoAddebito=`Indica quanto addebitare (il costo è ${eur(r2((+x.importo||0)-(+x.iva||0)))} senza IVA)`;
+    }
+    return r0;
+  };
+}
+/* l'importo che si addebita di un movimento */
+const movAddebito=m=>(m.tipo==='Rifornimento'&&m.importoAddebito!==''&&m.importoAddebito!=null)
+  ?(+m.importoAddebito||0):r2((+m.importo||0)-(+m.iva||0));
+
+/* nel riepilogo della fatturazione: la voce del verbale e l'addebito del carburante, riga per riga */
+function fatRigaExtra(x){
+  if(x.vrb){
+    const v=S.vrb.find(y=>y.codice===x.vrb);
+    const cur=v&&v.voceAddebito==='Rinotifica'?'Rinotifica':'Gestione amministrativa';
+    return `<span class="sub">Voce in fattura: <select class="input" style="width:auto;min-height:0;padding:2px 8px" data-voce="${esc(x.vrb)}" aria-label="Voce da addebitare">${VRB_VOCI.map(o=>`<option ${o===cur?'selected':''}>${o}</option>`).join('')}</select></span>`;
+  }
+  if(x.mov&&x.costo!==''&&x.costo!=null)
+    return `<span class="sub">Costo nostro ${eur(x.costo)} · addebito (IVA esclusa) <input class="input" type="number" step="0.01" min="0" style="width:100px;min-height:0;padding:2px 8px" data-addeb="${esc(x.mov)}" value="${x.prezzo}" aria-label="Importo da addebitare"></span>`;
+  return '';
+}
+function fatLegaRiaddebiti(m,ridisegna){
+  m.querySelectorAll('[data-voce]').forEach(s=>s.onchange=()=>{
+    const v=S.vrb.find(x=>x.codice===s.dataset.voce);if(!v)return;
+    v.voceAddebito=s.value;markDirty();ridisegna();});
+  m.querySelectorAll('[data-addeb]').forEach(i=>i.onchange=()=>{
+    const v=S.mov.find(x=>x.codice===i.dataset.addeb);if(!v)return;
+    v.importoAddebito=i.value===''?'':(parseFloat(i.value)||0);markDirty();ridisegna();});
+}
+
+/* dentro una proforma in bozza: riga di riaddebito carburante, costo prima e addebito poi */
+async function fatCarburante(f,paint){
+  const ivaStd=r2((+S.par.iva||0)*100);
+  const opt=S.mezzi.filter(m=>!ARCH(m)).map(m=>m.targa);
+  const r=await bkBox('Riaddebito carburante',
+    `<p class="muted s6" style="margin:0">Prima quanto abbiamo pagato, poi quanto addebiti a ${esc(f.cliente||'il cliente')}.</p>
+     <div class="field s2"><label>Data</label><input class="input" type="date" id="cbData" value="${todayISO()}"></div>
+     <div class="field s2"><label>Targa</label><input class="input upc" id="cbTarga" list="cbTg"><datalist id="cbTg">${opt.map(t=>`<option value="${esc(t)}">`).join('')}</datalist></div>
+     <div class="field s2"><label>Litri (facoltativo)</label><input class="input" type="number" step="0.01" min="0" id="cbLitri"></div>
+     <div class="field s3"><label>1 · Quanto paghiamo (€, IVA esclusa)</label><input class="input" type="number" step="0.01" min="0" id="cbCosto"></div>
+     <div class="field s3"><label>2 · Importo da addebitare (€, IVA esclusa)</label><input class="input" type="number" step="0.01" min="0" id="cbAddeb"></div>
+     <p class="muted s6" style="font-size:12.5px;margin:0">Se non scrivi l’importo da addebitare, si addebita il costo. IVA proposta ${ivaStd}%.</p>`,
+    'Aggiungi la riga',
+    m=>{
+      const q=s=>m.querySelector(s).value;
+      const costo=r2(parseFloat(q('#cbCosto'))||0);
+      if(costo<=0)return 'Indica quanto abbiamo pagato il carburante.';
+      const ad=q('#cbAddeb')===''?costo:r2(parseFloat(q('#cbAddeb'))||0);
+      if(ad<0)return 'L’importo da addebitare non può essere negativo.';
+      return {data:q('#cbData'),targa:normTarga(q('#cbTarga')),litri:parseFloat(q('#cbLitri'))||'',costo,ad};
+    });
+  if(!r)return;
+  S.righe.push({id:uid(),codice:nextCode(MODS.righe),proforma:f.codice,tipo:'Riaddebito carburante',
+    descrizione:`Riaddebito carburante${r.litri?` ${numF.format(r.litri)} litri`:''} del ${fmtD(r.data)}`,
+    targa:r.targa,origine:'',quantita:1,prezzo:r.ad,aliquota:ivaStd,natura:'',imponibile:r.ad,costoSostenuto:r.costo,
+    dal:'',al:'',giorni:'',canoneMensile:'',modello:r.targa&&mezzoBy(r.targa)?mezzoName(mezzoBy(r.targa)):''});
+  markDirty();paint();
+  toast(`Riaddebito carburante: costo ${eur(r.costo)}, addebito ${eur(r.ad)}.`);
+}
+
+
+/* =====================================================================
+   GRAFICI E ANALISI
+   ---------------------------------------------------------------------
+   Una pagina con grafici interattivi, disegnati in SVG dentro la pagina:
+   nessuna libreria esterna, funzionano anche senza rete. Passando sopra
+   si legge il valore, cliccando si apre l'elenco che sta dietro al numero.
+   Ogni grafico compare solo se la persona ha accesso ai dati che mostra.
+   ===================================================================== */
+const GF_COL=['#208295','#e0a030','#c9553d','#6b8f3c','#7a6bb5','#55b9c8','#8a9aa3','#b5527f'];
+const gfN=n=>new Intl.NumberFormat('it-IT',{maximumFractionDigits:0}).format(n);
+const gfE=n=>eur(r2(n));
+const gfMese=iso=>{const d=fromISO(iso+'-01');return d?d.toLocaleDateString('it-IT',{month:'short',timeZone:'UTC'}).replace('.',''):iso;};
+
+/* ---- il suggerimento che segue il mouse (e la tastiera) ---- */
+function gfTipInit(root){
+  let t=document.getElementById('gfTip');
+  if(!t){t=document.createElement('div');t.id='gfTip';t.className='gftip';t.setAttribute('role','tooltip');document.body.append(t);}
+  t.style.display='none';
+  const mostra=(el,x,y)=>{
+    t.innerHTML=el.getAttribute('data-tip');t.style.display='block';
+    const w=t.offsetWidth,h=t.offsetHeight;
+    t.style.left=Math.max(8,Math.min(innerWidth-w-8,x+14))+'px';
+    t.style.top=Math.max(8,Math.min(innerHeight-h-8,y+14))+'px';};
+  root.addEventListener('mousemove',e=>{const el=e.target.closest('[data-tip]');if(el)mostra(el,e.clientX,e.clientY);else t.style.display='none';});
+  root.addEventListener('mouseleave',()=>{t.style.display='none';});
+  root.addEventListener('focusin',e=>{const el=e.target.closest('[data-tip]');if(el){const r=el.getBoundingClientRect();mostra(el,r.left+r.width/2,r.top);}});
+  root.addEventListener('focusout',()=>{t.style.display='none';});
+}
+
+/* ---- ciambella ---- */
+function gfDonut(items,{centro='',sotto='',id=''}={}){
+  const tot=items.reduce((a,x)=>a+x.v,0);
+  if(!tot)return '<p class="muted">Nessun dato da mostrare.</p>';
+  const R=84,r0=52,C=100;let a=-Math.PI/2;
+  const P=(r,t)=>[C+r*Math.cos(t),C+r*Math.sin(t)];
+  const fette=items.filter(x=>x.v>0).map((x,i)=>{
+    const ang=x.v/tot*Math.PI*2,a1=a+Math.min(ang,Math.PI*2-0.0001);
+    const [x0,y0]=P(R,a),[x1,y1]=P(R,a1),[x2,y2]=P(r0,a1),[x3,y3]=P(r0,a);
+    const lg=ang>Math.PI?1:0;
+    const d=`M${x0},${y0}A${R},${R} 0 ${lg} 1 ${x1},${y1}L${x2},${y2}A${r0},${r0} 0 ${lg} 0 ${x3},${y3}Z`;
+    a+=ang;const col=x.c||GF_COL[i%GF_COL.length];
+    const pct=Math.round(x.v/tot*100);
+    const tip=`<b>${esc(x.l)}</b><br>${x.fmt?x.fmt(x.v):gfN(x.v)} · ${pct}%`;
+    return `<path class="gfseg" d="${d}" fill="${col}" data-tip="${esc(tip)}" data-i="${i}" tabindex="0" role="button" aria-label="${esc(x.l)}: ${x.fmt?x.fmt(x.v):gfN(x.v)}"/>`;
+  }).join('');
+  const leg=items.filter(x=>x.v>0).map((x,i)=>`<button class="gfleg" data-i="${i}" type="button"><i style="background:${x.c||GF_COL[i%GF_COL.length]}"></i>${esc(x.l)}<b>${x.fmt?x.fmt(x.v):gfN(x.v)}</b></button>`).join('');
+  return `<div class="gfdonut" ${id?`data-d="${id}"`:''}><svg viewBox="0 0 200 200" role="img" aria-label="Grafico a ciambella">${fette}
+    <text x="100" y="${sotto?96:104}" text-anchor="middle" class="gfc1">${esc(centro)}</text>${sotto?`<text x="100" y="116" text-anchor="middle" class="gfc2">${esc(sotto)}</text>`:''}</svg>
+    <div class="gflegs">${leg}</div></div>`;
+}
+
+/* ---- barre verticali, anche impilate ---- */
+function gfBars(cols,serie,{fmt=gfN,id=''}={}){
+  const W=640,H=250,L=52,B=28,T=10,Rr=8;
+  const max0=Math.max(...cols.map(c=>c.v.reduce((a,b)=>a+b,0)),0);
+  if(!max0)return '<p class="muted">Nessun dato da mostrare.</p>';
+  const mag=10**Math.floor(Math.log10(max0)),passi=[1,2,2.5,5,10];
+  const stp=passi.map(p=>p*mag/ (p>=5?1:1)).find(s=>max0/s<=5)||mag*10;
+  const max=Math.ceil(max0/stp)*stp;
+  const y=v=>T+(H-T-B)*(1-v/max),bw=(W-L-Rr)/cols.length;
+  let g='';for(let v=0;v<=max+1e-9;v+=stp)g+=`<line x1="${L}" x2="${W-Rr}" y1="${y(v)}" y2="${y(v)}" class="gfgrid"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end" class="gfax">${fmt(v)}</text>`;
+  const barre=cols.map((c,i)=>{
+    let base=0;const x=L+i*bw+bw*0.16,w=bw*0.68;
+    const tot=c.v.reduce((a,b)=>a+b,0);
+    const tip=`<b>${esc(c.l)}</b><br>`+serie.map((s,k)=>c.v[k]?`<i style="background:${s.c}"></i>${esc(s.l)}: ${fmt(c.v[k])}`:'').filter(Boolean).join('<br>')+(serie.length>1?`<br><b>Totale ${fmt(tot)}</b>`:'');
+    const seg=c.v.map((v,k)=>{if(!v)return '';const h=(H-T-B)*v/max,yy=y(base+v);base+=v;
+      return `<rect x="${x}" y="${yy}" width="${w}" height="${Math.max(h,1)}" fill="${serie[k].c}" rx="${k===c.v.length-1||base>=tot?3:0}"/>`;}).join('');
+    return `<g class="gfbar" data-tip="${esc(tip)}" data-i="${i}" tabindex="0" role="button" aria-label="${esc(c.l)}: ${fmt(tot)}"><rect x="${L+i*bw}" y="${T}" width="${bw}" height="${H-T-B}" fill="transparent"/>${seg}
+      <text x="${L+i*bw+bw/2}" y="${H-9}" text-anchor="middle" class="gfax">${esc(c.l)}</text></g>`;}).join('');
+  const leg=serie.length>1?`<div class="gflegs row">${serie.map(s=>`<span class="gfleg"><i style="background:${s.c}"></i>${esc(s.l)}</span>`).join('')}</div>`:'';
+  return `<div ${id?`data-d="${id}"`:''}><svg viewBox="0 0 ${W} ${H}" class="gfsvg" role="img" aria-label="Grafico a barre">${g}${barre}</svg>${leg}</div>`;
+}
+
+/* ---- barre orizzontali (HTML, leggibili e accessibili) ---- */
+function gfHBars(righe,{fmt=gfN,id=''}={}){
+  const max=Math.max(...righe.map(r=>r.v),0);
+  if(!max)return '<p class="muted">Nessun dato da mostrare.</p>';
+  return `<div class="gfh" ${id?`data-d="${id}"`:''}>${righe.map((r,i)=>`<button type="button" class="gfhrow" data-i="${i}" data-tip="${esc(`<b>${esc(r.l)}</b><br>${fmt(r.v)}${r.n!=null?` · ${r.n} voci`:''}`)}">
+    <span class="gfhl">${esc(r.l)}</span><span class="gfhb"><u style="width:${Math.max(2,r.v/max*100)}%;background:${r.c||GF_COL[i%GF_COL.length]}"></u></span><b>${fmt(r.v)}</b></button>`).join('')}</div>`;
+}
+
+/* ---- l'elenco che sta dietro al grafico ---- */
+function gfElenco(box,titolo,righe,vai){
+  if(!righe.length){box.innerHTML='';return;}
+  box.innerHTML=`<div class="gfdet"><div class="gfdeth"><b>${esc(titolo)}</b><button class="btn ghost" data-chiudi type="button">Chiudi</button></div>
+    <table class="grid mini"><tbody>${righe.slice(0,40).map((r,i)=>`<tr ${vai?`class="clk" data-r="${i}" tabindex="0"`:''}><td>${r[0]}</td><td>${r[1]||''}</td><td class="num">${r[2]||''}</td></tr>`).join('')}</tbody></table>
+    ${righe.length>40?`<p class="muted">Primi 40 di ${righe.length}.</p>`:''}</div>`;
+  box.querySelector('[data-chiudi]').onclick=()=>{box.innerHTML='';};
+  if(vai)box.querySelectorAll('tr[data-r]').forEach(tr=>{const f=()=>vai(righe[+tr.dataset.r]);tr.onclick=f;tr.onkeydown=e=>{if(e.key==='Enter')f();};});
+  box.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+
+/* ---- il periodo dei grafici economici ---- */
+function gfPeriodo(k){
+  const t=todayISO(),y=+t.slice(0,4);
+  if(k==='mese')return [t.slice(0,8)+'01',t];
+  if(k==='12m')return [addDays(t,-364),t];
+  if(k==='scorso')return [`${y-1}-01-01`,`${y-1}-12-31`];
+  return [`${y}-01-01`,t];
+}
+
+function renderGrafici(){
+  const u=ui('graf');u.per=u.per||'anno';u.orz=u.orz||90;
+  const t=todayISO();
+  const md=S.mezzi.filter(m=>!ARCH(m)&&!FUORI_FLOTTA(m.stato)&&inScope('mezzi',m));
+  const ok=k=>{try{return tabOk(k);}catch(e){return false;}};
+  const pannelli=[];
+  const P=(id,titolo,sub,corpo,largo)=>pannelli.push(`<section class="gfcard ${largo?'wide':''}" aria-labelledby="gf_${id}"><header><h3 id="gf_${id}">${esc(titolo)}</h3>${sub?`<span class="muted">${sub}</span>`:''}</header>${corpo}<div data-det="${id}"></div></section>`);
+
+  /* 1 · la flotta oggi */
+  const per=new Map();
+  for(const m of md){const l=dispo(m).label;if(!per.has(l))per.set(l,[]);per.get(l).push(m);}
+  const ordine=['A noleggio','Disponibile','In uso'];
+  const stati=[...per.keys()].sort((a,b)=>{const i=ordine.indexOf(a),j=ordine.indexOf(b);return (i<0?9:i)-(j<0?9:j)||a.localeCompare(b);});
+  const colStato={'A noleggio':'#208295','Disponibile':'#6b8f3c','In uso':'#e0a030'};
+  const itemsF=stati.map(s=>({l:s,v:per.get(s).length,c:colStato[s]}));
+  P('flotta','La flotta oggi',`${md.length} mezzi in flotta`,gfDonut(itemsF,{centro:String(md.length),sotto:'mezzi',id:'flotta'}));
+
+  /* 2 · scadenze nelle prossime settimane */
+  {
+    const sc=scadenzeAll();const sett=[];
+    const lun=addDays(t,-((fromISO(t).getUTCDay()+6)%7));
+    const cols=[{l:'Scadute',v:[0,0,0],dati:[]}];
+    for(let i=0;i<10;i++)cols.push({l:i===0?'Questa':'+'+i,v:[0,0,0],dati:[],da:addDays(lun,i*7),a:addDays(lun,i*7+6)});
+    for(const x of sc){
+      let c=null;
+      if(x.giorni<0)c=cols[0];else c=cols.slice(1).find(k=>x.data>=k.da&&x.data<=k.a);
+      if(!c)continue;
+      const k=x.liv==='scaduta'?0:x.liv==='imminente'?1:2;
+      c.v[k]++;c.dati.push(x);
+    }
+    cols[0].v=[cols[0].dati.length,0,0];
+    cols.forEach(c=>c.dati.sort((a,b)=>a.data<b.data?-1:1));
+    u.__sc=cols;
+    P('scad','Scadenze nelle prossime settimane','settimane dal lunedì',gfBars(cols,[{l:'Scadute',c:'#c9553d'},{l:'Entro 7 giorni',c:'#e0a030'},{l:'Più avanti',c:'#208295'}],{id:'scad'}),true);
+  }
+
+  /* 3 · occupazione dei mezzi (diagramma a barre del tempo) */
+  if(ok('contratti')){
+    const orz=+u.orz,da=addDays(t,-Math.round(orz/6)),a=addDays(da,orz);
+    const tot=(+fromISO(a)-+fromISO(da))/DAY;
+    const cont=S.rows.filter(r=>r.targa&&r.inizio&&r.fine&&r.inizio<=a&&r.fine>=da);
+    const targhe=[...new Set(cont.map(r=>r.targa))].sort();
+    const libere=md.filter(m=>!targhe.includes(m.targa)).length;
+    const riga=tg=>{
+      const bar=cont.filter(r=>r.targa===tg).map(r=>{
+        const s=r.inizio<da?da:r.inizio,e=r.fine>a?a:r.fine;
+        const l=(+fromISO(s)-+fromISO(da))/DAY/tot*100,w=Math.max(((+fromISO(e)-+fromISO(s))/DAY+1)/tot*100,0.8);
+        const cli=r.cliente||r.societa||'';
+        const tip=`<b>${esc(tg)}</b> · ${esc(cli)}<br>${fmtD(r.inizio)} → ${fmtD(r.fine)}${r.numero?`<br>Contratto ${esc(r.numero)}`:''}`;
+        const cls=r.fine<t?'fin':r.inizio>t?'fut':'run';
+        return `<button type="button" class="gfgb ${cls}" style="left:${l}%;width:${w}%" data-n="${esc(r.numero||'')}" data-tip="${esc(tip)}" aria-label="${esc(tg+' '+cli)}">${w>9?esc(cli):''}</button>`;}).join('');
+      return `<div class="gfg"><span class="gfgl">${esc(tg)}</span><div class="gfgt">${bar}</div></div>`;};
+    const oggi=(+fromISO(t)-+fromISO(da))/DAY/tot*100;
+    const sel=`<div class="gfctl"><label>Orizzonte <select class="input" data-orz>${[[45,'45 giorni'],[90,'3 mesi'],[180,'6 mesi'],[365,'12 mesi']].map(([v,l])=>`<option value="${v}" ${orz===v?'selected':''}>${l}</option>`).join('')}</select></label>
+      <span class="gflegs row"><span class="gfleg"><i style="background:#8a9aa3"></i>concluso</span><span class="gfleg"><i style="background:#208295"></i>in corso</span><span class="gfleg"><i style="background:#e0a030"></i>da iniziare</span></span></div>`;
+    P('occ','Occupazione dei mezzi',`${targhe.length} con contratto, ${libere} senza nel periodo`,
+      `${sel}<div class="gfgantt" style="--oggi:${oggi}%"><div class="gfgax"><span>${fmtD(da)}</span><span>oggi</span><span>${fmtD(a)}</span></div>
+        <div class="gfgrows">${targhe.slice(0,40).map(riga).join('')||'<p class="muted">Nessun contratto nel periodo.</p>'}</div>
+        ${targhe.length>40?`<p class="muted">Primi 40 mezzi di ${targhe.length}.</p>`:''}</div>`,true);
+  }
+
+  /* 4 · fatturato per mese */
+  if(ok('fatturazione')){
+    const mesi=[];let c=new Date(Date.UTC(+t.slice(0,4),+t.slice(5,7)-1,1));
+    for(let i=11;i>=0;i--){const d=new Date(Date.UTC(c.getUTCFullYear(),c.getUTCMonth()-i,1));mesi.push(d.toISOString().slice(0,7));}
+    const fat=S.fat.filter(f=>f.stato!=='Annullata'&&f.data);
+    const cols=mesi.map(m=>{const fm=fat.filter(f=>f.data.slice(0,7)===m);
+      const s=fn=>r2(fm.filter(fn).reduce((a,f)=>a+(+f.imponibile||0),0));
+      return {l:gfMese(m),v:[s(f=>f.stato==='Pagata'),s(f=>f.stato==='Fattura emessa SDI'),s(f=>['Bozza','Inviata ad amministrazione'].includes(f.stato))],dati:fm,m};});
+    u.__fat=cols;
+    const tot=cols.reduce((a,x)=>a+x.v.reduce((p,q)=>p+q,0),0);
+    P('fat','Fatturato per mese (imponibile)',`12 mesi · ${gfE(tot)}`,gfBars(cols,[{l:'Pagata',c:'#6b8f3c'},{l:'Fattura emessa',c:'#208295'},{l:'Bozza o in amministrazione',c:'#e0a030'}],{fmt:v=>gfE(v).replace(',00',''),id:'fat'}),true);
+  }
+
+  /* 5 · ricavi e costi (scheda economica di tutti i mezzi) */
+  if(ok('margini')){
+    const [pa,pb]=gfPeriodo(u.per);
+    const costi=new Map(),ricavi=new Map();
+    for(const m of md){
+      let e;try{e=schedaEconomica(m.targa,pa,pb);}catch(x){continue;}
+      for(const [arr,mp] of [[e.costi,costi],[e.ricavi,ricavi]])for(const x of arr){
+        const v=mp.get(x.voce)||{v:0,n:0};v.v=r2(v.v+x.importo);v.n+=x.n||0;mp.set(x.voce,v);}
+    }
+    const lista=mp=>[...mp.entries()].map(([l,x])=>({l,v:x.v,n:x.n})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v).slice(0,8);
+    const tc=[...costi.values()].reduce((a,x)=>a+x.v,0),tr=[...ricavi.values()].reduce((a,x)=>a+x.v,0);
+    const sel=`<div class="gfctl"><label>Periodo <select class="input" data-per>${[['anno','Anno in corso'],['12m','Ultimi 12 mesi'],['mese','Mese in corso'],['scorso','Anno scorso']].map(([v,l])=>`<option value="${v}" ${u.per===v?'selected':''}>${l}</option>`).join('')}</select></label>
+      <span class="gfkpi"><small>Ricavi</small><b>${gfE(tr)}</b></span><span class="gfkpi"><small>Costi</small><b>${gfE(tc)}</b></span>
+      <span class="gfkpi ${tr-tc<0?'neg':'pos'}"><small>Margine</small><b>${gfE(tr-tc)}</b></span></div>`;
+    P('eco','Ricavi e costi dei mezzi',`${fmtD(pa)} – ${fmtD(pb)}`,`${sel}<div class="gf2"><div><h4>Ricavi</h4>${gfHBars(lista(ricavi).map(x=>({...x,c:'#6b8f3c'})),{fmt:gfE,id:'ric'})}</div>
+      <div><h4>Costi</h4>${gfHBars(lista(costi).map(x=>({...x,c:'#c9553d'})),{fmt:gfE,id:'cos'})}</div></div>`,true);
+  }
+
+  /* 6 · verbali e mancati pedaggi */
+  if(ok('vrb')){
+    const pv=new Map();for(const v of S.vrb){const s=v.stato||'Senza stato';pv.set(s,(pv.get(s)||0)+1);}
+    const vi=[...pv.entries()].map(([l,v])=>({l,v})).sort((a,b)=>b.v-a.v).slice(0,8);
+    P('vrb','Verbali per stato',`${S.vrb.length} verbali`,gfHBars(vi,{id:'vrb'}));
+  }
+  if(ok('mp')&&typeof mpTotale==='function'){
+    const pm=new Map();for(const p of S.mp){const s=p.stato||'Senza stato';const o=pm.get(s)||{v:0,n:0};o.v=r2(o.v+(+p.importoPratica||mpTotale(p)||0));o.n++;pm.set(s,o);}
+    const mi=[...pm.entries()].map(([l,x])=>({l,v:x.v,n:x.n})).sort((a,b)=>b.v-a.v);
+    P('mp','Mancati pedaggi per stato',`${S.mp.length} pratiche`,gfHBars(mi,{fmt:gfE,id:'mp'}));
+  }
+
+  /* 7 · note spese per categoria */
+  if(ok('ns')){
+    const note=S.ns.filter(n=>nsAmm()||nsMia(n)),cod=new Set(note.map(n=>n.codice));
+    const righe=S.nsr.filter(r=>cod.has(r.nota));
+    const pc=new Map();for(const r of righe){const k=r.categoria||'Altro';pc.set(k,r2((pc.get(k)||0)+(+r.importo||0)));}
+    const it=[...pc.entries()].map(([l,v])=>({l,v,fmt:gfE})).sort((a,b)=>b.v-a.v);
+    const tot=it.reduce((a,x)=>a+x.v,0);
+    P('ns','Note spese per categoria',`${note.length} note`,gfDonut(it,{centro:gfE(tot).replace(',00',''),sotto:'totale',id:'ns'}));
+  }
+
+  $('#main').innerHTML=pageHead('Grafici e analisi',`Situazione al ${fmtD(t)}. Passa sopra per leggere i valori, clicca per aprire l’elenco.`)+
+    `<div class="gfgrid2">${pannelli.join('')}</div>`;
+  const m=$('#main');gfTipInit(m);
+
+  /* ---- interazioni ---- */
+  const det=id=>m.querySelector(`[data-det="${id}"]`);
+  const su=(id,sel,fn)=>m.querySelectorAll(`[data-d="${id}"] ${sel}`).forEach(el=>{el.onclick=()=>fn(+el.dataset.i);el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fn(+el.dataset.i);}};});
+  su('flotta','[data-i]',i=>{const s=itemsF.filter(x=>x.v>0)[i].l;
+    gfElenco(det('flotta'),`${s} · ${per.get(s).length} mezzi`,per.get(s).map(x=>[`<b>${esc(x.targa)}</b>`,esc(mezzoName(x)),'']),r=>{S.tab='mezzi';render();});});
+  su('scad','[data-i]',i=>{const c=u.__sc[i];
+    gfElenco(det('scad'),`${c.l==='Scadute'?'Scadute':'Settimana '+(c.da?fmtD(c.da)+' – '+fmtD(c.a):'')} · ${c.dati.length}`,
+      c.dati.map(x=>[esc(x.titolo),esc(x.cat),fmtD(x.data)]),r=>{S.tab='cruscotto';render();});});
+  su('fat','[data-i]',i=>{const c=u.__fat[i];
+    gfElenco(det('fat'),`Proforma di ${monthLabel(c.m+'-01')} · ${c.dati.length}`,
+      c.dati.map(f=>[`<b>${esc(f.codice||'')}</b> ${esc(f.cliente||'')}`,esc(f.stato||''),gfE(+f.imponibile||0)]),r=>{S.tab='fatturazione';render();});});
+  m.querySelectorAll('.gfgb').forEach(b=>b.onclick=()=>{const n=b.dataset.n;if(n)openNav({mod:'rows',id:n});});
+  m.querySelectorAll('[data-d="vrb"] .gfhrow').forEach(b=>b.onclick=()=>{S.tab='vrb';render();});
+  m.querySelectorAll('[data-d="mp"] .gfhrow').forEach(b=>b.onclick=()=>{S.tab='mp';render();});
+  su('ns','[data-i]',i=>{
+    const note=S.ns.filter(n=>nsAmm()||nsMia(n)),cod=new Set(note.map(n=>n.codice));
+    const cat=[...new Set(S.nsr.filter(r=>cod.has(r.nota)).map(r=>r.categoria||'Altro'))].map(c=>[c,r2(S.nsr.filter(r=>cod.has(r.nota)&&(r.categoria||'Altro')===c).reduce((a,r)=>a+(+r.importo||0),0))]).sort((a,b)=>b[1]-a[1]);
+    const c=cat[i][0];
+    gfElenco(det('ns'),`${c} · ${gfE(cat[i][1])}`,S.nsr.filter(r=>cod.has(r.nota)&&(r.categoria||'Altro')===c).map(r=>[esc(r.descrizione||r.fornitore||c),`${esc(r.nota)} · ${fmtD(r.data)}`,gfE(+r.importo||0)]),r=>{S.tab='ns';render();});});
+  const so=m.querySelector('[data-orz]');if(so)so.onchange=()=>{u.orz=+so.value;renderGrafici();};
+  const sp=m.querySelector('[data-per]');if(sp)sp.onchange=()=>{u.per=sp.value;renderGrafici();};
+}
+VIEWS.grafici=()=>renderGrafici();
+
+/* ---- menu, permessi e stile ---- */
+{
+  const g=MENU[0];
+  if(g&&!g.items.some(([k])=>k==='grafici'))g.items.push(['grafici','Grafici e analisi']);
+  for(const k of ['flotta','operativo','amministrazione']){const r=RUOLI[k];if(r&&r.tabs&&!r.tabs.includes('grafici'))r.tabs.push('grafici');}
+  if(typeof AREE!=='undefined'&&!AREE.some(a=>a.k==='grafici'))
+    AREE.push({k:'grafici',l:'Grafici e analisi',tabs:['grafici'],store:[]});
+}
+(()=>{
+  const s=document.createElement('style');s.textContent=`
+.gfgrid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+.gfcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;min-width:0}
+.gfcard.wide{grid-column:1/-1}
+.gfcard header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-bottom:10px}
+.gfcard h3{margin:0;font-size:16px;color:var(--navy)}
+.gfcard h4{margin:6px 0;font-size:13px;color:var(--muted);font-weight:600}
+.gfsvg{width:100%;height:auto;max-height:270px;display:block}
+.gfgrid{stroke:var(--line);stroke-width:1}
+.gfax{fill:var(--muted);font-size:11px}
+.gfbar{cursor:pointer;outline:none}
+.gfbar rect{transition:opacity .15s}
+.gfbar:hover rect,.gfbar:focus rect{opacity:.82}
+.gfbar:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+.gfdonut{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+.gfdonut svg{width:210px;max-width:100%;flex:none}
+.gfseg{cursor:pointer;transition:transform .15s;transform-origin:100px 100px;outline:none}
+.gfseg:hover,.gfseg:focus{transform:scale(1.045)}
+.gfc1{fill:var(--ink);font-size:21px;font-weight:700}
+.gfc2{fill:var(--muted);font-size:11px}
+.gflegs{display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px}
+.gflegs.row{flex-direction:row;flex-wrap:wrap;gap:6px 14px;margin-top:6px}
+.gfleg{display:flex;align-items:center;gap:7px;font-size:13px;background:none;border:0;color:var(--ink);padding:3px 4px;border-radius:6px;text-align:left}
+button.gfleg{cursor:pointer}button.gfleg:hover{background:var(--surface-2)}
+.gfleg i,.gftip i{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none;margin-right:5px}
+.gfleg b{margin-left:auto;padding-left:10px;font-variant-numeric:tabular-nums}
+.gfh{display:flex;flex-direction:column;gap:6px}
+.gfhrow{display:grid;grid-template-columns:minmax(90px,28%) 1fr auto;align-items:center;gap:10px;background:none;border:0;color:var(--ink);padding:4px 6px;border-radius:8px;cursor:pointer;text-align:left;font:inherit;font-size:13px}
+.gfhrow:hover,.gfhrow:focus-visible{background:var(--surface-2)}
+.gfhb{height:12px;background:var(--surface-2);border-radius:6px;overflow:hidden;display:block}
+.gfhb u{display:block;height:100%;border-radius:6px;text-decoration:none;transition:width .4s}
+.gfhrow b{font-variant-numeric:tabular-nums}
+.gf2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+.gfctl{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin-bottom:10px}
+.gfctl label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.gfkpi{display:flex;flex-direction:column;font-size:12px;color:var(--muted)}
+.gfkpi b{font-size:17px;color:var(--ink)}
+.gfkpi.pos b{color:var(--ok)}.gfkpi.neg b{color:var(--danger)}
+.gfgantt{position:relative}
+.gfgax{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin:0 0 4px 92px}
+.gfgrows{max-height:440px;overflow:auto;position:relative}
+.gfg{display:flex;align-items:center;gap:8px;height:26px}
+.gfgl{width:84px;flex:none;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.gfgt{position:relative;flex:1;height:18px;background:var(--surface-2);border-radius:5px;overflow:hidden}
+.gfgt::after{content:"";position:absolute;left:var(--oggi);top:0;bottom:0;width:2px;background:var(--danger);opacity:.7;pointer-events:none}
+.gfgb{position:absolute;top:2px;height:14px;border:0;border-radius:4px;font-size:10px;line-height:14px;color:#fff;padding:0 4px;overflow:hidden;white-space:nowrap;cursor:pointer;text-align:left}
+.gfgb.run{background:#208295}.gfgb.fin{background:#8a9aa3}.gfgb.fut{background:#e0a030;color:#222}
+.gfgb:hover,.gfgb:focus-visible{filter:brightness(1.15);outline:2px solid var(--navy)}
+.gfdet{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
+.gfdeth{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.gfdet tr.clk{cursor:pointer}
+.gftip{position:fixed;display:none;z-index:9999;background:var(--bar);color:var(--bar-ink);padding:7px 10px;border-radius:8px;font-size:12px;line-height:1.45;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.25);max-width:260px}
+@media (max-width:640px){.gfgrid2{grid-template-columns:1fr}.gfgax{margin-left:0}.gfgl{width:70px}}
+@media (prefers-reduced-motion:reduce){.gfseg,.gfhb u{transition:none}}`;
+  document.head.append(s);
+})();
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();

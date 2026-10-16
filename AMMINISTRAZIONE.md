@@ -288,6 +288,52 @@ finita in un F24, vale la riga dell'F24 — è quella che si versa.
 
 ---
 
+## Il canone rapportato ai giorni: il mese commerciale
+
+Il canone di noleggio si calcola sui **giorni di utilizzo**, ma il mese vale
+sempre **30 giorni**, qualunque sia il mese di calendario:
+
+- un mese intero vale il canone per intero (ottobre di 31 giorni, febbraio di 28);
+- un mese parziale vale `canone ÷ 30 × giorni di utilizzo`, e mai più di un canone;
+- un contratto su più mesi si calcola mese per mese: dal 15 ottobre al 10
+  dicembre sono 17/30 di ottobre, novembre intero e 10/30 di dicembre.
+
+Esempio con canone 900 €: 15–31 ottobre = 17 giorni = 510 €; 1–15 ottobre = 15
+giorni = 450 €; 10–28 febbraio = 19 giorni = 570 €; 2–31 ottobre = 30 giorni =
+900 €. La regola è la stessa nel registro, nelle proforma, nel foglio Excel e
+nella scheda economica del mezzo, così il margine usa gli stessi numeri della
+fattura. Si applica anche ai canoni dei contratti dei fornitori.
+
+## Contratti con più targhe: il costo per mezzo
+
+Per il margine di un veicolo il canone di un contratto che ne copre dieci va
+diviso. Nella scheda del contratto (*Condizioni economiche*) si sceglie come
+leggere il canone:
+
+- **Per veicolo**: il canone indicato è già quello di ogni targa (come prima).
+- **Totale del contratto, da ripartire**: il canone è uno solo per tutte le
+  targhe. *In parti uguali* lo divide per il numero di targhe; *Importi per
+  targa* usa gli importi scritti nel campo apposito, nella forma
+  `GA123BC=450; GB456CD=520,50`. Se gli importi non tornano con il totale, o
+  mancano targhe, il contratto non si salva e dice che cosa non torna.
+
+I centesimi che avanzano vanno alle prime targhe: la somma delle quote è sempre
+il totale. La scheda economica del mezzo prende la sua quota, e lo dichiara.
+
+**Fatture con una riga sola per tutto il contratto.** Se una riga della fattura
+passiva non ha la targa ma cita un contratto che il gestionale conosce, la riga
+si divide in una quota per targa, in proporzione alle quote del contratto. Succede
+all'importazione; per le righe già entrate c'è il pulsante **Ripartisci sulle
+targhe del contratto** nella finestra delle righe. Ogni quota è marcata
+«Ripartita» e porta l'importo della riga originale. Se il contratto non c'è, la
+riga resta com'è e il gestionale lo dice.
+
+Un limite da conoscere: la riga si divide per intero, anche quando contiene
+voci che non sono canoni (km eccedenti, spese). Se vanno attribuite a una targa
+sola, si corregge la riga prima di ripartire.
+
+---
+
 ## Margini per veicolo
 
 La domanda è semplice — questo mezzo rende o no — e la risposta richiede di
@@ -335,6 +381,111 @@ fonti erano spente: un numero senza la sua provenienza non serve a decidere.
 
 ---
 
+## Note di credito e bolli di fattura
+
+**Note di credito.** Nell'elenco delle fatture passive (e delle attive) una
+nota di credito (TD04) si riconosce subito: riga evidenziata, etichetta «Nota di
+credito», importo, IVA e totale **con il segno meno e in rosso**. I totali in
+testata la sottraggono (un'imponibile di 1.000 € e una nota di 200 € fanno
+800 €), e il filtro **Documento** separa le fatture dalle note.
+
+**Bolli di fattura.** È l'imposta di 2 € sui documenti con operazioni senza IVA,
+cosa diversa dal «bollo auto» di *Bolli e tasse*. L'elenco ha:
+
+- la colonna **Bollo**: l'importo quando c'è, oppure «dovuto, non indicato»;
+- il filtro **Bollo** (con bollo / dovuto non indicato / senza bollo);
+- nella testata, il totale dei bolli e quanti ne mancano;
+- il pulsante **Bolli di fattura**: riepilogo per trimestre.
+
+«Dovuto non indicato» scatta quando le righe con natura N1, N2.x, N3.x o N4
+superano **77,47 €** e la fattura non porta nessun bollo. N5, N6 e N7 non
+contano. È un controllo, non una certezza: le esclusioni sono più di quelle
+che il gestionale conosce, e l'ultima parola è del commercialista.
+
+Dall'XML si legge sia `ImportoBollo` sia il solo `BolloVirtuale=SI` (che vale
+2 €). Nelle fatture ricevute il bollo è già dentro il totale e la prima nota lo
+registra su «Imposta di bollo». Per le **fatture emesse** il riepilogo dà, per
+trimestre, il numero di fatture con bollo, l'importo, il **codice tributo F24**
+(2521, 2522, 2523, 2524) e la scadenza (31 maggio, 30 settembre, 30 novembre,
+28 febbraio, spostate al primo giorno lavorativo). Se il primo trimestre non
+supera 250 € il versamento slitta al secondo; se i primi due non superano 250 €,
+al terzo. Il gestionale **non** compila l'F24: prepara i numeri.
+
+---
+
+## Banca e carte
+
+Sezione **Banca e carte**, nel gruppo Amministrazione: l'archivio dei conti
+correnti, delle carte di credito e prepagate, dei conti postali e della cassa.
+Per ognuno: nome, banca, IBAN, ultime cifre, società, saldo iniziale con data,
+fido o plafond e, per le carte, il conto su cui si addebita e il giorno.
+
+**Il nome del conto è il suo identificativo**: è quello che compare nella
+colonna «Conto» della prima nota, e per questo non si cambia dopo i primi
+movimenti. Ogni conto ha un saldo che segue la prima nota:
+
+- conto corrente e cassa: saldo iniziale + dare − avere;
+- carta di credito: è un debito, cresce con le spese e scende con il
+  pagamento dell'estratto (iniziale + avere − dare); il disponibile è il fido
+  meno il debito.
+
+Quando segni una fattura **pagata** o **incassata**, il campo «Conto» è una
+scelta tra i conti censiti (il predefinito per primo): pagare con una carta
+mette l'avere sulla carta, non sulla banca. Dalla scheda di ogni conto:
+
+- **Estratto conto** con saldo progressivo, filtro per periodo, PDF ed Excel;
+- **Nuovo movimento**: commissioni, interessi, stipendi, prelievi e versamenti
+  di contante, o un altro conto a tua scelta (registrazione `MB-aaaa-nnnn`);
+- **Giroconto** tra conti e **addebito dell'estratto della carta** (propone
+  importo, conto e giorno; registrazione `GC-aaaa-nnnn`);
+- **Riconciliazione**: spunta le righe verificate sull'estratto della banca; il
+  «saldo riconciliato» deve coincidere con quello che dice la banca.
+
+La prima nota si filtra per conto e per stato di riconciliazione.
+
+**Che cosa non fa.** Non è collegato alla banca: il saldo è contabile, non
+quello reale. Non importa gli estratti (CBI, CSV, PSD2) e non abbina i
+movimenti da solo: la riconciliazione è manuale. Senza nessun conto censito
+tutto funziona come prima, con il conto di Parametri.
+
+---
+
+## Note spese dei dipendenti
+
+Sezione **Note spese**. Il dipendente raccoglie le spese fatte per l'azienda in
+una nota, con una riga per scontrino (data, categoria, esercente, importo, IVA,
+targa, e **come l'ha pagata**: anticipo suo, carta aziendale, contanti
+aziendali) e gli scontrini come allegati della nota.
+
+Percorso: **Bozza → Presentata → Approvata (o Respinta) → Rimborsata**.
+
+- **Chi non fa parte dell'amministrazione** vede e modifica solo le *sue* note,
+  e solo in bozza o respinte. Il collegamento è l'email: quella con cui entra
+  deve comparire nell'anagrafica del dipendente.
+- **Approva** (amministrazione): nasce la scrittura di prima nota
+  `NS-aaaa-nnnn`. Costi in dare per categoria (con la targa sulla riga, se c'è),
+  IVA a credito solo sulle righe dove hai scelto «IVA detraibile: Sì»; in avere
+  *Debiti verso dipendenti* per le spese anticipate, il conto della carta per
+  quelle con carta, la *Cassa* per i contanti.
+- **Rimborsa**: per le spese anticipate, dal conto scelto (`NS-…/RIM`), in
+  contanti, oppure **in busta paga** (in quel caso non si registra nessuna
+  uscita e il debito resta aperto finché non lo chiude il cedolino).
+- **Annulla le scritture** riporta la nota a «Presentata».
+- **Respingi** chiede il motivo, che il dipendente legge nell'elenco.
+- La nota si stampa in **PDF** per la firma.
+
+**Costo per veicolo.** Le righe con la targa, nelle note approvate, entrano nella
+scheda economica del mezzo (fonte «Note spese», accesa di default) al netto
+dell'IVA detraibile.
+
+**Cautele.** L'IVA è detraibile solo se la scegli tu: senza fattura intestata,
+nel dubbio lascia «No» e l'IVA entra nel costo. Il gestionale non calcola
+rimborsi chilometrici né indennità di trasferta e non verifica massimali o il
+trattamento fiscale delle singole spese: è un'organizzazione del lavoro, non un
+parere fiscale.
+
+---
+
 ## Parametri nuovi
 
 In **Parametri**, righe 31–34 del foglio:
@@ -360,6 +511,10 @@ Vale la pena dirlo chiaramente:
   corrente. Prima di versare, conferma importi, codici e scadenze con il
   commercialista;
 - **non produce il modello F24 ministeriale**: produce un riepilogo leggibile;
+- **non è collegato alla banca**: i saldi sono quelli della prima nota, e la
+  riconciliazione con l'estratto è manuale;
+- **non compila né versa i bolli di fattura**: li riepiloga per trimestre con
+  codici e scadenze da confermare;
 - **non è una contabilità generale**: è una prima nota che quadra e un registro
   acquisti e vendite, pensati per essere passati a chi tiene la contabilità;
 - **non ripartisce da solo i costi di una fattura su più veicoli**: attribuisce

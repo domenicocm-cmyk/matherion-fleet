@@ -109,6 +109,19 @@ cruscotto: chi non ha il permesso non li vede comparire. Filiale, Officina e Sol
 aprirle, neanche la sola lettura che vede tutto il resto. Anche le scadenze
 fiscali del cruscotto seguono la stessa regola. Vedi AMMINISTRAZIONE.md.
 
+## Invitare una persona
+
+Non c'è una registrazione da fare: chi è nell'elenco entra con il proprio
+account Microsoft 365. Per avvisarla, sulla riga della persona si preme
+**Invita**: si apre il messaggio già scritto, con il link, l'account da usare,
+il profilo e che cosa fare se compare «Questo account non è abilitato». Si
+modifica a piacere e si apre nella propria posta, oppure si copia.
+
+Il gestionale **non spedisce** l'invito da solo: servirebbe un permesso di
+invio posta in più nella registrazione Entra, e non lo chiede. Se i dati stanno
+su SharePoint, la persona va abilitata anche lì (condividi la raccolta con lei):
+l'invito del gestionale non lo fa al posto tuo.
+
 ## Permessi per singola persona
 
 Il ruolo dà il profilo di partenza; sopra si possono mettere **eccezioni per
@@ -145,6 +158,26 @@ Chi accede con un account che non è in elenco, o che è stato disattivato, vede
 **Il primo accesso.** Finché il foglio `Utenti` è vuoto, chi entra è Master:
 serve a configurare. Appena aggiungi la prima riga la regola diventa
 vincolante, quindi **la prima riga dev'essere la tua**.
+
+## Banca e note spese: chi ci arriva
+
+**Banca e carte** appartiene all'area *Amministrazione*: la vedono il Master e
+chi ha il ruolo Amministrazione (o il permesso «amm»). **Note spese** ha un'area
+sua, *Note spese dei dipendenti*: la vedono anche l'Ufficio flotta e l'Operativo,
+ma ciascuno soltanto le note che ha intestate (la sua email deve comparire
+nell'anagrafica dei dipendenti). Approvare e rimborsare spetta
+all'amministrazione. La Sola lettura non entra. Come per il resto, è l'ordine
+dentro il gestionale: chi può aprire il file su SharePoint vede comunque tutto.
+
+---
+
+## Ufficio flotta: contratti e mancati pedaggi
+
+L'Ufficio flotta genera e stampa i contratti di noleggio e registra le pratiche
+di mancato pedaggio (sezione sotto Verbali). La fatturazione, dove quei
+pedaggi vengono riaddebitati, resta dell'amministrazione. Vedi RIADDEBITI.md.
+
+---
 
 ## Che cosa protegge che cosa
 
