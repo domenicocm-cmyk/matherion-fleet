@@ -1,7 +1,8 @@
 MATHERION — AGGIORNAMENTO GRAFICO STUDIO
+Base applicativa: versione 2026.10.19 dei nuovi allegati
 
 CONTENUTO DEL PACCHETTO
-index.html: pagina principale aggiornata (sostituisce index(4).html come home).
+index.html: pagina principale aggiornata (sostituisce index(6).html come home).
 burago.html: pagina della filiale aggiornata.
 sw.js: versione cache aggiornata per il nuovo tema.
 restyling_python.py: sorgente Python che genera le illustrazioni SVG e incorpora il tema.
@@ -19,6 +20,7 @@ SVG e CSS sono incorporati: non servono librerie grafiche esterne né Python sul
 
 NOTE
 Logica applicativa originale conservata; aggiornati solo il tema e gli identificatori di versione.
+Verifiche: confronto integrale con gli allegati per preservare tutte le funzioni e controllo sintattico JavaScript; verifica browser di navigazione, temi e larghezza cellulare. Corretto il ritorno a capo degli indirizzi lunghi nei Parametri.
 Il pacchetto va caricato sul sito: il download da solo non aggiorna la piattaforma online.
 Per rigenerare da originali: python restyling_python.py CARTELLA_ORIGINALI CARTELLA_OUTPUT
-La cartella originali deve contenere index(4).html, burago.html e sw.js senza il tema Studio già applicato.
+La cartella originali deve contenere index(6).html, burago(2).html e sw(2).js senza il tema Studio già applicato.

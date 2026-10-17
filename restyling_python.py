@@ -40,7 +40,7 @@ paths={
 
 def build(src, out):
     out.mkdir(parents=True,exist_ok=True)
-    source=(src/'index(4).html').read_text()
+    source=(src/'index(6).html').read_text()
     for k,v in re.findall(r"^\s*(\w+):'([^']+)'",source[source.find('const ICO={'):source.find('const aspetto=')],re.M):paths.setdefault(k,v)
     paths['calendario']=paths.get('cal',paths['cruscotto'])
     css='''
@@ -110,6 +110,7 @@ body.app .scheda{border-radius:14px;padding:15px;box-shadow:var(--studio-shadow)
 @media(max-width:620px){.layout main{padding:18px 14px 90px}.brand h1{font-size:16px}.hero h2{font-size:32px}.hero .logobox img{height:52px}.hero .actions{flex-direction:column}.hero .actions .btn{justify-content:center;min-height:46px}.hero-card::before{height:145px}.hero-card{padding:20px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.kpi{padding:17px 13px;min-height:130px}.kpi b{font-size:24px;padding-right:0;max-width:calc(100% - 22px)}.kpi span{font-size:11px}.kpi::before{right:10px;top:16px;width:17px;height:17px}.kpi::after{width:52px;height:52px}.pagehead h2::before{font-size:8px}.ledger div{padding:12px}.toolbar{padding:12px}.panel{padding:17px}.input,select.input,textarea.input{font-size:16px}body.app .drawer header{padding:14px}body.app .drawer header h2{font-size:18px}body.app .pagehead .piu{flex-shrink:0}}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.kpi:hover{transform:none}}
+@media screen and (max-width:620px){#main code{overflow-wrap:anywhere;word-break:break-word}}
 @media print{.hero-card::before,.pagehead h2::before,.kpi::before,.kpi::after{display:none!important}.pagehead,.kpi,.panel,.card,.ledger,.hero-card{box-shadow:none!important;background:white}.pagehead{padding:0;border:0}.grid tbody tr{background:white!important}}
 '''
     css+='\n:root{--studio-fleet:url("'+illustration()+'")}\n'
@@ -118,12 +119,12 @@ body.app .scheda{border-radius:14px;padding:15px;box-shadow:var(--studio-shadow)
     for k,path in paths.items():
         uri=svg_uri(f'<path d="{path}" fill="none" stroke="black" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>')
         css+=f'.sitem[data-tab="{k}"],.kpi[data-go="{k}"]{{--studio-icon:url("{uri}")}}\n'
-    for srcname,dstname in [('index(4).html','index.html'),('burago.html','burago.html')]:
+    for srcname,dstname in [('index(6).html','index.html'),('burago(2).html','burago.html')]:
         text=(src/srcname).read_text()
         text=text.replace('</head>','<style id="matherion-studio-20261016">'+css+'</style>\n</head>',1)
-        text=text.replace("const APP_VERSION='2026.10.17';","const APP_VERSION='2026.10.17-studio.1';")
+        text=re.sub(r"const APP_VERSION='([^']+)';", lambda m: "const APP_VERSION='"+m[1]+"-studio.1';", text, count=1)
         (out/dstname).write_text(text)
-    sw=(src/'sw.js').read_text().replace("const VER = 'flotta-2026.10.17';","const VER = 'flotta-2026.10.17-studio.1';")
+    sw=re.sub(r"const VER = '([^']+)';", lambda m: "const VER = '"+m[1]+"-studio.1';", (src/'sw(2).js').read_text(), count=1)
     (out/'sw.js').write_text(sw)
     print('Creati index.html, burago.html e sw.js; SVG e icone incorporati.')
 
