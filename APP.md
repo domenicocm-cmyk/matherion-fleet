@@ -33,6 +33,27 @@ ripubblica a ogni salvataggio.
 Funziona identico sia con la cartella sincronizzata sia con SharePoint
 diretto, perché passa dagli stessi gestori di file.
 
+## Le note spese
+
+Dal telefono, *Oggi → Nuova spesa* (e *Altro → Le mie spese*): importo, tipo di
+spesa, come è stata pagata, mezzo se c'entra, data e **foto dello scontrino**.
+Compare solo a chi ha la scheda in **Dipendenti** con la propria email.
+
+La spesa parte come file in `App/Posta/<giorno>/` — stesso canale delle
+giornaliere, senza coda separata e senza concorrenza. Alla prossima apertura
+del registro il gestionale la ritira:
+
+- la mette nella nota del mese del dipendente, intitolata *Spese da app –
+  ottobre 2026*, **in bozza**; se la nota del mese è già presentata o approvata
+  non la tocca e ne apre una nuova;
+- sposta la foto tra gli allegati della nota (tipo *Scontrino*);
+- non importa mai due volte la stessa spesa, nemmeno se il file non si riesce
+  a cancellare dalla cassetta;
+- una spesa il cui dipendente non si riconosce, o senza importo, **resta nella
+  cassetta** e il gestionale lo dice.
+
+La nota resta in bozza: la presenta e la approva l'amministrazione, come le altre.
+
 ## Chi vede che cosa
 
 Il ruolo arriva dall'account aziendale, non si sceglie.

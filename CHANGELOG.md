@@ -114,3 +114,36 @@
   (flotta, scadenze, occupazione dei mezzi, fatturato, ricavi e costi, verbali,
   mancati pedaggi, note spese). Vedi GRAFICI.md.
 - **2026.10.17** — pubblicata il 16/10/2026
+- **2026.10.18** — pubblicata il 17/10/2026 — **Note spese dal telefono**: l'app
+  dei telefoni (versione 1.1.0) registra una spesa con importo, tipo, pagamento e
+  foto dello scontrino; il gestionale la ritira alla prima apertura nella nota del
+  mese del dipendente («Spese da app», in bozza) con lo scontrino negli allegati.
+  Nessun doppione. Vedi APP.md.
+- **2026.10.18** — pubblicata il 17/10/2026
+- **2026.10.19** — pubblicata il 17/10/2026 — verbali: importo riaddebitabile
+  al cliente anche se pagato dalla società; gestione/rinotifica sotto il
+  verbale con casella; gestione sinistro da 20 € con casella e parametro.
+  Vedi RIADDEBITI.md.
+- **2026.10.19** — pubblicata il 17/10/2026
+- **2026.10.20** — pubblicata il 19/10/2026 — **Contratti: operazioni massive**.
+  Caselle di selezione nella lista, generazione Word e/o PDF per contratto, per
+  società o tutto insieme, esportazione dell'elenco in Excel (anche un foglio per
+  società) e CSV, e degli allegati in ZIP. Vedi CONTRATTI_MASSIVI.md.
+- **2026.10.20** — pubblicata il 19/10/2026
+- **2026.10.21** — pubblicata il 19/10/2026 — **Centri di costo e costi
+  dell'appalto**. Il centro di costo del contratto arriva nel menu e abbina il
+  mezzo; «Nuovo centro di costo» nel contratto; costi per centro e per mese
+  (Fast Rent e le altre società) con Excel; il centro di costo nel riepilogo e
+  nei movimenti di Telepass e carte. Vedi CENTRI_DI_COSTO.md.
+- **2026.10.22** — pubblicata il 19/10/2026 — **Carte e movimenti per centro di
+  costo, storico del mezzo**. Centro di costo su carte e Telepass e sui
+  movimenti (anche in blocco), ricerca per numero carta, costi sul centro del
+  movimento e non sul contratto, «Storico mezzi» con tutte le modifiche nella
+  scheda economica. Vedi CENTRI_DI_COSTO.md.
+- **2026.10.22** — pubblicata il 19/10/2026
+- **2026.10.23** — pubblicata il 19/10/2026 — **Grafica Studio e canoni per
+  targa**. Tema «Studio» di index.html su tutte le pagine; il canone si
+  allinea da solo fra contratto di noleggio, scheda del mezzo e noleggi non
+  scaduti (stessa targa), con i costi del contratto fornitore accanto e le
+  modifiche nello storico. Vedi CANONI.md.
+- **2026.10.23** — pubblicata il 19/10/2026

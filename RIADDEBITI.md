@@ -63,6 +63,27 @@ L'Ufficio flotta può **generare e stampare i contratti di noleggio** (da Stampa
 contratti e dal pulsante sulla riga) e gestisce le pratiche di mancato pedaggio.
 Non apre la fatturazione.
 
+## Verbali e sinistri: addebiti selezionabili (2026.10.19)
+
+**Importo del verbale al cliente, anche se pagato dalla società.** Sul verbale
+il campo «Importo da riaddebitare al cliente» (No/Sì) fa entrare in
+fatturazione l'importo pagato anche quando ha pagato la società. La riga è
+«Riaddebito verbale», senza IVA (N1). Se l'importo pagato manca, il verbale
+finisce nel pannello «da sistemare».
+
+**Gestione amministrativa / rinotifica sotto il verbale.** Compare nel
+riepilogo subito sotto il verbale (riga rientrata «↳») con una casella per
+selezionarla o deselezionarla. Una riga deselezionata è barrata, non entra nei
+totali né nella proforma e resta da fatturare: riappare da sola il mese dopo.
+
+**Gestione sinistro (20 €).** Per ogni sinistro addebitato a un cliente compare
+sotto la franchigia la riga «Gestione sinistro», con casella. L'importo è nei
+parametri (riga «Gestione sinistro»); sul singolo sinistro il campo «Addebita
+la gestione sinistro» (Sì/No) la esclude.
+
+Ogni riga ha il suo segno «già fatturato»: annullando una proforma si liberano
+solo le sue righe.
+
 ## Che cosa non fa
 
 - non riconosce da solo la società se più clienti hanno avuto il mezzo nel
@@ -71,3 +92,5 @@ Non apre la fatturazione.
   il trattamento con l'amministrazione;
 - non ripartisce una pratica tra società in proporzione ai giorni: ogni importo
   è attribuito per targa e data.
+- l'IVA (N1, fuori campo) sull'importo del verbale riaddebitato è una proposta:
+  confermala con il commercialista.
