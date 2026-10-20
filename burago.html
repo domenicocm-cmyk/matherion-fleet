@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.24';
+const APP_VERSION='2026.10.25';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -17286,6 +17286,540 @@ async function docmEsporta(sc,targhe,c,st){
   }catch(e){toast('Esportazione non riuscita: '+e.message,true);}
   finally{busy(false);}
 }
+
+
+/* =====================================================================
+   GUIDA: LA DOMANDA, LA RISPOSTA E IL PERCORSO SULLO SCHERMO
+   ---------------------------------------------------------------------
+   Un assistente dentro il gestionale. Si scrive una domanda in italiano
+   («come devo caricare un sinistro?», «dove trovo il riepilogo delle spese
+   del centro di costo Amazon?»); la Guida capisce che cosa si vuole fare,
+   risponde e, se si vuole, accompagna passo passo: porta nella sezione
+   giusta e evidenzia sullo schermo il pulsante o il campo da usare.
+
+   Funziona sul posto, senza servizi esterni: nessun dato lascia il computer.
+   Riconosce nella domanda i centri di costo, le targhe e le società che
+   esistono nel registro, e li usa per aprire direttamente la pagina giusta.
+   I passaggi per inserire un dato si ricavano dalle schede stesse (gruppi di
+   campi, campi obbligatori, suggerimenti): se la scheda cambia, la Guida
+   cambia con lei.
+   ===================================================================== */
+
+/* ---------- 1. capire la domanda ---------- */
+const gNorm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+const gKey=w=>w.length<=4?w:w.slice(0,5);
+const gParole=s=>gNorm(s).split(' ').filter(Boolean);
+const G_STOP=new Set('il lo la le gli un una uno di del della dei delle da in con su per tra fra e ed o a al alla ai alle che chi come dove cosa quale quali mi ti si ci vi non piu mio mia miei mie devo posso voglio vorrei fare fatto sono ho ha hanno questo questa dei nel nella nei nelle'.split(' '));
+/* concetti: ogni parola è ridotta alle prime lettere, così «sinistro» e «sinistri» coincidono */
+const G_CONCETTI={
+  sin:'sinistro sinistri incidente incidenti urto danno danni cai denuncia scontro',
+  vrb:'multa multe verbale verbali infrazione sanzione rinotifica rinotificare',
+  man:'manutenzione manutenzioni officina tagliando riparazione riparare guasto fermo gomme pneumatici carrozzeria',
+  mezzo:'mezzo mezzi veicolo veicoli targa targhe furgone furgoni auto automezzo flotta',
+  cn:'contratto contratti noleggio noleggi locazione locatario',
+  cp:'leasing fornitore fornitori nlt',
+  carta:'carta carte carburante telepass pedaggio pedaggi rifornimento rifornimenti unipolmove dispositivo dispositivi viacard',
+  mov:'movimento movimenti transazione transazioni estratto',
+  cdc:'cdc appalto appalti filiale filiali commessa commesse',
+  fat:'fattura fatture fatturare fatturazione proforma',
+  fp:'passive passiva xml',
+  dip:'dipendente dipendenti autista autisti conducente assegnazione assegnazioni patente',
+  gio:'giornaliera giornaliere consegna riconsegna ritiro turno',
+  doc:'documento documenti allegato allegati libretto libretti polizza polizze',
+  scad:'scadenza scadenze scade scadono revisione bollo assicurazione scadenziario rca',
+  costi:'spese spesa costi costo riepilogo report margine margini quanto spendo spendiamo',
+  canone:'canone canoni importo importi prezzo listino',
+  storico:'storico cronologia modifiche cambiato cambiamenti',
+  soc:'societa cliente clienti anagrafica',
+  salva:'salvare salvataggio backup',
+  riadd:'riaddebito riaddebiti riaddebitare addebito addebiti',
+  numero:'numero'
+};
+const G_VERBI={
+  crea:'carico carica caricare inserisco inserire inserimento aggiungo aggiungere registro registrare creo creare nuovo nuova apro aprire segnalo segnalare compilo compilare genero generare genera',
+  trova:'dove trovo trovare vedo vedere cerco cercare elenco riepilogo mostra mostrare visualizza visualizzare consulto controllo controllare quanto',
+  esporta:'esporto esportare esportazione scarico scaricare estraggo estrarre stampo stampare excel pdf zip word',
+  importa:'importo importare importazione xml csv',
+  modifica:'modifico modificare cambio cambiare aggiorno aggiornare correggo correggere sposto spostare abbino abbinare associo associare allineo allineare',
+  elimina:'elimino eliminare cancello cancellare rimuovo rimuovere',
+  spiega:'perche cos significa spiega funziona mai'
+};
+const gInverti=d=>{const m=new Map();for(const [k,v] of Object.entries(d))for(const w of v.split(' '))m.set(gKey(w),(m.get(gKey(w))||[]).concat(k));return m;};
+const G_C=gInverti(G_CONCETTI),G_V=gInverti(G_VERBI);
+function gCapisci(q){
+  const par=gParole(q).filter(w=>!G_STOP.has(w)||G_C.has(gKey(w))||G_V.has(gKey(w)));
+  const c=new Set(),v=new Set();
+  for(const w of par){const k=gKey(w);(G_C.get(k)||[]).forEach(x=>c.add(x));(G_V.get(k)||[]).forEach(x=>v.add(x));}
+  if(/centro\s+di\s+costo|centri\s+di\s+costo/i.test(gNorm(q)))c.add('cdc');
+  if(/noleggio\s+a\s+lungo|noleggio\s+lungo|contratti?\s+di\s+leasing|leasing/i.test(gNorm(q)))c.add('cp');
+  if(/fatture?\s+passive?/i.test(gNorm(q)))c.add('fp');
+  if(/carte?\s+carburante|telepass/i.test(gNorm(q)))c.add('carta');
+  return {par,c,v};
+}
+/* le cose del registro nominate nella domanda */
+const G_GENERICHE=new Set('centro costo cdc appalto srl spa sas snc di del s r l group the e spa'.split(' '));
+function gEntita(q){
+  const nq=gNorm(q),par=new Set(gParole(q).map(gKey));
+  const out={cdc:[],targhe:[],soc:[]};
+  const tok=s=>gParole(s).filter(w=>w.length>=3&&!G_GENERICHE.has(w));
+  let best=0;const punti=[];
+  for(const c of S.cdc){
+    const t=tok(c.nome);const n=t.filter(w=>par.has(gKey(w))).length;
+    if(n>0){punti.push([c,n]);best=Math.max(best,n);}
+  }
+  out.cdc=punti.filter(x=>x[1]===best).map(x=>x[0]);
+  const r=/\b([a-z]{2})\s?(\d{3})\s?([a-z]{2})\b/gi;let m;
+  while((m=r.exec(q))){const t=(m[1]+m[2]+m[3]).toUpperCase();if(S.mezzi.some(x=>x.targa===t))out.targhe.push(t);}
+  for(const s of S.soc){const t=tok(s.ragione);if(t.length&&t.some(w=>par.has(gKey(w)))&&!out.cdc.some(c=>c.societa===s.ragione&&false))out.soc.push(s.ragione);}
+  return out;
+}
+
+/* ---------- 2. dove si trovano le cose ---------- */
+function gPercorso(tab){
+  for(const g of MENU)for(const [k,l] of g.items)if(k===tab)return g.g?`${g.g} › ${l}`:l;
+  return tab;
+}
+const gEtichetta=tab=>{for(const g of MENU)for(const [k,l] of g.items)if(k===tab)return l;return tab;};
+const gAccesso=tab=>{try{return tabOk(tab);}catch(e){return true;}};
+function gVai(tab,sub){
+  if(sub)for(const [k,v] of Object.entries(sub))ui(k).tab=v;
+  S.tab=tab;render();
+}
+const gTesto=(el)=>(el.textContent||'').replace(/\s+/g,' ').trim();
+function gBottone(radice,re){
+  const r=typeof radice==='string'?document.querySelector(radice):radice;if(!r)return null;
+  return [...r.querySelectorAll('button,label,a')].find(b=>re.test(gTesto(b)))||null;
+}
+const gVisibile=el=>{if(!el)return false;const r=el.getBoundingClientRect();return r.width>0&&r.height>0;};
+const gDrawer=()=>document.querySelector('.drawer');
+const gMenu=tab=>({
+  testo:`Apri **${gPercorso(tab)}** dal menu a sinistra.`,
+  sel:()=>document.querySelector(`.sitem[data-tab="${tab}"]`),
+  fatto:()=>S.tab===tab,fai:()=>gVai(tab)});
+const gSub=(chiave,val,etichetta,tab)=>({
+  testo:`Apri la scheda **${etichetta}**.`,
+  sel:()=>document.querySelector(`#main [data-sub="${chiave}:${val}"]`),
+  fatto:()=>ui(chiave).tab===val&&(!tab||S.tab===tab),fai:()=>{ui(chiave).tab=val;if(tab)S.tab=tab;render();}});
+
+/* i passaggi per inserire un dato in una scheda generica, ricavati dalla scheda */
+function gPassiScheda(mod,tab,sub,nome){
+  const m=MODS[mod];if(!m)return [];
+  const passi=[];
+  passi.push(gMenu(tab));
+  if(sub)passi.push(gSub(sub[0],sub[1],sub[2],tab));
+  passi.push({
+    testo:`Premi **«${nome}»**: si apre la scheda da compilare.`,
+    sel:()=>document.querySelector('#main [data-std="new"]'),
+    fatto:()=>!!gDrawer(),fai:()=>{const b=document.querySelector('#main [data-std="new"]');if(b)b.click();}});
+  const ap=()=>{if(!gDrawer()){const b=document.querySelector('#main [data-std="new"]');if(b)b.click();}};
+  for(const g of m.groups){
+    const campi=g.f.filter(f=>!f.hidden&&!f.noWrite);if(!campi.length)continue;
+    const obb=campi.filter(f=>f.req).map(f=>f.label),altri=campi.filter(f=>!f.req).map(f=>f.label);
+    const sugg=campi.filter(f=>f.hint).slice(0,2).map(f=>`**${f.label}**: ${f.hint}`);
+    passi.push({
+      testo:`**${g.t}**. ${obb.length?`Obbligatori: ${obb.join(', ')}. `:''}${altri.length?`${obb.length?'Poi, se li hai: ':'Campi: '}${altri.slice(0,8).join(', ')}${altri.length>8?'…':''}.`:''}${sugg.length?` Suggerimenti: ${sugg.join(' · ')}.`:''}`,
+      prima:ap,
+      sel:()=>[...document.querySelectorAll('.drawer fieldset')].find(f=>gTesto(f.querySelector('legend')||f)===g.t||gTesto(f.querySelector('legend')||{textContent:''})===g.t)||null,
+      fatto:()=>false});
+  }
+  passi.push({
+    testo:`Premi **Salva** in fondo alla scheda. I campi segnati in rosso sono quelli da correggere prima del salvataggio.${m.attach?' Per allegare foto o documenti, riapri il record appena creato: gli allegati si aggiungono lì.':''}`,
+    sel:()=>document.querySelector('.drawer footer .primary'),
+    fatto:()=>!gDrawer(),fai:()=>{const b=document.querySelector('.drawer footer .primary');if(b)b.click();}});
+  passi.push(gSalvaFile());
+  return passi;
+}
+const gSalvaFile=()=>({
+  testo:'Ricorda che i dati stanno nel **registro Excel**. Se «Salvataggio automatico» è attivo si salva da solo; altrimenti usa **Salva** in alto.',
+  sel:()=>{const b=document.querySelector('#bSave');return gVisibile(b)?b:document.querySelector('.bar');},
+  fatto:()=>!S.dirty});
+
+/* ---------- 3. il catalogo delle attività ---------- */
+const G_MODULI=[
+  {c:'sin',mod:'sin',tab:'sin',oggetto:'un sinistro',oggetti:'i sinistri',nuovo:'Nuovo sinistro'},
+  {c:'vrb',mod:'vrb',tab:'vrb',oggetto:'un verbale',oggetti:'i verbali',nuovo:'Nuovo verbale'},
+  {c:'man',mod:'man',tab:'man',oggetto:'una manutenzione',oggetti:'le manutenzioni',nuovo:'Nuova manutenzione'},
+  {c:'mezzo',mod:'mezzi',tab:'mezzi',oggetto:'un mezzo',oggetti:'i mezzi',nuovo:'Nuovo mezzo'},
+  {c:'cp',mod:'cp',tab:'cp',oggetto:'un contratto di leasing o noleggio del fornitore',oggetti:'i contratti di leasing e noleggio',nuovo:'Nuovo contratto'},
+  {c:'soc',mod:'soc',tab:'soc',oggetto:'un cliente o un fornitore',oggetti:'i clienti e i fornitori',nuovo:'Nuovo'},
+  {c:'dip',mod:'dip',tab:'dip',oggetto:'un dipendente',oggetti:'i dipendenti',nuovo:'Nuovo dipendente',sub:['dipTab','dip','Dipendenti']},
+  {c:'gio',mod:'gio',tab:'gio',oggetto:'una giornaliera',oggetti:'le giornaliere',nuovo:'Nuova giornaliera'},
+  {c:'cdc',mod:'cdc',tab:'cdc',oggetto:'un centro di costo',oggetti:'i centri di costo',nuovo:'Nuovo centro di costo',sub:['cdcTab','e','Elenco']},
+  {c:'fp',mod:'fp',tab:'fp',oggetto:'una fattura passiva',oggetti:'le fatture passive',nuovo:'Nuova fattura'},
+  {c:'carta',mod:'disp',tab:'disp',oggetto:'una carta carburante o un Telepass',oggetti:'le carte e i Telepass',nuovo:'Nuovo dispositivo',sub:['dispTab','d','Dispositivi e carte']}
+];
+function gCompito(o){return Object.assign({c:[],v:[],peso:1},o);}
+function gCatalogo(){
+  const T=[];
+  /* a. le schede: inserire, trovare, esportare, importare */
+  for(const x of G_MODULI){
+    if(!MODS[x.mod])continue;
+    T.push(gCompito({id:'crea-'+x.mod,c:[x.c],v:['crea'],titolo:`Inserire ${x.oggetto}`,tab:x.tab,mod:x.mod,
+      risp:()=>({passi:gPassiScheda(x.mod,x.tab,x.sub,x.nuovo),sezione:x.tab,scrivi:x.mod})}));
+    T.push(gCompito({id:'trova-'+x.mod,c:[x.c],v:['trova'],titolo:`Dove trovo ${x.oggetti}`,tab:x.tab,
+      risp:e=>gRispTrova(x,e)}));
+    T.push(gCompito({id:'esporta-'+x.mod,c:[x.c],v:['esporta'],titolo:`Esportare ${x.oggetti} in Excel`,tab:x.tab,
+      risp:()=>({passi:[gMenu(x.tab),...(x.sub?[gSub(x.sub[0],x.sub[1],x.sub[2],x.tab)]:[]),{testo:'Premi **Esporta Excel**: scarichi la tabella con i filtri che hai impostato.',sel:()=>document.querySelector('#main [data-std="exp"]'),fatto:()=>false}],sezione:x.tab})}));
+    T.push(gCompito({id:'importa-'+x.mod,c:[x.c],v:['importa'],titolo:`Importare ${x.oggetti} da Excel o file`,tab:x.tab,
+      risp:()=>({passi:[gMenu(x.tab),...(x.sub?[gSub(x.sub[0],x.sub[1],x.sub[2],x.tab)]:[]),{testo:'Premi **Importa** e scegli il file: la Guida di importazione ti mostra l’anteprima e le righe con errori prima di caricare.',sel:()=>document.querySelector('#main [data-std="imp"]'),fatto:()=>!!document.querySelector('.modal')}],sezione:x.tab,scrivi:x.mod})}));
+    T.push(gCompito({id:'modifica-'+x.mod,c:[x.c],v:['modifica','elimina'],titolo:`Modificare o eliminare ${x.oggetto}`,tab:x.tab,
+      risp:()=>({passi:[gMenu(x.tab),...(x.sub?[gSub(x.sub[0],x.sub[1],x.sub[2],x.tab)]:[]),
+        {testo:'Cerca la riga con la casella **Cerca** o con i filtri.',sel:()=>document.querySelector('#main [data-q]'),fatto:()=>false},
+        {testo:'Clicca sulla riga per aprire la scheda: modifica i campi e premi **Salva**. Per eliminarla usa **Elimina** nella scheda.',sel:()=>document.querySelector('#main tbody tr'),fatto:()=>!!gDrawer()}],sezione:x.tab,scrivi:x.mod})}));
+  }
+  /* b. i compiti specifici */
+  T.push(gCompito({id:'nuovo-contratto-noleggio',c:['cn'],v:['crea'],titolo:'Inserire un contratto di noleggio a un cliente',
+    risp:()=>({passi:[gMenu('contratti'),{testo:'Premi **Nuovo contratto** (uno solo) oppure **Nuovo contratto multiplo** (più veicoli insieme).',sel:()=>document.querySelector('#bAdd'),fatto:()=>!!gDrawer(),fai:()=>{const b=document.querySelector('#bAdd');if(b)b.click();}},
+      {testo:'Scegli la **targa**: modello, tipologia, canone e franchigie si compilano dal mezzo. Poi indica **inizio e fine**, la **società locataria** e, se serve, il **centro di costo** (con «+ Nuovo centro di costo» lo crei da qui).',sel:()=>document.querySelector('.drawer #f_targa'),prima:()=>{if(!gDrawer()){const b=document.querySelector('#bAdd');if(b)b.click();}},fatto:()=>false},
+      {testo:'Premi **Salva**: se il centro di costo è nuovo compare anche in Centri di costo e il mezzo viene abbinato.',sel:()=>document.querySelector('.drawer footer .primary'),fatto:()=>!gDrawer()},gSalvaFile()],sezione:'contratti',scrivi:'rows'})}));
+  T.push(gCompito({id:'contratti-massivi',c:['cn','doc'],v:['crea','esporta'],titolo:'Generare o esportare più contratti insieme (Word, PDF, Excel)',
+    risp:()=>({passi:[gMenu('contratti'),
+      {testo:'Spunta i contratti con le **caselle** a sinistra delle righe (o la casella in alto per tutti i visibili: prima applica i filtri per società, centro di costo o stato).',sel:()=>document.querySelector('#tb input[data-sel]'),fatto:()=>S.csel&&S.csel.size>0},
+      {testo:'Nella barra della selezione scegli **Genera contratti…** (Word e/o PDF, per contratto, per società o tutto insieme) oppure **Esporta…** (Excel, CSV o ZIP degli allegati).',sel:()=>document.querySelector('#massBar'),fatto:()=>!!document.querySelector('.modal')}],sezione:'contratti'})}));
+  T.push(gCompito({id:'documenti-mezzi',c:['doc','mezzo'],v:['esporta','trova'],titolo:'Esportare i documenti di più mezzi (libretti, polizze…)',
+    risp:()=>({passi:[gMenu('mezzi'),
+      {testo:'Spunta le targhe di cui ti servono i documenti.',sel:()=>document.querySelector('#main tbody input[type=checkbox]'),fatto:()=>ui('mezzi').sel&&ui('mezzi').sel.size>0},
+      {testo:'Nella barra della selezione premi **Esporta documenti…**: scegli per ogni targa e per ogni tipo che cosa estrarre, poi **Esporta ZIP**.',sel:()=>document.querySelector('[data-selbar]'),fatto:()=>!!document.querySelector('.modal')}],sezione:'mezzi'})}));
+  T.push(gCompito({id:'costi-cdc',c:['cdc','costi'],v:['trova'],peso:3,titolo:'Vedere i costi di un centro di costo',
+    risp:e=>gRispCostiCdc(e)}));
+  T.push(gCompito({id:'costi-cdc-carte',c:['cdc','carta','costi'],v:['trova'],peso:2,titolo:'Riepilogo di carburante e pedaggi per centro di costo',
+    risp:()=>({passi:[gMenu('disp'),gSub('dispTab','r','Riepilogo per targa','disp'),
+      {testo:'In **Riepilogo per** scegli **Centro di costo**: vedi per ogni centro pedaggi, carburante, litri e totale del mese. Il filtro **Centro di costo** restringe a uno solo.',sel:()=>document.querySelector('#main [data-rg]'),fatto:()=>{const s=document.querySelector('#main [data-rg]');return !!s&&s.value==='cdc';},fai:()=>{const s=document.querySelector('#main [data-rg]');if(s){s.value='cdc';s.dispatchEvent(new Event('change',{bubbles:true}));}}},
+      {testo:'Cambia **Mese** per i mesi precedenti. Cliccando una riga vedi le targhe di quel centro.',sel:()=>document.querySelector('#main [data-m]'),fatto:()=>false}],sezione:'disp'})}));
+  T.push(gCompito({id:'cdc-movimenti',c:['carta','cdc'],v:['modifica','crea'],peso:3,titolo:'Assegnare movimenti e carte a un centro di costo',
+    risp:()=>({testo:'I costi seguono il **centro di costo del movimento**, non il contratto del mezzo. La carta o il Telepass ha un proprio centro di costo, che i movimenti importati ereditano; puoi cambiarlo sul singolo movimento o in blocco.',
+      passi:[gMenu('disp'),gSub('dispTab','m','Movimenti','disp'),
+      {testo:'Spunta i movimenti (anche filtrando per numero di carta nella casella **Cerca**).',sel:()=>document.querySelector('#main tbody input[type=checkbox]'),fatto:()=>ui('mov').sel&&ui('mov').sel.size>0},
+      {testo:'Nella barra della selezione scegli **Assegna centro di costo…**. Per sistemare quelli rimasti senza, usa **Assegna i centri di costo mancanti** in alto.',sel:()=>document.querySelector('[data-selbar]'),fatto:()=>!!document.querySelector('.modal')},
+      {testo:'Per cambiare il centro di una carta da una certa data: **Dispositivi e carte** › spunta la carta › **Assegna centro di costo…** e «Applica anche ai movimenti già importati».',sel:()=>document.querySelector('#main [data-sub="dispTab:d"]'),fatto:()=>false}],sezione:'disp'})}));
+  T.push(gCompito({id:'importa-movimenti',c:['carta','mov'],v:['importa','crea'],peso:2,titolo:'Importare i movimenti di carburante e pedaggi',
+    risp:()=>({testo:'Importa l’estratto conto del fornitore (CSV o Excel): targa, dipendente, cliente e **centro di costo** (della carta, altrimenti del mezzo) si attribuiscono da soli e le anomalie vengono evidenziate.',
+      passi:[gMenu('disp'),gSub('dispTab','m','Movimenti','disp'),{testo:'Premi **Importa** e scegli il file dell’estratto conto.',sel:()=>document.querySelector('#main [data-std="imp"]'),fatto:()=>!!document.querySelector('.modal')},
+      {testo:'Controlla l’anteprima e conferma. Poi filtra per **Controlli › Con anomalie** per rivedere le righe segnalate.',sel:()=>document.querySelector('#main [data-f]'),fatto:()=>false}],sezione:'disp',scrivi:'mov'})}));
+  T.push(gCompito({id:'cerca-carta',c:['carta','numero'],v:['trova'],peso:2,titolo:'Cercare un movimento per numero di carta',
+    risp:()=>({passi:[gMenu('disp'),gSub('dispTab','m','Movimenti','disp'),{testo:'Scrivi il **numero della carta o del Telepass** (con o senza trattini) nella casella **Cerca**: compaiono i suoi movimenti.',sel:()=>document.querySelector('#main [data-q]'),fatto:()=>false}],sezione:'disp'})}));
+  T.push(gCompito({id:'storico-mezzo',c:['storico','mezzo'],v:['trova'],peso:3,titolo:'Vedere lo storico delle modifiche di un mezzo',
+    risp:e=>({testo:'Ogni cambio di centro di costo, stato, canone e di ogni altro dato del mezzo (e dei suoi noleggi e assegnazioni) resta registrato con data, ora e utente. Si legge nella **scheda economica** del mezzo, riquadro **Storico del mezzo**.',
+      azioni:e.targhe.map(t=>({l:`Apri lo storico di ${t}`,fn:()=>apriSchedaMezzo(t)})),
+      passi:[gMenu('margini'),{testo:'Cerca la targa e premi **Scheda** sulla sua riga.',sel:()=>document.querySelector('#main [data-sch]'),fatto:()=>!!gDrawer()},
+      {testo:'Scorri fino a **Storico del mezzo**: filtra per Centro di costo, Disponibilità e stato, Noleggi e assegnazioni.',sel:()=>[...document.querySelectorAll('.drawer h3')].find(h=>/Storico del mezzo/.test(h.textContent)),fatto:()=>false}],sezione:'margini'})}));
+  T.push(gCompito({id:'scheda-economica',c:['costi','mezzo'],v:['trova'],peso:2,titolo:'Vedere costi e ricavi di un mezzo',
+    risp:e=>({testo:'La **scheda economica** del mezzo riunisce per la stessa targa costi (fatture, carburante, pedaggi, bolli, verbali, canoni) e ricavi, con il margine.',
+      azioni:e.targhe.map(t=>({l:`Apri la scheda economica di ${t}`,fn:()=>apriSchedaMezzo(t)})),
+      passi:[gMenu('margini'),{testo:'Premi **Scheda** sulla riga del mezzo.',sel:()=>document.querySelector('#main [data-sch]'),fatto:()=>!!gDrawer()}],sezione:'margini'})}));
+  T.push(gCompito({id:'canone-allineato',c:['canone'],v:['spiega','modifica','trova'],peso:2,titolo:'Il canone non è uguale fra scheda mezzo e contratti',
+    risp:()=>({testo:'Il canone compare in tre posti, legati dalla **targa**: contratto di noleggio al cliente, **canone listino** della scheda mezzo e contratto di leasing/noleggio del fornitore (un costo). Quando cambia in uno, gli altri si allineano da soli; gli importi voluti diversi non si toccano. Per sistemare i dati già presenti usa il pulsante qui sotto.',
+      azioni:[{l:'Allinea i canoni ai contratti adesso',fn:()=>canoniAllineaTutti()}],sezione:'mezzi'})}));
+  T.push(gCompito({id:'abbina-cdc',c:['cdc','mezzo'],v:['modifica','crea'],peso:2,titolo:'Abbinare un mezzo a un centro di costo',
+    risp:()=>({testo:'Tre strade: dal **contratto di noleggio** (il centro scelto lì abbina il mezzo e, se manca, viene creato), dalla scheda **Centri di costo** con «Abbina mezzi», oppure dall’elenco **Mezzi** selezionando le targhe.',
+      azioni:[{l:'Allinea i mezzi ai contratti adesso',fn:()=>cdcAllineaTutti()}],
+      passi:[gMenu('mezzi'),{testo:'Spunta i mezzi e usa **Abbina a centro di costo** nella barra della selezione.',sel:()=>document.querySelector('[data-selbar]')||document.querySelector('#main tbody input[type=checkbox]'),fatto:()=>!!document.querySelector('.modal')}],sezione:'mezzi'})}));
+  T.push(gCompito({id:'scadenze',c:['scad'],v:['trova'],peso:2,titolo:'Vedere le scadenze (revisioni, bolli, assicurazioni)',
+    risp:()=>({passi:[gMenu('cruscotto'),{testo:'Il cruscotto raccoglie le **scadenze scadute e imminenti**; il numero accanto al nome del menu dice quante sono. Clicca una scadenza per aprire il mezzo.',sel:()=>document.querySelector('#main .kpi')||document.querySelector('#main'),fatto:()=>false}],sezione:'cruscotto'})}));
+  T.push(gCompito({id:'proforma',c:['fat'],v:['crea','trova'],peso:2,titolo:'Preparare e inviare le proforma',
+    risp:()=>({passi:[gMenu('fatturazione'),{testo:'Apri **Prepara fatturazione del mese**: ti propone i canoni e le altre voci da fatturare per cliente.',sel:()=>document.querySelector('#main [data-sub="fatTab:n"]'),fatto:()=>ui('fatTab').tab==='n',fai:()=>{ui('fatTab').tab='n';render();}},
+      {testo:'Controlla le righe, poi genera le proforma: compaiono nell’elenco **Proforma** in bozza, pronte da inviare all’amministrazione.',sel:()=>document.querySelector('#main [data-sub="fatTab:l"]'),fatto:()=>false}],sezione:'fatturazione'})}));
+  T.push(gCompito({id:'riaddebiti',c:['riadd'],v:['crea','trova','spiega'],peso:2,titolo:'Riaddebitare un verbale o un sinistro al cliente',
+    risp:()=>({testo:'Nel **verbale** (o nel **sinistro**) indica chi paga e l’importo riaddebitabile, le spese di gestione e la casella di riaddebito: l’importo confluisce nella proforma del cliente che aveva il mezzo in quella data.',
+      passi:[gMenu('vrb'),{testo:'Apri il verbale dalla riga.',sel:()=>document.querySelector('#main tbody tr'),fatto:()=>!!gDrawer()}],sezione:'vrb'})}));
+  T.push(gCompito({id:'salva-registro',c:['salva'],v:['crea','trova','spiega'],peso:2,titolo:'Salvare il registro Excel',
+    risp:()=>({testo:'Le modifiche si scrivono nel **registro Excel** della cartella di lavoro. Con «Salvataggio automatico» acceso succede da solo; altrimenti premi **Salva** in alto.',passi:[gSalvaFile()]})}));
+  /* c. le sezioni del menu: la rete di sicurezza */
+  for(const g of MENU)for(const [k,l] of g.items)
+    T.push(gCompito({id:'apri-'+k,c:[],v:[],parole:gParole(l),titolo:`Aprire «${l}»`,peso:0.5,tab:k,
+      risp:()=>({testo:`**${l}** è in ${gPercorso(k)}.`,passi:[gMenu(k)],sezione:k})}));
+  return T;
+}
+function gRispTrova(x,e){
+  const azioni=[];
+  const q=e.targhe[0]||'';
+  if(q&&['sin','vrb','man','carta','mezzo','gio','cp'].includes(x.c))azioni.push({l:`Mostra ${x.oggetti} di ${q}`,fn:()=>{ui(x.mod==='disp'?'disp':x.mod).q=q;if(x.c==='carta'){ui('dispTab').tab='d';}S.tab=x.tab;render();}});
+  return {testo:`${x.oggetti[0].toUpperCase()+x.oggetti.slice(1)} sono in **${gPercorso(x.tab)}**. Con la casella **Cerca** e i filtri sopra la tabella trovi quello che ti serve.`,
+    azioni,passi:[gMenu(x.tab),...(x.sub?[gSub(x.sub[0],x.sub[1],x.sub[2],x.tab)]:[]),{testo:'Usa **Cerca** e i **filtri** per restringere l’elenco; clicca sulle intestazioni per ordinare.',sel:()=>document.querySelector('#main [data-q]'),fatto:()=>false}],sezione:x.tab};
+}
+/* i costi dell'appalto: se la domanda nomina un centro di costo, si apre direttamente */
+function gApriCostiCdc(c){
+  const lab=c.etichetta||cdcLabel(c);
+  const u=ui('cdcCosti');u.soc=c.societa;u.focus=lab;ui('cdcTab').tab='c';S.tab='cdc';render();
+  setTimeout(()=>{if(typeof apriCostiAppalto==='function')apriCostiAppalto(lab);},60);
+}
+function gRispCostiCdc(e){
+  const lista=e.cdc;
+  const passi=[gMenu('cdc'),gSub('cdcTab','c','Costi per mese','cdc'),
+    {testo:'Scegli la **società** (Fast Rent, Global One…): vedi per ogni centro di costo i costi mese per mese.',sel:()=>document.querySelector('#main [data-cdcvs]'),fatto:()=>false},
+    {testo:'Imposta **Anno** e, se vuoi, una **Voce di costo** (carburante, canoni, manutenzioni…).',sel:()=>document.querySelector('#cdcAnno'),fatto:()=>false},
+    {testo:'Clicca il centro di costo: si apre il dettaglio con **voci per mese** e **mezzi**.',sel:()=>(lista[0]&&document.querySelector(`#main tr[data-cdcr="${CSS.escape(lista[0].etichetta||cdcLabel(lista[0]))}"]`))||document.querySelector('#main tr[data-cdcr]'),fatto:()=>!!gDrawer()},
+    {testo:'**Esporta Excel** scarica la matrice mensile, il dettaglio per voce e per mezzo.',sel:()=>document.querySelector('#main [data-cdcxl]'),fatto:()=>false}];
+  const base='I costi dell’appalto (canoni di leasing e noleggio, carburante, pedaggi, manutenzioni, fatture…) per centro di costo e per mese sono in **Centri di costo › Costi per mese**.';
+  if(lista.length)return {testo:`${base} ${lista.length===1?'Ho riconosciuto il centro di costo':'Ho riconosciuto questi centri di costo'}: scegli quale aprire.`,
+    azioni:lista.slice(0,6).map(c=>({l:`Apri i costi di ${c.nome} (${c.societa})`,fn:()=>gApriCostiCdc(c)})),passi,sezione:'cdc'};
+  return {testo:`${base} Dimmi anche **quale centro di costo** (per esempio «costi del centro di costo Amazon») e lo apro direttamente.`,passi,sezione:'cdc'};
+}
+
+/* ---------- 4. scegliere la risposta ---------- */
+let G_CAT=null;
+function gRispondi(q){
+  if(!G_CAT)G_CAT=gCatalogo();
+  const k=gCapisci(q),e=gEntita(q);
+  if(!k.par.length)return null;
+  const punti=[];
+  for(const t of G_CAT){
+    let p=0;
+    const c=t.c||[];
+    for(const x of c)if(k.c.has(x))p+=3;
+    const cMan=c.filter(x=>!k.c.has(x)).length;
+    if(c.length)p-=cMan*0.8;
+    for(const v of t.v||[])if(k.v.has(v))p+=2;
+    if(t.parole){const pk=new Set(t.parole.map(gKey));let n=0;for(const w of k.par)if(pk.has(gKey(w)))n++;p+=n*2.5;}
+    if(p>0&&(c.length||t.parole))p*=(t.peso||1)>=1?1+((t.peso||1)-1)*0.15:t.peso;
+    if(e.cdc.length&&/cdc/.test(t.id)&&(c.includes('costi')||c.includes('cdc')))p+=1.5;
+    if(e.targhe.length&&/storico|scheda-eco/.test(t.id)&&(c.length?c.some(x=>k.c.has(x)):false))p+=1.5;
+    if(p>0)punti.push([t,p]);
+  }
+  punti.sort((a,b)=>b[1]-a[1]);
+  if(!punti.length||punti[0][1]<2.5)return {nessuna:true,altre:punti.slice(0,4).map(x=>x[0]),e};
+  /* tolgo i compiti quasi uguali già scelti */
+  const migliori=punti.slice(0,4);
+  return {t:migliori[0][0],altre:migliori.slice(1).filter(x=>x[1]>=migliori[0][1]*0.55).map(x=>x[0]),e,k};
+}
+
+/* ---------- 5. il percorso sullo schermo ---------- */
+const GW={attivo:false,passi:[],i:0,titolo:'',timer:null,el:null};
+function gHtmlLite(s){return esc(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');}
+function gAvvia(passi,titolo){
+  if(!passi||!passi.length)return;
+  gChiudiPannello();
+  GW.passi=passi;GW.i=0;GW.titolo=titolo||'';GW.attivo=true;
+  gCreaSpot();gMostraPasso(true);
+  clearInterval(GW.timer);GW.timer=setInterval(gAggiorna,250);
+}
+function gFine(){
+  GW.attivo=false;clearInterval(GW.timer);
+  for(const id of ['gSpot','gTip'])document.getElementById(id)?.remove();
+  document.removeEventListener('keydown',gTasti,true);
+}
+function gTasti(e){if(!GW.attivo)return;if(e.key==='Escape'){e.stopPropagation();gFine();}else if(e.key==='ArrowRight'&&!/INPUT|SELECT|TEXTAREA/.test((document.activeElement||{}).tagName||'')){gAvanti();}}
+function gCreaSpot(){
+  gFine();GW.attivo=true;
+  const sp=document.createElement('div');sp.id='gSpot';document.body.appendChild(sp);
+  const tp=document.createElement('div');tp.id='gTip';tp.setAttribute('role','dialog');tp.setAttribute('aria-live','polite');document.body.appendChild(tp);
+  document.addEventListener('keydown',gTasti,true);
+  tp.addEventListener('click',e=>{
+    const b=e.target.closest('[data-g]');if(!b)return;
+    const a=b.dataset.g;
+    if(a==='x')gFine();else if(a==='b')gIndietro();else if(a==='n')gAvanti();else if(a==='f')gFai();
+  });
+}
+const gPasso=()=>GW.passi[GW.i];
+function gEl(){const p=gPasso();if(!p||!p.sel)return null;try{const el=p.sel();return gVisibile(el)?el:null;}catch(e){return null;}}
+function gMostraPasso(avanti){
+  const p=gPasso();if(!p){gFine();return;}
+  /* un passo già fatto (la sezione è già aperta, la scheda già aperta…) si salta in avanti */
+  if(avanti&&p.fatto&&GW.i<GW.passi.length-1){let g=false;try{g=p.fatto();}catch(e){}if(g&&p.fatto.toString().indexOf('false')<0){GW.i++;return gMostraPasso(true);}}
+  if(p.prima){try{p.prima();}catch(e){}}
+  gDisegna(true);
+}
+function gDisegna(scorri){
+  const p=gPasso();if(!p)return;
+  const tip=document.getElementById('gTip'),sp=document.getElementById('gSpot');if(!tip||!sp)return;
+  const el=gEl();
+  const ultimo=GW.i===GW.passi.length-1;
+  const html=`<div class="gt-h"><span class="gt-n">Passo ${GW.i+1} di ${GW.passi.length}</span><span class="gt-t">${esc(GW.titolo)}</span><button class="gt-x" data-g="x" aria-label="Chiudi la guida">×</button></div>
+    <div class="gt-b">${gHtmlLite(p.testo)}${el?'':'<div class="gt-nf">Non vedo ancora questo elemento sullo schermo: usa «Fallo per me» o «Avanti».</div>'}</div>
+    <div class="gt-f"><button class="btn ghost" data-g="b" ${GW.i?'':'disabled'}>Indietro</button>
+      ${p.fai?'<button class="btn" data-g="f">Fallo per me</button>':''}
+      <button class="btn primary" data-g="n">${ultimo?'Fine':'Avanti'}</button></div>`;
+  if(tip.dataset.k!==GW.i+'|'+(el?1:0)+'|'+p.testo){tip.innerHTML=html;tip.dataset.k=GW.i+'|'+(el?1:0)+'|'+p.testo;}
+  if(el){
+    if(scorri){try{el.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});}catch(e){}}
+    const r=el.getBoundingClientRect(),pad=6;
+    Object.assign(sp.style,{display:'block',left:(r.left-pad)+'px',top:(r.top-pad)+'px',width:(r.width+pad*2)+'px',height:(r.height+pad*2)+'px'});
+    const tw=tip.offsetWidth||340,th=tip.offsetHeight||160,W=innerWidth,H=innerHeight;
+    let x=r.left+r.width/2-tw/2,y=r.bottom+pad+14;
+    if(y+th>H-10){y=r.top-th-pad-14;}
+    if(y<10){y=Math.min(H-th-10,Math.max(10,r.top+r.height/2-th/2));x=r.right+pad+14;if(x+tw>W-10)x=r.left-tw-pad-14;}
+    x=Math.max(10,Math.min(W-tw-10,x));y=Math.max(10,Math.min(H-th-10,y));
+    Object.assign(tip.style,{left:x+'px',top:y+'px',transform:'none'});
+  }else{
+    sp.style.display='none';
+    Object.assign(tip.style,{left:Math.max(10,(innerWidth-(tip.offsetWidth||340))/2)+'px',top:Math.max(10,innerHeight-(tip.offsetHeight||170)-30)+'px',transform:'none'});
+  }
+}
+function gAggiorna(){
+  if(!GW.attivo)return;
+  const p=gPasso();if(!p)return;
+  /* se l'utente ha già fatto quello che si chiedeva, si passa al passo dopo */
+  if(p.fatto&&GW.i<GW.passi.length-1){let g=false;try{g=p.fatto();}catch(e){}
+    if(g&&p.fatto.toString().indexOf('false')<0&&GW.fattoVisto===GW.i){GW.fattoVisto=-1;GW.i++;gMostraPasso(true);return;}
+    GW.fattoVisto=g?GW.i:-1;}
+  gDisegna(false);
+}
+function gFai(){const p=gPasso();if(p&&p.fai){try{p.fai();}catch(e){}setTimeout(()=>{GW.fattoVisto=-1;gDisegna(true);},120);}}
+function gAvanti(){
+  const p=gPasso();if(!p)return;
+  let fatto=false;try{fatto=p.fatto&&p.fatto.toString().indexOf('false')<0?p.fatto():false;}catch(e){}
+  if(p.fai&&!fatto){try{p.fai();}catch(e){}}
+  if(GW.i>=GW.passi.length-1){gFine();toast('Fine della guida.');return;}
+  GW.i++;
+  setTimeout(()=>{gMostraPasso(true);},p.fai&&!fatto?180:0);
+}
+function gIndietro(){if(GW.i>0){GW.i--;gMostraPasso(false);}}
+
+/* ---------- 6. il pannello della conversazione ---------- */
+const GP={aperto:false,msg:[],storia:[]};
+function gStorico(){try{return JSON.parse(localStorage.getItem('guida-storia')||'[]');}catch(e){return [];}}
+function gSalvaStorico(q){try{const l=[q,...gStorico().filter(x=>x!==q)].slice(0,6);localStorage.setItem('guida-storia',JSON.stringify(l));}catch(e){}}
+const G_SUGG_BASE=['Come devo caricare un sinistro?','Dove trovo il riepilogo delle spese del centro di costo Amazon?','Come esporto i documenti dei mezzi?','Come importo i movimenti Telepass e carburante?','Come genero i contratti in Word e PDF?','Dove vedo lo storico di un mezzo?'];
+function gSuggerimenti(){
+  const t=S.tab,extra={sin:['Come carico un sinistro?'],vrb:['Come riaddebito un verbale al cliente?'],mezzi:['Come esporto i documenti dei mezzi selezionati?','Come abbino un mezzo a un centro di costo?'],contratti:['Come genero i contratti in PDF per società?'],disp:['Come assegno i movimenti a un centro di costo?','Come cerco un movimento per numero di carta?'],cdc:['Dove vedo i costi del centro di costo?'],man:['Come apro una manutenzione?']}[t]||[];
+  return [...new Set([...extra,...gStorico().slice(0,2),...G_SUGG_BASE])].slice(0,6);
+}
+function gStileInit(){
+  if(document.getElementById('gStile'))return;
+  const s=document.createElement('style');s.id='gStile';
+  s.textContent=`
+#gFab{position:fixed;right:22px;bottom:22px;z-index:80;display:flex;align-items:center;gap:8px;border:0;border-radius:999px;padding:12px 18px 12px 14px;background:linear-gradient(135deg,var(--navy,#185b87),var(--gold,#27b7bc));color:#fff;font:700 13px/1 inherit;cursor:pointer;box-shadow:0 8px 24px #0b223455;transition:transform .15s}
+#gFab:hover{transform:translateY(-2px)}#gFab svg{width:20px;height:20px}
+body:has(.drawer) #gFab,body:has(.modal) #gFab{display:none!important}
+body.app #gFab{bottom:84px;right:14px}
+#gPanel{position:fixed;right:22px;bottom:22px;z-index:90;width:min(420px,calc(100vw - 24px));height:min(640px,calc(100vh - 44px));display:flex;flex-direction:column;background:var(--surface,#fff);color:var(--ink,#18354b);border:1px solid var(--line,#dde7ee);border-radius:18px;box-shadow:0 18px 60px #0b223455;overflow:hidden}
+#gPanel[hidden]{display:none}
+.gp-h{display:flex;align-items:center;gap:10px;padding:14px 16px;background:linear-gradient(110deg,#0e2942,#174762 75%,#146576);color:#fff}
+.gp-h b{font-size:15px;flex:1}.gp-h small{display:block;font-weight:400;opacity:.8;font-size:11.5px}
+.gp-h button{background:none;border:0;color:#fff;font-size:22px;cursor:pointer;line-height:1}
+.gp-m{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--bg,#f1f5fa)}
+.gm{max-width:92%;padding:10px 12px;border-radius:14px;font-size:13.5px;line-height:1.55;word-wrap:break-word}
+.gm.u{align-self:flex-end;background:var(--navy,#185b87);color:#fff;border-bottom-right-radius:4px}
+.gm.a{align-self:flex-start;background:var(--surface,#fff);border:1px solid var(--line,#dde7ee);border-bottom-left-radius:4px}
+.gm.a b{color:var(--navy,#185b87)}
+.gm .ga{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.gm .ga .btn{justify-content:flex-start;text-align:left;white-space:normal;min-height:38px;font-size:12.5px}
+.gm .gl{margin-top:10px;font-size:12px;color:var(--muted,#586f80)}
+.gm .gl a{display:block;color:var(--navy,#185b87);cursor:pointer;margin-top:3px;text-decoration:underline}
+.gm .gdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold,#27b7bc);margin-right:3px;animation:gdot 1s infinite}
+.gm .gdot:nth-child(2){animation-delay:.15s}.gm .gdot:nth-child(3){animation-delay:.3s}
+@keyframes gdot{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.gp-s{display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 10px;background:var(--bg,#f1f5fa)}
+.gp-s button{border:1px solid var(--line,#dde7ee);background:var(--surface,#fff);color:var(--ink,#18354b);border-radius:999px;padding:6px 11px;font-size:12px;cursor:pointer}
+.gp-s button:hover{border-color:var(--gold,#27b7bc);background:var(--gold-soft,#e9f7f8)}
+.gp-i{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line,#dde7ee);background:var(--surface,#fff)}
+.gp-i input{flex:1;border:1px solid var(--line,#dde7ee);border-radius:11px;padding:11px 12px;font-size:14px;background:var(--surface,#fff);color:var(--ink,#18354b);min-width:0}
+.gp-i input:focus{outline:2px solid var(--gold,#27b7bc);border-color:transparent}
+#gSpot{position:fixed;z-index:200;display:none;pointer-events:none;border-radius:10px;box-shadow:0 0 0 9999px #0b223499,0 0 0 3px var(--gold,#27b7bc);transition:left .2s,top .2s,width .2s,height .2s}
+#gSpot::after{content:"";position:absolute;inset:-3px;border-radius:12px;border:3px solid var(--gold,#27b7bc);animation:gpulse 1.4s infinite}
+@keyframes gpulse{0%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(1.12)}}
+#gTip{position:fixed;z-index:210;width:min(360px,calc(100vw - 20px));background:var(--surface,#fff);color:var(--ink,#18354b);border:1px solid var(--line,#dde7ee);border-top:4px solid var(--gold,#27b7bc);border-radius:14px;box-shadow:0 14px 44px #0b223466;transition:left .2s,top .2s}
+.gt-h{display:flex;align-items:center;gap:8px;padding:10px 12px 0}.gt-n{font:700 10.5px/1 inherit;letter-spacing:.08em;text-transform:uppercase;color:var(--gold-ink,#15616d)}
+.gt-t{flex:1;font-size:11.5px;color:var(--muted,#586f80);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gt-x{background:none;border:0;font-size:20px;color:var(--muted,#586f80);cursor:pointer;line-height:1}
+.gt-b{padding:8px 12px 4px;font-size:13.5px;line-height:1.55}.gt-b b{color:var(--navy,#185b87)}.gt-nf{margin-top:8px;font-size:12px;color:var(--muted,#586f80)}
+.gt-f{display:flex;gap:8px;justify-content:flex-end;padding:8px 12px 12px;flex-wrap:wrap}.gt-f .btn{min-height:36px;font-size:12.5px}
+@media print{#gFab,#gPanel,#gSpot,#gTip{display:none!important}}
+@media(prefers-reduced-motion:reduce){#gSpot,#gTip{transition:none}#gSpot::after{animation:none}.gm .gdot{animation:none}}`;
+  document.head.appendChild(s);
+}
+function gCreaPannello(){
+  gStileInit();
+  if(!document.getElementById('gFab')){
+    const f=document.createElement('button');f.id='gFab';f.type='button';f.setAttribute('aria-label','Apri la Guida');
+    f.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>Guida';
+    f.onclick=()=>gApriPannello();document.body.appendChild(f);
+  }
+  if(!document.getElementById('gPanel')){
+    const p=document.createElement('div');p.id='gPanel';p.hidden=true;p.setAttribute('role','dialog');p.setAttribute('aria-label','Guida');
+    p.innerHTML=`<div class="gp-h"><div style="flex:1"><b>Guida Matherion</b><small>Chiedimi come fare una cosa o dove trovarla</small></div><button type="button" data-g="x" aria-label="Chiudi">×</button></div>
+      <div class="gp-m" id="gMsg" aria-live="polite"></div><div class="gp-s" id="gSug"></div>
+      <form class="gp-i" id="gForm"><input id="gIn" type="text" autocomplete="off" placeholder="Per esempio: come carico un sinistro?" aria-label="La tua domanda"><button class="btn primary" type="submit">Chiedi</button></form>`;
+    document.body.appendChild(p);
+    p.querySelector('[data-g="x"]').onclick=()=>gChiudiPannello();
+    p.querySelector('#gForm').onsubmit=e=>{e.preventDefault();const i=p.querySelector('#gIn');const q=i.value.trim();if(q){i.value='';gChiedi(q);}};
+    p.addEventListener('keydown',e=>{if(e.key==='Escape')gChiudiPannello();});
+  }
+}
+function gApriPannello(){
+  gCreaPannello();GP.aperto=true;
+  document.getElementById('gPanel').hidden=false;document.getElementById('gFab').style.display='none';
+  if(!GP.msg.length)gSaluto();
+  gSugg();
+  setTimeout(()=>document.getElementById('gIn')?.focus(),50);
+}
+function gChiudiPannello(){
+  GP.aperto=false;
+  const p=document.getElementById('gPanel');if(p)p.hidden=true;
+  const f=document.getElementById('gFab');if(f)f.style.display='';
+}
+function gSugg(){
+  const box=document.getElementById('gSug');if(!box)return;
+  box.innerHTML=gSuggerimenti().map(s=>`<button type="button">${esc(s)}</button>`).join('');
+  box.querySelectorAll('button').forEach((b,i)=>b.onclick=()=>gChiedi(b.textContent));
+}
+function gAggiungi(chi,html){
+  const m=document.getElementById('gMsg');if(!m)return null;
+  const d=document.createElement('div');d.className='gm '+chi;d.innerHTML=html;m.appendChild(d);m.scrollTop=m.scrollHeight;return d;
+}
+function gSaluto(){
+  GP.msg.push('saluto');
+  gAggiungi('a',`Ciao! Scrivimi che cosa devi fare, per esempio <i>«come carico un sinistro?»</i> o <i>«dove trovo i costi del centro di costo Amazon?»</i>. Ti spiego come fare e, se vuoi, ti accompagno passo passo evidenziando sullo schermo dove cliccare.<div class="gl">Funziona qui, nel gestionale: le tue domande non vanno a nessun servizio esterno.</div>`);
+}
+function gChiedi(q){
+  gSalvaStorico(q);
+  gAggiungi('u',esc(q));
+  const att=gAggiungi('a','<span class="gdot"></span><span class="gdot"></span><span class="gdot"></span>');
+  setTimeout(()=>{
+    let r;try{r=gRispondi(q);}catch(e){console.warn('guida',e);r=null;}
+    att&&att.remove();
+    gMostraRisposta(q,r);
+  },380);
+}
+function gAzione(label,fn,primario){
+  const b=document.createElement('button');b.type='button';b.className='btn'+(primario?' primary':'');b.textContent=label;b.onclick=fn;return b;
+}
+function gMostraRisposta(q,r){
+  if(!r||r.nessuna){
+    const d=gAggiungi('a','Non sono sicura di aver capito. Prova a dirlo con altre parole (per esempio «come inserisco…», «dove trovo…», «come esporto…»)'+(r&&r.altre&&r.altre.length?', oppure scegli una di queste:':'.'));
+    if(d){const box=document.createElement('div');box.className='ga';
+      const lista=(r&&r.altre&&r.altre.length?r.altre:G_CAT.filter(t=>/^(crea-sin|costi-cdc|documenti-mezzi|importa-movimenti)$/.test(t.id)));
+      for(const t of lista)box.appendChild(gAzione(t.titolo,()=>gProponi(t,r&&r.e?r.e:gEntita(q),q)));
+      d.appendChild(box);}
+    return;
+  }
+  gProponi(r.t,r.e,q,r.altre);
+}
+function gProponi(t,e,q,altre){
+  let ris;try{ris=t.risp(e||gEntita(q||''));}catch(err){console.warn('guida',err);ris={testo:'Non riesco a preparare questa guida.'};}
+  const tit=t.titolo;
+  const nega=[];
+  if(ris.sezione&&!gAccesso(ris.sezione))nega.push('Con il tuo ruolo questa sezione non è disponibile: chiedi a chi gestisce gli accessi.');
+  else if(ris.scrivi&&!puoScrivere(ris.scrivi))nega.push('Con il tuo ruolo puoi consultare questi dati ma non modificarli: per inserirli serve un ruolo con permesso di scrittura.');
+  const intro=ris.testo?gHtmlLite(ris.testo):(ris.passi&&ris.passi.length?`Per <b>${esc(tit[0].toLowerCase()+tit.slice(1))}</b> ci vogliono ${ris.passi.length} ${ris.passi.length===1?'passaggio':'passaggi'}. Ti accompagno io sullo schermo.`:'');
+  const d=gAggiungi('a',`<div style="font-weight:700;margin-bottom:4px">${esc(tit)}</div>${intro}${nega.length?`<div class="gl" style="color:var(--danger,#b00020)">${esc(nega[0])}</div>`:''}`);
+  if(!d)return;
+  const box=document.createElement('div');box.className='ga';
+  for(const a of ris.azioni||[])box.appendChild(gAzione(a.l,()=>{gChiudiPannello();a.fn();},true));
+  if(ris.passi&&ris.passi.length&&!nega.length)box.appendChild(gAzione('Guidami passo passo',()=>gAvvia(ris.passi,tit),!(ris.azioni||[]).length));
+  if(ris.sezione&&!nega.length&&ris.passi&&ris.passi.length)box.appendChild(gAzione(`Portami in «${gEtichetta(ris.sezione)}»`,()=>{gChiudiPannello();gVai(ris.sezione);}));
+  if(box.children.length)d.appendChild(box);
+  if(altre&&altre.length){
+    const l=document.createElement('div');l.className='gl';l.textContent='Forse cercavi anche:';
+    for(const a of altre){const x=document.createElement('a');x.textContent=a.titolo;x.onclick=()=>gProponi(a,e,q);l.appendChild(x);}
+    d.appendChild(l);
+  }
+  const m=document.getElementById('gMsg');if(m)m.scrollTop=m.scrollHeight;
+}
+
+/* ---------- 7. aggancio all'app ---------- */
+(()=>{
+  const r0=render;
+  render=function(){
+    const x=r0.apply(this,arguments);
+    try{if(S.wb){gCreaPannello();if(!GP.aperto&&!GW.attivo){const f=document.getElementById('gFab');if(f)f.style.display='';}}}catch(e){}
+    return x;
+  };
+  document.addEventListener('keydown',e=>{
+    const tag=(document.activeElement||{}).tagName||'';
+    if((e.ctrlKey||e.metaKey)&&e.key==='/'){e.preventDefault();GP.aperto?gChiudiPannello():gApriPannello();}
+    else if(e.key==='?'&&!/INPUT|TEXTAREA|SELECT/.test(tag)&&S.wb&&!document.querySelector('.modal')){e.preventDefault();gApriPannello();}
+  });
+})();
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
