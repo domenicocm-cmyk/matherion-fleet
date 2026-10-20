@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.23';
+const APP_VERSION='2026.10.24';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -5427,6 +5427,7 @@ function renderMezzi(){
       {l:'Archivia i selezionati',fn:l=>openArchivia(l,()=>{ui('mezzi').sel.clear();renderMezzi();})},
       {l:'Abbina a centro di costo',fn:l=>openCdcAssign(l)},
       {l:'Allinea canoni ai contratti',fn:l=>canoniAllineaTutti(l)},
+      {l:'Esporta documenti…',fn:l=>docmApri(l)},
       {l:'Calcola scadenza revisione',fn:l=>revisioneBulk(l)},
       {l:'Esporta controllo revisioni',fn:l=>esportaControlloRevisioni(l)},
       {l:'Crea contratto di noleggio multiplo',primary:true,fn:l=>openMulti(l.filter(m=>dispo(m).label==='Disponibile').map(m=>m.id))},
@@ -5508,7 +5509,7 @@ function renderArchivio(){
         return n.length?esc(n.map(x=>x[1]+' '+x[0]).join(', ')):'<span class="muted">nessuno</span>';}},
     ],
     rowActions:[{l:'Riporta in flotta',fn:r=>ripristinaMezzi([r],()=>renderArchivio())}],
-    selActions:[{l:'Riporta in flotta',primary:true,fn:l=>ripristinaMezzi(l,ref)}],
+    selActions:[{l:'Esporta documenti…',fn:l=>docmApri(l)},{l:'Riporta in flotta',primary:true,fn:l=>ripristinaMezzi(l,ref)}],
   });
 }
 
@@ -17150,6 +17151,141 @@ function canoniAllineaTutti(){
       <div><small>Costo del contratto fornitore</small><b>${cp?esc(eur(cpq)+' al mese · '+cp.numero+' · '+cp.tipo):'nessuno'}</b></div>`+base;
   };
 })();
+
+
+/* =====================================================================
+   ESPORTAZIONE MASSIVA DEI DOCUMENTI DEI MEZZI
+   ---------------------------------------------------------------------
+   Dall'elenco Mezzi: si selezionano le targhe e «Esporta documenti…».
+   La finestra mostra una tabella targhe × tipo di documento (libretto,
+   polizza, certificato di proprietà…): per ogni targa e per ogni tipo si
+   sceglie che cosa esportare, perché non di tutti i mezzi servono gli stessi
+   documenti. Oltre ai documenti allegati al mezzo si possono includere,
+   sempre per targa, quelli dei noleggi ai clienti, del contratto di leasing
+   o noleggio del fornitore, di manutenzioni, sinistri, verbali, carte.
+   Esce uno ZIP (una cartella per targa, per tipo, oppure tutto insieme) con
+   un indice Excel dei file esportati e dei documenti che mancano.
+   ===================================================================== */
+const DOCM_FONTI=[
+  {k:'mezzi',l:'Documenti del mezzo',d:'Libretto, polizza, certificato di proprietà…'},
+  {k:'cp',l:'Contratto di leasing o noleggio del fornitore'},
+  {k:'noleggi',l:'Noleggi ai clienti'},
+  {k:'man',l:'Manutenzioni'},{k:'sin',l:'Sinistri'},{k:'vrb',l:'Verbali'},{k:'disp',l:'Telepass e carte'}];
+/* tutti i documenti di una targa, con la sezione da cui arrivano */
+function docmDocumenti(targa,fonti){
+  const t=normTarga(targa),out=[];
+  const agg=(modulo,rif,fonte,desc)=>{if(!rif)return;for(const a of attachFor(modulo,rif))out.push({a,fonte,desc:desc||''});};
+  if(fonti.has('mezzi'))agg('mezzi',targa,'Documenti del mezzo');
+  if(fonti.has('noleggi'))for(const r of S.rows)if(normTarga(r.targa)===t)agg('noleggi',r.numero,'Noleggio ai clienti','contratto '+(r.numero||''));
+  if(fonti.has('cp'))for(const c of S.cp)if(cpTarghe(c).includes(t))agg('cp',c.codice,'Contratto fornitore',c.numero||c.codice);
+  for(const [k,l] of [['man','Manutenzione'],['sin','Sinistro'],['vrb','Verbale'],['disp','Telepass e carte']])
+    if(fonti.has(k))for(const x of S[k])if(normTarga(x.targa)===t)agg(k,x.codice,l,x.numero||x.numeroVerbale||x.codice);
+  return out;
+}
+const docmData=a=>a.dataDocumento||a.caricatoIl||'';
+function docmApri(list){
+  if(!list||!list.length)return toast('Seleziona almeno un mezzo.',true);
+  const targhe=list.map(m=>m.targa).filter(Boolean);
+  const st={fonti:new Set(['mezzi']),off:new Set(),ultimo:false,cart:'targa',indice:true,tipiOff:null};
+  const m=document.createElement('div');m.className='modal';document.body.appendChild(m);
+  const calcola=()=>{
+    const doc=new Map();                         /* targa → lista documenti */
+    const tipi=new Map();                        /* tipo → n targhe che lo hanno */
+    for(const t of targhe){
+      let l=docmDocumenti(t,st.fonti);
+      if(st.ultimo){const per=new Map();for(const x of l){const k=x.a.tipo+'|'+x.fonte+'|'+x.desc;const p=per.get(k);if(!p||docmData(x.a)>=docmData(p.a))per.set(k,x);}l=[...per.values()];}
+      doc.set(t,l);
+      for(const tp of new Set(l.map(x=>x.a.tipo)))tipi.set(tp,(tipi.get(tp)||0)+1);
+    }
+    return {doc,tipi:[...tipi.keys()].sort((a,b)=>tipi.get(b)-tipi.get(a)||a.localeCompare(b,'it')),conta:tipi};
+  };
+  const scelti=c=>{
+    const out=[];
+    for(const [t,l] of c.doc)for(const x of l)if(!st.off.has(t+'|'+x.a.tipo))out.push({t,...x});
+    return out;
+  };
+  const paint=()=>{
+    const c=calcola(),sc=scelti(c);
+    const nMezzi=new Set(sc.map(x=>x.t)).size;
+    const cella=(t,tp)=>{
+      const n=c.doc.get(t).filter(x=>x.a.tipo===tp).length;
+      if(!n)return '<td class="num"><span class="muted">–</span></td>';
+      return `<td class="num"><label class="check" style="justify-content:center"><input type="checkbox" data-c="${esc(t)}|${esc(tp)}" ${st.off.has(t+'|'+tp)?'':'checked'}> ${n>1?`<span class="muted">${n}</span>`:''}</label></td>`;
+    };
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:min(1100px,96vw);max-height:92vh;display:flex;flex-direction:column">
+      <h3>Esporta i documenti di ${massPlur(targhe.length,'mezzo','mezzi')}</h3>
+      <div style="overflow:auto;flex:1;padding-right:4px">
+      <div class="muted" style="margin-bottom:8px">Spunta i documenti da esportare per ogni targa. Il trattino indica che quel mezzo non ha quel tipo di documento.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:10px"><b style="align-self:center">Da dove prendere i documenti:</b>
+        ${DOCM_FONTI.map(f=>`<label class="check"><input type="checkbox" data-f="${f.k}" ${st.fonti.has(f.k)?'checked':''}> ${esc(f.l)}</label>`).join('')}</div>
+      ${c.tipi.length?`<div class="tablewrap" style="max-height:44vh"><table class="grid mini"><thead><tr><th>Targa</th>${c.tipi.map(tp=>{
+        const tutti=targhe.filter(t=>c.doc.get(t).some(x=>x.a.tipo===tp));const acc=tutti.every(t=>!st.off.has(t+'|'+tp));
+        return `<th class="num"><label class="check" style="justify-content:center;white-space:normal;text-align:center"><input type="checkbox" data-col="${esc(tp)}" ${acc?'checked':''}><span>${esc(tp)}<span class="sub">${c.conta.get(tp)} su ${targhe.length}</span></span></label></th>`;}).join('')}<th class="num">File</th></tr></thead><tbody>
+        ${targhe.map(t=>{const l=c.doc.get(t);const n=l.filter(x=>!st.off.has(t+'|'+x.a.tipo)).length;
+          return `<tr><td class="nowrap"><label class="check"><input type="checkbox" data-row="${esc(t)}" ${l.length&&l.every(x=>!st.off.has(t+'|'+x.a.tipo))?'checked':''} ${l.length?'':'disabled'}> ${esc(t)}</label>${l.length?'':'<span class="sub late">nessun documento</span>'}</td>${c.tipi.map(tp=>cella(t,tp)).join('')}<td class="num"><b>${n}</b></td></tr>`;}).join('')}
+        </tbody></table></div>`
+        :'<div class="panel"><p>I mezzi selezionati non hanno documenti allegati con le sezioni scelte. Allega i file dalla scheda del mezzo, o includi altre sezioni qui sopra.</p></div>'}
+      <div style="display:flex;flex-wrap:wrap;gap:8px 24px;margin:14px 0 4px">
+        <div class="field" style="min-width:230px"><label for="docmCart">Come ordinare i file nello ZIP</label><select class="input" id="docmCart">
+          <option value="targa" ${st.cart==='targa'?'selected':''}>Una cartella per ogni targa</option>
+          <option value="tipo" ${st.cart==='tipo'?'selected':''}>Una cartella per ogni tipo di documento</option>
+          <option value="piatto" ${st.cart==='piatto'?'selected':''}>Tutti i file insieme</option></select></div>
+        <div style="align-self:end;display:flex;flex-direction:column;gap:4px">
+          <label class="check"><input type="checkbox" id="docmUlt" ${st.ultimo?'checked':''}> Solo il più recente per ogni tipo di documento</label>
+          <label class="check"><input type="checkbox" id="docmInd" ${st.indice?'checked':''}> Aggiungi l’indice Excel (file esportati e documenti mancanti)</label></div></div>
+      </div>
+      <div class="acts" style="align-items:center"><span class="muted" style="margin-right:auto">${sc.length?`<b>${massPlur(sc.length,'file','file')}</b> di ${massPlur(nMezzi,'mezzo','mezzi')} in un archivio ZIP`:'Nessun file scelto'}</span>
+        <button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1" ${sc.length?'':'disabled'}>Esporta ZIP</button></div></div>`;
+    m.querySelectorAll('[data-f]').forEach(x=>x.onchange=()=>{x.checked?st.fonti.add(x.dataset.f):st.fonti.delete(x.dataset.f);if(!st.fonti.size)st.fonti.add('mezzi');paint();});
+    m.querySelectorAll('[data-c]').forEach(x=>x.onchange=()=>{x.checked?st.off.delete(x.dataset.c):st.off.add(x.dataset.c);paint();});
+    m.querySelectorAll('[data-col]').forEach(x=>x.onchange=()=>{for(const t of targhe)if(c.doc.get(t).some(y=>y.a.tipo===x.dataset.col))x.checked?st.off.delete(t+'|'+x.dataset.col):st.off.add(t+'|'+x.dataset.col);paint();});
+    m.querySelectorAll('[data-row]').forEach(x=>x.onchange=()=>{for(const y of c.doc.get(x.dataset.row))x.checked?st.off.delete(x.dataset.row+'|'+y.a.tipo):st.off.add(x.dataset.row+'|'+y.a.tipo);paint();});
+    m.querySelector('#docmCart').onchange=e=>{st.cart=e.target.value;};
+    m.querySelector('#docmUlt').onchange=e=>{st.ultimo=e.target.checked;paint();};
+    m.querySelector('#docmInd').onchange=e=>{st.indice=e.target.checked;};
+    m.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{
+      if(b.dataset.a==='0'){m.remove();return;}
+      m.remove();await docmEsporta(sc,targhe,c,st);
+    });
+  };
+  paint();
+}
+async function docmEsporta(sc,targhe,c,st){
+  busy(true,'Preparazione dei documenti');
+  try{
+    const z=new PizZip(),usati=new Set(),idx=[];let n=0,mancano=0;
+    const unico=p=>{let q=p,i=2;while(usati.has(q.toLowerCase())){const k=p.lastIndexOf('.');q=k>0?p.slice(0,k)+'_'+i+p.slice(k):p+'_'+i;i++;}usati.add(q.toLowerCase());return q;};
+    for(const x of sc){
+      const a=x.a,nome=safe(a.file);
+      const base=st.cart==='targa'?`${safe(x.t)}/${safe(a.tipo)}_${nome}`:st.cart==='tipo'?`${safe(a.tipo)}/${safe(x.t)}_${nome}`:`${safe(x.t)}_${safe(a.tipo)}_${nome}`;
+      let stato='esportato',percorso='';
+      try{const b=await getBlob(a);percorso=unico(base);z.file(percorso,new Uint8Array(await b.arrayBuffer()));n++;}
+      catch(e){stato='non disponibile: '+e.message;mancano++;}
+      idx.push([x.t,a.tipo,x.fonte,x.desc,a.file,a.scadenza||'',a.caricatoIl||'',stato,percorso]);
+    }
+    if(!n){toast('Nessuno dei file scelti è disponibile su questa postazione: apri il registro dalla cartella di lavoro.',true);return;}
+    if(st.indice){
+      const tipiScelti=[...new Set(sc.map(x=>x.a.tipo))];
+      const wb=new ExcelJS.Workbook();wb.creator='Gestionale flotta';
+      const ws=wb.addWorksheet('File esportati');
+      ws.addRow(['Targa','Veicolo','Tipo documento','Sezione','Riferimento','File','Scadenza','Caricato il','Esito','Percorso nello ZIP']);
+      for(const r of idx){const mz=mezzoBy(r[0]);ws.addRow([r[0],mz?mezzoName(mz):'',r[1],r[2],r[3],r[4],r[5]?fromISO(r[5]):'',r[6]?fromISO(r[6]):'',r[7],r[8]]);}
+      ws.getRow(1).font={bold:true};ws.views=[{state:'frozen',ySplit:1}];[11,26,26,26,18,34,12,12,30,50].forEach((w,i)=>ws.getColumn(i+1).width=w);
+      ws.getColumn(7).numFmt='dd/mm/yyyy';ws.getColumn(8).numFmt='dd/mm/yyyy';
+      const wm=wb.addWorksheet('Documenti mancanti');
+      wm.addRow(['Targa','Veicolo','Tipo documento non presente']);
+      let nm=0;
+      for(const t of targhe){const ha=new Set((c.doc.get(t)||[]).map(x=>x.a.tipo));
+        for(const tp of tipiScelti)if(!ha.has(tp)){const mz=mezzoBy(t);wm.addRow([t,mz?mezzoName(mz):'',tp]);nm++;}}
+      wm.getRow(1).font={bold:true};[11,26,36].forEach((w,i)=>wm.getColumn(i+1).width=w);
+      if(!nm)wm.addRow(['','','Nessuno: tutti i mezzi hanno tutti i tipi scelti.']);
+      z.file('Indice_documenti.xlsx',new Uint8Array(await wb.xlsx.writeBuffer()));
+    }
+    await saveFile(`Documenti_mezzi_${stampNow()}_${targhe.length}_targhe.zip`,z.generate({type:'blob',mimeType:'application/zip',compression:'DEFLATE'}));
+    toast(`${massPlur(n,'documento esportato','documenti esportati')} di ${massPlur(new Set(sc.map(x=>x.t)).size,'mezzo','mezzi')} in ZIP.`+(mancano?` ${massPlur(mancano,'file non disponibile','file non disponibili')} su questa postazione (indicati nell’indice).`:''),!!mancano);
+  }catch(e){toast('Esportazione non riuscita: '+e.message,true);}
+  finally{busy(false);}
+}
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
