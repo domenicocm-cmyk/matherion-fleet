@@ -1172,7 +1172,7 @@ async function loadWorkbook(buf,name,{fromDraft}={}){
   for(let r=2;r<=wl.rowCount;r++){const v=str(cv(wl.getCell('A'+r)));if(v)S.tip.push(v);}
   const wp=wb.getWorksheet('Parametri');const p=k=>cv(wp.getCell('B'+PR[k]));
   const mese=anyToISO(p('mese'))||todayISO();
-  S.par={mese:mese.slice(0,8)+'01',iva:toNum(p('iva'))===''?0.22:toNum(p('iva')),termine:p('termine')||30,preavviso:p('preavviso')||30,
+  S.par={mese:mese.slice(0,8)+'01',iva:toNum(p('iva'))===''?0.22:toNum(p('iva')),termine:(toNum(p('termine'))===''?30:toNum(p('termine'))),preavviso:p('preavviso')||30,
     penaleRecesso:p('penaleRecesso')||3,speseSanz:toNum(p('speseSanz'))===''?25:toNum(p('speseSanz')),eta:p('eta')||21,anniPat:p('anniPat')||2,
     luogo:str(p('luogo')),prefisso:str(p('prefisso'))||'NOL-',penaleRit:toNum(p('penaleRit'))===''?1.5:toNum(p('penaleRit')),mora:str(p('mora'))||'D.Lgs. 231/2002',quadroTag:str(p('quadroTag'))||'Q'};
   loadModules(wb);
@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.25';
+const APP_VERSION='2026.10.26';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -6342,7 +6342,7 @@ function fatDocData(f){
     righe:righe.map(r=>docBlank({descrizione:r.descrizione,targa:r.targa||'',quantita:numF.format(+r.quantita||0),prezzo:eur(+r.prezzo||0),aliquota:r.natura||`${numF.format(+r.aliquota||0)}%`,imponibile:eur(+r.imponibile||0)})),
     iva:Object.entries(byIva).map(([k,o])=>({aliquota:k,imponibile:eur(o.imp),imposta:eur(o.iva)})),
     centro_costo:f.centroCosto?cdcNome(f.centroCosto):'non previsto',tot_imponibile:eur(f.imponibile),tot_iva:eur(f.iva),totale:eur(f.totale),
-    pagamento:cli.pagamento||`Bonifico a ${S.par.termine} giorni data fattura`,iban:tit.iban,note:f.note||'nessuna'});
+    pagamento:cli.pagamento||(+S.par.termine===0?'Rimessa Diretta':`Bonifico a ${S.par.termine} giorni data fattura`),iban:tit.iban,note:f.note||'nessuna'});
 }
 function rigaPeriodo(r,f){
   // periodo e giorni della riga; per righe vecchie li ricava dal contratto di noleggio
@@ -9220,15 +9220,36 @@ function contractData(o,isLast){
     canone:E(eur(o.canone)),aliquota_iva:pct(S.par.iva),km_inclusi:o.kmInclusi===''?BL:numF.format(o.kmInclusi),costo_km_extra:E(eur(o.costoKm)),
     franchigia_rca:E(eur(o.frRca)),franchigia_kasko:E(eur(o.frKasko)),franchigia_furto:E(eur(o.frFurto)),deposito:E(eur(o.deposito)),
     localita_ritiro:E(o.localita),localita_indirizzo:E(addr(lo)),localita_orari:E(lo.orari),note:o.note?o.note:'nessuna',
-    termine_pagamento:E(S.par.termine),preavviso_giorni:E(S.par.preavviso),penale_recesso_canoni:E(S.par.penaleRecesso),spese_sanzioni:E(eur(S.par.speseSanz)),
+    termine_pagamento:(+S.par.termine===0?'⁠RD⁠':E(S.par.termine)),preavviso_giorni:E(S.par.preavviso),penale_recesso_canoni:E(S.par.penaleRecesso),spese_sanzioni:E(eur(S.par.speseSanz)),
     eta_minima:E(S.par.eta),anni_patente:E(S.par.anniPat),penale_ritardo_pct:pct(S.par.penaleRit),mora:E(S.par.mora),
     ultimo:!!isLast
   };
+}
+/* termine di pagamento 0: «a 0 giorni data fattura» diventa «in Rimessa Diretta» (anche se il testo è spezzato in più blocchi) */
+function rimessaDiretta(zip){
+  const f=zip.file('word/document.xml');if(!f)return;
+  const x=f.asText();if(x.indexOf('⁠RD⁠')<0)return;
+  const dom=new DOMParser().parseFromString(x,'application/xml');
+  for(const p of [...dom.getElementsByTagName('w:p')]){
+    const ts=[...p.getElementsByTagName('w:t')];if(!ts.length)continue;
+    const txt=ts.map(t=>t.textContent).join('');
+    const re=/(?:(?:a|entro) )?⁠RD⁠(?: giorni(?: dalla data della fattura| data fattura(?: fine mese)?)?)?/g;let m;const trovati=[];
+    while((m=re.exec(txt)))trovati.push([m.index,m.index+m[0].length,/^(a|entro) /.test(m[0])?'in Rimessa Diretta':'Rimessa Diretta']);
+    for(const [a,b,nuovo] of trovati.reverse()){
+      let pos=0,messo=false;
+      for(const t of ts){const v=t.textContent,s=pos,e=pos+v.length;pos=e;
+        if(e<=a||s>=b)continue;
+        const da=Math.max(a,s)-s,fino=Math.min(b,e)-s;
+        t.textContent=v.slice(0,da)+(messo?'':nuovo)+v.slice(fino);messo=true;t.setAttribute('xml:space','preserve');}
+    }
+  }
+  zip.file('word/document.xml',new XMLSerializer().serializeToString(dom));
 }
 function renderDocx(tplBuf,data){
   const zip=new PizZip(tplBuf);
   const doc=new window.docxtemplater(zip,{paragraphLoop:true,linebreaks:true,nullGetter(){return '________';}});
   doc.render(data);
+  rimessaDiretta(doc.getZip());
   return doc.getZip();
 }
 function tplHasLoop(buf){try{const z=new PizZip(buf);const x=(z.file('word/document.xml')?.asText()||'').replace(/<[^>]+>/g,'');return x.includes('{#contratti}');}catch(e){return false;}}
