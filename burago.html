@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.26';
+const APP_VERSION='2026.10.28';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -5999,7 +5999,7 @@ function attribuisciVerbale(x,force){
   const t=normTarga(x.targa);if(!t||!x.dataInfrazione)return null;
   if(!force&&x.tipoResponsabile&&x.tipoResponsabile!=='Da verificare')return null;
   const r=rentalOn(t,x.dataInfrazione);
-  if(r)return {tipoResponsabile:'Cliente locatario',cliente:r.locataria,noleggio:r.numero,stato:'Da rinotificare',speseGestione:S.par.speseSanz};
+  if(r)return vrbEsito(r);
   const a=assAt(t,x.dataInfrazione);
   if(a)return {tipoResponsabile:'Dipendente',dipendente:a.dipendente,stato:'Da contestare al dipendente'};
   return null;
@@ -6055,11 +6055,11 @@ function renderVrb(){
 /* ---------- RINOTIFICHE ---------- */
 function renderRinot(){
   const u=ui('rinot');
-  const cand=r=>r.tipoResponsabile==='Cliente locatario'||!!r.cliente||!!(r.targa&&r.dataInfrazione&&rentalOn(r.targa,r.dataInfrazione));
+  const cand=r=>!vrbSoloSocieta(r)&&(r.tipoResponsabile==='Cliente locatario'||!!r.cliente||!!(r.targa&&r.dataInfrazione&&rentalOn(r.targa,r.dataInfrazione)));
   genericList('vrb',{uiKey:'rinot',title:'Rinotifiche',sub:'Verbali su veicoli a noleggio: pacchetto con lettera al cliente, comunicazione all’ente e allegati presi dall’anagrafica del cliente.',
     noImport:true,noNew:true,rowFilter:r=>u.f.__tutti==='Tutti i verbali'||cand(r),searchPh:'Numero, cliente, targa',search:['numeroVerbale','cliente','targa','ente','protocollo','codice'],
     buttons:[{l:'Ricalcola attribuzioni',fn:()=>{
-        let n=0;for(const v of S.vrb){if(['Pagato','Annullato','Chiuso'].includes(v.stato))continue;const a=attribuisciVerbale(v,v.tipoResponsabile!=='Cliente locatario');if(a&&a.tipoResponsabile==='Cliente locatario'&&!v.cliente){Object.assign(v,a);n++;}}
+        let n=0;for(const v of S.vrb){if(['Pagato','Annullato','Chiuso'].includes(v.stato))continue;const a=attribuisciVerbale(v,v.tipoResponsabile!=='Cliente locatario');if(a&&['Cliente locatario','Società'].includes(a.tipoResponsabile)&&!v.cliente){Object.assign(v,a);n++;}}
         if(n)markDirty();renderRinot();renderSide();toast(n?`${n} verbali collegati al cliente locatario.`:'Nessun verbale da collegare: controlla targhe e date dei contratti di noleggio.',!n);}},
       {l:'Vai ai verbali',fn:()=>{S.tab='vrb';render();}}],
     filters:[{k:'stato',label:'Stato',opts:()=>MODS.vrb.fmap.stato.opts},
@@ -6581,7 +6581,7 @@ function renderFattWizard(tabs){
        }).sort().join('')}</tbody></table></div>
      <p class="muted" style="margin:10px 0 0;font-size:12px">Per rifatturarne uno, annulla la proforma che lo contiene: torna subito in questo elenco. Una proforma in bozza conta come emessa.</p>
    </details>`:''}
-   <p class="muted" style="margin-top:-4px;font-size:13px">IVA proposta: ${ivaStd}% su canoni, spese e franchigie; pedaggi come anticipazioni escluse (natura N1, art. 15 DPR 633/72). Verifica il trattamento con l’amministrazione e correggi le righe dopo la creazione, se serve.</p>
+   <p class="muted" style="margin-top:-4px;font-size:13px">IVA proposta: ${ivaStd}% su canoni e spese; franchigie e danni senza IVA (risarcimento, natura N2.2); pedaggi come anticipazioni escluse (natura N1, art. 15 DPR 633/72). Verifica il trattamento con l’amministrazione e correggi le righe dopo la creazione, se serve.</p>
    ${vis.length?vis.map(c=>{const l=lines.filter(x=>x.key===c);const la=l.filter(x=>!x.off);const imp=la.reduce((a,x)=>a+r2(x.quantita*x.prezzo),0);const iva=la.reduce((a,x)=>a+r2(r2(x.quantita*x.prezzo)*x.aliquota/100),0);const s=socBy(keyCli(c))||{};
      return `<div class="panel fatcli"><label class="check"><input type="checkbox" data-c="${esc(c)}" ${u.excl.has(c)?'':'checked'}><b>${esc(keyCli(c))}${keyCdc(c)?' – centro di costo '+esc(cdcNome(keyCdc(c))):''}</b><span class="muted">${esc(keyEmit(c)?'da '+keyEmit(c):'emittente da definire')} · ${esc(s.sdi?'SDI '+s.sdi:'codice SDI mancante')} · ${esc(s.piva?'P.IVA '+s.piva:'P.IVA mancante')}</span><span class="grow"></span><b>${eur(imp+iva)}</b></label>
       <table class="grid mini"><tbody>${l.map(x=>`<tr class="${x.sub?'fatsub':''}${x.off?' fatoff':''}"><td>${fatCheck(u,x)}${esc(x.tipo)}</td><td>${esc(x.descrizione)}${fatRigaExtra(x)}</td><td>${x.targa?plate(x.targa):''}</td><td class="num">${numF.format(x.quantita)} × ${eur(x.prezzo)}</td><td class="num">${x.natura||x.aliquota+'%'}</td><td class="num"><b>${eur(r2(x.quantita*x.prezzo))}</b></td></tr>`).join('')}</tbody></table></div>`;}).join('')
@@ -15469,7 +15469,7 @@ function fatRigheSinistri({ivaStd,emitDi,lines}){
     const base={cli:s.cliente,emit:emitDi(s.targa,s.data),cdc:s.centroCosto||cdcFor(s.targa,s.data),targa:s.targa,origine:s.codice,quantita:1};
     const fra=!s.proforma&&+s.importoRiaddebito>0;
     if(fra)lines.push({...base,tipo:'Franchigia sinistro',descrizione:`Addebito franchigia/danni sinistro ${s.codice} del ${fmtD(s.data)}`,
-      prezzo:+s.importoRiaddebito,aliquota:ivaStd,natura:''});
+      prezzo:+s.importoRiaddebito,aliquota:0,natura:'N2.2'});  /* franchigia e danni: risarcimento, senza IVA */
     if(s.addebitaGestione!=='No'&&!s.proformaGestione&&sinGestione()>0)
       lines.push({...base,id:'sin-ges:'+s.codice,opz:true,sub:fra,tipo:'Gestione sinistro',
         descrizione:`Sinistro ${s.codice} del ${fmtD(s.data)}`,prezzo:sinGestione(),aliquota:ivaStd,natura:'',
@@ -15493,6 +15493,48 @@ tr.fatoff td:first-child{text-decoration:none}
 .fatpre{color:var(--muted)}`;
   document.head.append(s);
 }
+
+/* =====================================================================
+   VERBALI SU MEZZI A NOLEGGIO: SI RINOTIFICANO TUTTI AL CLIENTE,
+   TRANNE QUELLI DI GLOBAL ONE, CHE PAGA LA SOCIETÀ
+   Il nome (o i nomi, separati da «;») sta nei Parametri: «Verbali pagati
+   dalla società per i clienti». I verbali di questi clienti non vanno in
+   rinotifica: nascono «Responsabile: Società», «Da pagare», pagati dalla società.
+   ===================================================================== */
+if(typeof PARAMS_EXTRA!=='undefined'&&!PARAMS_EXTRA.some(p=>p[0]==='verbaliPagaSocieta'))
+  PARAMS_EXTRA.push(['verbaliPagaSocieta',38,'Clienti i cui verbali paga la società, senza rinotifica (separati da ;)','Global One']);
+const vrbNomeNorm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'');
+function vrbPagaSocieta(cliente){
+  const n=vrbNomeNorm(cliente);if(!n)return false;
+  const p=S.par&&S.par.verbaliPagaSocieta!=null&&S.par.verbaliPagaSocieta!==''?S.par.verbaliPagaSocieta:'Global One';
+  return String(p).split(/[;|]/).map(vrbNomeNorm).filter(Boolean).some(x=>n.includes(x));
+}
+const vrbSoloSocieta=r=>r.tipoResponsabile==='Società'&&vrbPagaSocieta(r.cliente);
+function vrbEsito(r){
+  if(vrbPagaSocieta(r.locataria))
+    return {tipoResponsabile:'Società',cliente:r.locataria,noleggio:r.numero,stato:'Da pagare',pagatoDa:'Società'};
+  return {tipoResponsabile:'Cliente locatario',cliente:r.locataria,noleggio:r.numero,stato:'Da rinotificare',speseGestione:S.par.speseSanz};
+}
+/* i verbali già registrati, ancora da rinotificare, di questi clienti */
+function vrbAllineaPagaSocieta(){
+  let n=0;
+  for(const v of S.vrb){
+    if(!v.cliente||!vrbPagaSocieta(v.cliente))continue;
+    if(!['Da rinotificare','Ricevuto','Da verificare',''].includes(v.stato||''))continue;
+    if(!['Cliente locatario','Da verificare',''].includes(v.tipoResponsabile||''))continue;
+    if(v.rinotificaData)continue;
+    Object.assign(v,{tipoResponsabile:'Società',stato:'Da pagare',pagatoDa:v.pagatoDa||'Società',speseGestione:''});n++;
+  }
+  return n;
+}
+(()=>{
+  const r0=render;let fatto=null;
+  render=function(){
+    try{if(S.wb&&fatto!==S.wb&&S.vrb){fatto=S.wb;const n=vrbAllineaPagaSocieta();
+      if(n){markDirty();toast(`${n} verbali di clienti pagati dalla società tolti dalle rinotifiche (ora «Da pagare»).`);}}}catch(e){console.warn('vrb',e);}
+    return r0.apply(this,arguments);
+  };
+})();
 
 
 /* =====================================================================
