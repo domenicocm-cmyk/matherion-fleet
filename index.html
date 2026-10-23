@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.29';
+const APP_VERSION='2026.10.30';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -17374,6 +17374,7 @@ const G_CONCETTI={
   dip:'dipendente dipendenti autista autisti conducente assegnazione assegnazioni patente',
   gio:'giornaliera giornaliere consegna riconsegna ritiro turno',
   doc:'documento documenti allegato allegati libretto libretti',
+  acc:'accise accisa gasolio rimborso carburante agevolato 7,5 75 quintali dogane quadro quadri',
   pol:'polizza polizze assicurazione assicurazioni assicurativa assicurative tagliando tagliandi quietanza quietanze rca certificato',
   scad:'scadenza scadenze scade scadono revisione bollo assicurazione scadenziario rca',
   costi:'spese spesa costi costo riepilogo report margine margini quanto spendo spendiamo',
@@ -17533,6 +17534,10 @@ function gCatalogo(){
     risp:()=>({testo:'Scegli il PDF della compagnia (anche uno solo con le polizze di tutta la flotta) o le foto: il gestionale legge targa, polizza, scadenze e premi, ti mostra l’anteprima e, alla conferma, aggiorna la scheda di ogni mezzo e vi allega la copia con le sole sue pagine.',
       passi:[gMenu('mezzi'),{testo:'Premi **Importa polizze** e scegli il file.',sel:()=>[...document.querySelectorAll('#main button')].find(b=>/Importa polizze/.test(b.textContent)),fatto:()=>!!document.querySelector('.modal')},
       {testo:'Aspetta la lettura (le scansioni richiedono qualche minuto), poi controlla targa, polizza e scadenza: puoi correggerle. Premi **Importa**.',sel:()=>document.querySelector('.modal .box'),fatto:()=>false}],sezione:'mezzi',scrivi:'mezzi'})}));
+  T.push(gCompito({id:'rimborso-accise',c:['acc'],v:['trova','crea','modifica'],peso:4,titolo:'Calcolare il rimborso accise sul gasolio (veicoli da 7,5 t)',
+    risp:()=>({testo:'Il calcolo prende i rifornimenti dei Movimenti, tiene solo i veicoli da 7,5 t Euro 5 o superiore, usa l’accisa in vigore il giorno di ogni rifornimento e raccoglie i totali per Quadro. Inserisci i km di ogni veicolo per il limite di 1 litro per km.',
+      passi:[gMenu('accise'),{testo:'Scegli **Anno** e **Trimestre**: vedi il credito, i quadri e i rifornimenti esclusi con il motivo.',sel:()=>document.querySelector('#main #accTr'),fatto:()=>false},
+      {testo:'Scrivi i **Km del trimestre** di ogni veicolo, poi **Esporta Excel** per i quadri della dichiarazione.',sel:()=>document.querySelector('#main [data-acckm]')||document.querySelector('#main [data-accxl]'),fatto:()=>false}],sezione:'accise'})}));
   T.push(gCompito({id:'costi-cdc',c:['cdc','costi'],v:['trova'],peso:3,titolo:'Vedere i costi di un centro di costo',
     risp:e=>gRispCostiCdc(e)}));
   T.push(gCompito({id:'costi-cdc-carte',c:['cdc','carta','costi'],v:['trova'],peso:2,titolo:'Riepilogo di carburante e pedaggi per centro di costo',
@@ -18251,6 +18256,359 @@ function polApri(files){
     }
   })();
 }
+
+
+/* =====================================================================
+   RIMBORSO ACCISE SUL GASOLIO COMMERCIALE (art. 24-ter TUA)
+   Veicoli di massa complessiva ≥ 7,5 t (75 quintali), Euro 5 o superiore.
+   ---------------------------------------------------------------------
+   Il rimborso è la differenza fra l'accisa in vigore il giorno del
+   rifornimento e l'aliquota agevolata fissa (403,22 €/1.000 l). L'accisa
+   cambia più volte anche nello stesso trimestre (tagli temporanei del
+   2026): per questo ogni rifornimento usa l'importo DELLA SUA DATA e
+   i totali si raccolgono per «Quadro» come nella dichiarazione ADM.
+   Regole applicate (dalla relazione di ottobre 2026, da verificare ad ogni
+   nota dell'Agenzia):
+     · solo gasolio e HVO acquistati in Italia, con la targa in fattura;
+       esclusi AdBlue, lubrificanti, rifornimenti all'estero;
+     · solo veicoli ≥ 7,5 t ed Euro 5/6; mai Euro 4 o inferiori;
+     · se il mezzo è a noleggio senza conducente il rimborso spetta al
+       cliente che lo usa (si prepara l'elenco per lui), non alla società;
+     · al massimo 1 litro per km per veicolo nel trimestre;
+     · la dichiarazione è trimestrale, entro il mese dopo il trimestre.
+   Le aliquote stanno in una tabella modificabile («Aliquote»): quando
+   l'Agenzia pubblica la nota del trimestre si aggiornano lì, senza
+   toccare il programma.
+   ===================================================================== */
+
+/* ---------- parametri ---------- */
+if(typeof PARAMS_EXTRA!=='undefined'){
+  if(!PARAMS_EXTRA.some(p=>p[0]==='acciseAgevolata'))PARAMS_EXTRA.push(['acciseAgevolata',39,'Accise gasolio autotrasporto: aliquota agevolata (€ per 1.000 litri)',403.22]);
+  if(!PARAMS_EXTRA.some(p=>p[0]==='acciseDiritto'))PARAMS_EXTRA.push(['acciseDiritto',40,'Rimborso accise: la società ha diritto (Albo conto terzi / licenza)? Sì/No','Sì']);
+}
+const accAgevolata=()=>{const n=parseFloat(S.par&&S.par.acciseAgevolata);return isNaN(n)?403.22:n;};
+const accDiritto=()=>String((S.par&&S.par.acciseDiritto)||'Sì').trim().toLowerCase()[0]!=='n';
+
+/* ---------- le schede: aliquote e km ---------- */
+const ACC_PROD=['Gasolio e HVO non conforme','HVO conforme'];
+MODS.accal={sheet:'Accise aliquote',store:'accal',title:'Aliquote di accisa sul gasolio',code:'AC',wide:true,
+ groups:[{t:'Periodo e aliquota',f:[
+   fd('dal','Dal','date',{req:true,span:'s3'}),fd('al','Al','date',{req:true,span:'s3'}),
+   fd('prodotto','Prodotto','sel',{req:true,opts:ACC_PROD,def:ACC_PROD[0],span:'s3'}),
+   fd('accisa','Accisa in vigore (€ per 1.000 l)','num',{req:true,span:'s3',hint:'Il rimborso è questa cifra meno l’aliquota agevolata (Parametri)'}),
+   fd('quadro','Quadro','text',{span:'s3',hint:'Vuoto: si numera da solo (A-1, A-2…) dentro il trimestre'}),
+   fd('fonte','Fonte','text',{span:'s3'}),fd('note','Note','text',{span:'s6'})]}]};
+MODS.acck={sheet:'Accise km',store:'acck',title:'Km per trimestre dei veicoli',code:'AK',wide:true,
+ groups:[{t:'Km',f:[fd('anno','Anno','int',{req:true,span:'s3'}),fd('trimestre','Trimestre','int',{req:true,span:'s3'}),
+   fd('targa','Targa','up',{req:true,span:'s3'}),fd('km','Km percorsi nel trimestre','int',{req:true,span:'s3'})]}]};
+ammRegistraModuli(['accal','acck']);
+
+/* le aliquote ufficiali (informative ADM; il 4° trimestre 2026 è dedotto: aggiornare con la nota) */
+const ACC_G='Gasolio e HVO non conforme',ACC_H='HVO conforme';
+const ACC_DEFAULT=[
+ ['2025-01-01','2025-05-14',ACC_G,617.40,'Informative ADM 2025'],
+ ['2025-05-15','2025-12-31',ACC_G,632.40,'DM 14/05/2025 (D.Lgs. 43/2025)'],
+ ['2026-01-01','2026-03-18',ACC_G,672.90,'L. 199/2025 c. 129'],
+ ['2026-03-19','2026-05-22',ACC_G,472.90,'D.L. 33/2026 – note ADM 1° e 2° trim. 2026'],
+ ['2026-05-23','2026-06-06',ACC_G,572.90,'Informativa ADM 2° trim. 2026'],
+ ['2026-06-07','2026-07-03',ACC_G,622.90,'Informative ADM 2° e 3° trim. 2026'],
+ ['2026-07-04','2026-07-27',ACC_G,672.90,'Informativa ADM 3° trim. 2026'],
+ ['2026-07-28','2026-09-17',ACC_G,532.90,'Informativa ADM 3° trim. 2026'],
+ ['2026-09-18','2026-09-25',ACC_G,572.90,'Informativa ADM 3° trim. 2026'],
+ ['2026-09-26','2026-10-05',ACC_G,622.90,'3° trim. 2026 / D.L. 162/2026'],
+ ['2026-10-06','2026-12-31',ACC_G,672.90,'Aliquota ordinaria: 4° trim. 2026 in attesa della nota ADM'],
+ ['2025-05-15','2026-03-18',ACC_H,617.40,'Art. 3 c. 4 D.Lgs. 43/2025'],
+ ['2026-03-19','2026-03-31',ACC_H,472.90,'Note ADM 2026'],
+ ['2026-04-01','2026-04-07',ACC_H,617.40,'Note ADM 2026'],
+ ['2026-04-08','2026-05-10',ACC_H,472.90,'Note ADM 2026'],
+ ['2026-05-11','2026-05-22',ACC_H,617.40,'Note ADM 2026'],
+ ['2026-05-23','2026-06-06',ACC_H,572.90,'Note ADM 2026'],
+ ['2026-06-07','2026-07-29',ACC_H,617.40,'Note ADM 2° e 3° trim. 2026'],
+ ['2026-07-30','2026-08-24',ACC_H,532.90,'Informativa ADM 3° trim. 2026'],
+ ['2026-08-25','2026-08-26',ACC_H,617.40,'Informativa ADM 3° trim. 2026'],
+ ['2026-08-27','2026-09-05',ACC_H,532.90,'Informativa ADM 3° trim. 2026'],
+ ['2026-09-06','2026-09-10',ACC_H,617.40,'Informativa ADM 3° trim. 2026'],
+ ['2026-09-11','2026-09-17',ACC_H,532.90,'Informativa ADM 3° trim. 2026'],
+ ['2026-09-18','2026-09-25',ACC_H,572.90,'Informativa ADM 3° trim. 2026'],
+ ['2026-09-26','2026-12-31',ACC_H,617.40,'Informativa ADM 3° trim. 2026; 4° trim. in attesa della nota'],
+].map(([dal,al,prodotto,accisa,fonte])=>({dal,al,prodotto,accisa,fonte}));
+const accTabella=()=>(S.accal&&S.accal.length?S.accal:ACC_DEFAULT).filter(r=>r.dal&&r.al&&r.accisa!==''&&r.accisa!=null);
+function accCaricaUfficiali(){
+  let n=0;
+  for(const d of ACC_DEFAULT){
+    if(S.accal.some(r=>r.dal===d.dal&&r.prodotto===d.prodotto))continue;
+    const r={id:uid(),codice:nextCode(MODS.accal)};for(const f of MODS.accal.fields)r[f.k]=f.def??'';
+    Object.assign(r,d);S.accal.push(r);n++;
+  }
+  if(n)markDirty();return n;
+}
+
+/* ---------- trimestri e scadenze ---------- */
+const accTrim=(anno,t)=>{const m0=(t-1)*3+1,m1=t*3;const p=n=>String(n).padStart(2,'0');
+  const fine=new Date(Date.UTC(+anno,m1,0)).getUTCDate();return {da:`${anno}-${p(m0)}-01`,a:`${anno}-${p(m1)}-${p(fine)}`};};
+const ACC_FESTE=['01-01','01-06','04-25','05-01','06-02','08-15','11-01','12-08','12-25','12-26'];
+function accScadenza(anno,t){          /* ultimo giorno del mese dopo il trimestre, spostato al primo giorno lavorativo */
+  let m=t*3+1,y=+anno;if(m>12){m=1;y++;}
+  let d=new Date(Date.UTC(y,m,0));
+  const fest=x=>{const w=x.getUTCDay();return w===0||w===6||ACC_FESTE.includes(x.toISOString().slice(5,10));};
+  while(fest(d))d=new Date(d.getTime()+86400000);
+  return d.toISOString().slice(0,10);
+}
+const accTrimDi=iso=>({anno:+iso.slice(0,4),t:Math.floor((+iso.slice(5,7)-1)/3)+1});
+
+/* ---------- veicoli ammessi ---------- */
+function accEuro(s){
+  const t=String(s||'').toUpperCase();if(!t)return null;if(/ELETTR|ZEV/.test(t))return 99;
+  const m=/EURO\s*([0-9]+|VI|V|IV|III|II|I)/.exec(t);if(!m)return null;
+  const r={VI:6,V:5,IV:4,III:3,II:2,I:1}[m[1]];return r||+m[1];
+}
+function accVeicolo(m){
+  const motivi=[];
+  const massa=+m.massa>0?+m.massa:(+m.massaMax>0?+m.massaMax:0);
+  const eu=accEuro(m.euro);
+  if(!massa)motivi.push('massa non indicata');else if(massa<7500)motivi.push(`massa ${numF.format(massa)} kg: sotto 7,5 t`);
+  if(eu==null)motivi.push('classe Euro non indicata');else if(eu===99)motivi.push('elettrico: non è gasolio');else if(eu<5)motivi.push(`Euro ${eu}: esclusa (Euro 4 o inferiore)`);
+  if(m.alimentazione&&!/gasolio/i.test(m.alimentazione))motivi.push(`alimentazione ${m.alimentazione}`);
+  if(/rimorchio/i.test(m.tipologia||''))motivi.push('rimorchio: conta il veicolo motore');
+  const incompleto=motivi.some(x=>/non indicata/.test(x));
+  return {ok:!motivi.length,motivi,massa,euro:eu,incompleto};
+}
+
+/* ---------- rifornimenti ---------- */
+if(!MODS.mov.fmap.estero){
+  const g=MODS.mov.groups[0].f,i=g.findIndex(f=>f.k==='prodotto');
+  g.splice(i+1,0,fd('estero','Rifornimento all’estero','bool',{def:'No',hint:'Escluso dal rimborso accise: non ha pagato l’accisa italiana'}));
+  ammCampi(MODS.mov);
+}
+function accProdotto(m){
+  const p=String(m.prodotto||'').toLowerCase();
+  if(/adblue|ad blue|urea|lubrif|\bolio\b|additiv|lavagg/.test(p))return {k:'x',l:'AdBlue o altro prodotto'};
+  if(/elettr|kwh/.test(p))return {k:'x',l:'Elettrico'};
+  if(/benzin|gpl|metano|\bgnl\b|\bcng\b/.test(p))return {k:'x',l:'Non è gasolio'};
+  if(/hvo|paraffin/.test(p)){
+    if(/non\s*conform|senza\s*inform|non\s*certif/.test(p))return {k:'hn',l:'HVO non conforme'};
+    if(/conform|certific|sostenib|100/.test(p))return {k:'hc',l:'HVO conforme'};
+    return {k:'hs',l:'HVO senza informazioni'};            /* prudenza: aliquota minore */
+  }
+  return {k:'g',l:'Gasolio'};
+}
+function accRiga(tab,prod,data){return tab.filter(r=>r.prodotto===prod&&r.dal<=data&&r.al>=data)[0]||null;}
+function accRate(k,data,tab){
+  const g=accRiga(tab,ACC_G,data),h=accRiga(tab,ACC_H,data),ag=accAgevolata();
+  const rim=r=>r?Math.max(0,r2(+r.accisa-ag)):null;
+  let r=null;
+  if(k==='g'||k==='hn')r=g;
+  else if(k==='hc')r=h;
+  else if(k==='hs'){r=g&&h?(rim(g)<=rim(h)?g:h):(g||h);}
+  return r?{riga:r,rimborso:rim(r),accisa:+r.accisa,tabella:r.prodotto}:null;
+}
+const accTargaMov=m=>normTarga(m.targa||((S.disp.find(d=>d.codice===m.dispositivo)||{}).targa)||'');
+
+/* il calcolo del trimestre */
+function accCalcola(anno,t){
+  const {da,a}=accTrim(anno,t),tab=accTabella();
+  const out={anno,t,da,a,scadenza:accScadenza(anno,t),ammessi:[],esclusi:[],veicoli:[],quadri:[],noleggi:[],tot:0,litri:0,diritto:accDiritto()};
+  const km=new Map(S.acck.filter(k=>String(k.anno)===String(anno)&&String(k.trimestre)===String(t)).map(k=>[normTarga(k.targa),+k.km||0]));
+  /* i quadri si numerano dentro il trimestre, prima il gasolio e poi l'HVO conforme (come nella dichiarazione) */
+  const seg=(prod)=>tab.filter(r=>r.prodotto===prod&&r.al>=da&&r.dal<=a).sort((x,y)=>x.dal<y.dal?-1:1);
+  const sg=seg(ACC_G),sh=seg(ACC_H);
+  const lab=r=>{if(r.quadro)return r.quadro;const i=sg.indexOf(r);if(i>=0)return 'A-'+(i+1);const j=sh.indexOf(r);return j>=0?'A-'+(sg.length+j+1):'';};
+  const mezzi=new Map(S.mezzi.map(m=>[normTarga(m.targa),m]));
+  for(const m of S.mov){
+    if(m.tipo!=='Rifornimento'||!(+m.litri>0)||!m.data||m.data<da||m.data>a)continue;
+    const targa=accTargaMov(m),p=accProdotto(m),base={m,data:m.data,targa,litri:+m.litri,prodotto:p.l,luogo:m.luogo||''};
+    const escludi=(motivo,tipo)=>out.esclusi.push({...base,motivo,tipo:tipo||'escluso'});
+    if(p.k==='x')escludi(p.l,'prodotto');
+    else if(m.estero==='Sì')escludi('rifornimento all’estero','estero');
+    else if(!targa)escludi('senza targa: serve la targa sulla fattura','da correggere');
+    else{
+      const mz=mezzi.get(targa);
+      if(!mz)escludi('targa non presente in anagrafica','da correggere');
+      else{
+        const v=accVeicolo(mz);
+        const nol=S.rows.find(r=>normTarga(r.targa)===targa&&r.inizio&&r.fine&&m.data>=r.inizio&&m.data<=r.fine);
+        if(!v.ok)escludi(v.motivi.join(', '),v.incompleto?'da correggere':'veicolo');
+        else if(nol){escludi(`a noleggio a ${nol.locataria}: il rimborso spetta al cliente`,'noleggio');out.noleggi.push({...base,cliente:nol.locataria,contratto:nol.numero});}
+        else if(!out.diritto)escludi('la società non risulta iscritta all’Albo / senza licenza (Parametri)','diritto');
+        else{
+          const rt=accRate(p.k,m.data,tab);
+          if(!rt)escludi('aliquota non presente per questa data: aggiorna la tabella «Aliquote»','da correggere');
+          else out.ammessi.push({...base,k:p.k,rt,quadro:lab(rt.riga),rimborso:rt.rimborso});
+        }
+      }
+    }
+  }
+  /* il limite di 1 litro per km, per veicolo */
+  const perV=new Map();
+  for(const x of out.ammessi){(perV.get(x.targa)||perV.set(x.targa,[]).get(x.targa)).push(x);}
+  for(const [targa,l] of perV){
+    const tot=l.reduce((s,x)=>s+x.litri,0),k=km.get(targa)||0,coeff=k>0&&tot>k?k/tot:1;
+    let imp=0,lit=0;
+    for(const x of l){x.coeff=coeff;x.litriAmm=x.litri*coeff;x.importo=x.litriAmm*x.rimborso/1000;imp+=x.importo;lit+=x.litriAmm;}
+    out.veicoli.push({targa,mezzo:mezzi.get(targa),litri:tot,km:k,litriAmm:lit,coeff,importo:imp,nRif:l.length,
+      avvisi:[!k?'km del trimestre non inseriti: limite 1 l/km non verificato':'',coeff<1?`litri oltre i km: ridotti a ${numF.format(Math.round(k))} l`:''].filter(Boolean)});
+  }
+  out.veicoli.sort((x,y)=>x.targa<y.targa?-1:1);
+  /* i quadri: un solo arrotondamento, sul totale */
+  const q=new Map();
+  for(const x of out.ammessi){
+    const key=x.quadro+'|'+x.rt.riga.prodotto+'|'+x.rt.riga.dal;
+    const o=q.get(key)||q.set(key,{quadro:x.quadro,prodotto:x.rt.riga.prodotto,dal:x.rt.riga.dal<da?da:x.rt.riga.dal,al:x.rt.riga.al>a?a:x.rt.riga.al,rimborso:x.rimborso,accisa:x.rt.accisa,litri:0,importo:0,n:0}).get(key);
+    o.litri+=x.litriAmm;o.n++;
+  }
+  out.quadri=[...q.values()].sort((x,y)=>(parseInt(String(x.quadro).replace(/\D/g,''))||0)-(parseInt(String(y.quadro).replace(/\D/g,''))||0)||(x.dal<y.dal?-1:1));
+  for(const o of out.quadri){o.litri=Math.round(o.litri*1000)/1000;o.importo=r2(o.litri*o.rimborso/1000);}
+  out.tot=r2(out.quadri.reduce((s,o)=>s+o.importo,0));
+  out.litri=Math.round(out.quadri.reduce((s,o)=>s+o.litri,0));
+  return out;
+}
+
+/* ---------- la pagina ---------- */
+const accEur=n=>n==null?'–':eur(n);
+const accLit=n=>numF.format(Math.round(n));
+function accTabs(){
+  const t=ui('accTab').tab||'c';
+  return `<div class="subtabs"><button class="${t==='c'?'on':''}" data-sub="accTab:c">Calcolo del trimestre</button><button class="${t==='v'?'on':''}" data-sub="accTab:v">Veicoli ammessi</button><button class="${t==='a'?'on':''}" data-sub="accTab:a">Aliquote</button><button class="${t==='r'?'on':''}" data-sub="accTab:r">Regole</button></div>`;
+}
+function renderAccise(){
+  const t=ui('accTab').tab||'c';
+  if(t==='a')return renderAcciseAliquote();
+  if(t==='v')return renderAcciseVeicoli();
+  if(t==='r')return renderAcciseRegole();
+  return renderAcciseCalcolo();
+}
+function renderAcciseCalcolo(){
+  const u=ui('accCalc');
+  if(!u.anno){const q=accTrimDi(addMonths(todayISO(),-1));u.anno=String(q.anno);u.t=String(q.t);}
+  const c=accCalcola(u.anno,u.t);
+  const anni=[...new Set([String(+todayISO().slice(0,4)),String(+todayISO().slice(0,4)-1),String(+todayISO().slice(0,4)-2),u.anno])].sort().reverse();
+  const giorni=Math.round((Date.parse(c.scadenza)-Date.parse(todayISO()))/86400000);
+  const scad=giorni<0?`<b class="late">scaduta da ${-giorni} giorni</b>`:giorni<=7?`<b class="late">tra ${giorni} giorni</b>`:`tra ${giorni} giorni`;
+  const daCorreggere=c.esclusi.filter(x=>x.tipo==='da correggere');
+  const perTipo={};for(const x of c.esclusi)(perTipo[x.tipo]=perTipo[x.tipo]||[]).push(x);
+  const nomiTipo={prodotto:'Prodotti diversi dal gasolio (AdBlue, lubrificanti…)',estero:'Rifornimenti all’estero',veicolo:'Veicoli non ammessi',noleggio:'Mezzi a noleggio: spetta al cliente',diritto:'Società senza diritto','da correggere':'Da correggere'};
+  const kpi=(l,v,s)=>`<div class="panel" style="flex:1;min-width:170px;margin:0"><small class="muted">${l}</small><div style="font:700 22px/1.2 inherit">${v}</div>${s?`<small class="muted">${s}</small>`:''}</div>`;
+  $('#main').innerHTML=`${pageHead('Rimborso accise gasolio','Veicoli da 7,5 t (75 quintali) in su, Euro 5 o superiore. Ogni rifornimento usa l’accisa della sua data; i totali si raccolgono per Quadro come nella dichiarazione dell’Agenzia delle dogane.',
+      '<button class="btn" data-accxl>Esporta Excel</button>')}${accTabs()}
+    <div class="toolbar">
+      <div class="field"><label for="accAnno">Anno</label><select class="input" id="accAnno">${anni.map(a=>`<option ${a===u.anno?'selected':''}>${a}</option>`).join('')}</select></div>
+      <div class="field"><label for="accTr">Trimestre</label><select class="input" id="accTr">${[1,2,3,4].map(x=>`<option value="${x}" ${String(x)===String(u.t)?'selected':''}>${x}° trimestre (${fmtD(accTrim(u.anno,x).da).slice(0,5)}–${fmtD(accTrim(u.anno,x).a).slice(0,5)})</option>`).join('')}</select></div></div>
+    ${c.diritto?'':'<div class="panel" style="border-left:4px solid var(--danger,#b00020)"><b>Nei Parametri la società risulta senza diritto al rimborso</b> (Albo conto terzi o licenza conto proprio): i rifornimenti dei mezzi propri non sono ammessi. Cambia «Rimborso accise: la società ha diritto» se non è così.</div>'}
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0">
+      ${kpi('Credito del trimestre',`<span style="color:var(--gold-ink,#15616d)">${accEur(c.tot)}</span>`,`${c.quadri.length} ${c.quadri.length===1?'quadro':'quadri'}`)}
+      ${kpi('Litri ammessi',accLit(c.litri),`${c.ammessi.length} rifornimenti di ${c.veicoli.length} ${c.veicoli.length===1?'veicolo':'veicoli'}`)}
+      ${kpi('Rifornimenti esclusi',c.esclusi.length,daCorreggere.length?`<b class="late">${daCorreggere.length} da correggere</b>`:'nessuno da correggere')}
+      ${kpi('Dichiarazione entro',fmtD(c.scadenza),scad)}</div>
+    ${c.ammessi.length?`<h3 style="margin:16px 0 6px">Quadri della dichiarazione</h3>
+      <div class="tablewrap"><table class="grid mini"><thead><tr><th>Quadro</th><th>Prodotto</th><th>Periodo</th><th class="num">Accisa €/1.000 l</th><th class="num">Rimborso €/1.000 l</th><th class="num">Litri</th><th class="num">Importo</th></tr></thead><tbody>
+      ${c.quadri.map(o=>`<tr><td><b>${esc(o.quadro)}</b></td><td>${esc(o.prodotto)}</td><td class="nowrap">${fmtD(o.dal)} – ${fmtD(o.al)}</td><td class="num">${numF.format(o.accisa)}</td><td class="num">${numF.format(o.rimborso)}</td><td class="num">${accLit(o.litri)}</td><td class="num"><b>${accEur(o.importo)}</b></td></tr>`).join('')}
+      <tr><td colspan="5"><b>Totale</b></td><td class="num"><b>${accLit(c.litri)}</b></td><td class="num"><b>${accEur(c.tot)}</b></td></tr></tbody></table></div>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 0">I quadri sono numerati in ordine di data (prima il gasolio, poi l’HVO conforme): confrontali con il software dell’Agenzia prima dell’invio.</p>
+      <h3 style="margin:16px 0 6px">Per veicolo</h3>
+      <div class="tablewrap"><table class="grid mini"><thead><tr><th>Targa</th><th>Veicolo</th><th class="num">Rifornimenti</th><th class="num">Litri fatturati</th><th class="num">Km del trimestre</th><th class="num">Litri ammessi</th><th class="num">Importo</th><th>Note</th></tr></thead><tbody>
+      ${c.veicoli.map(v=>`<tr><td class="nowrap"><b>${esc(v.targa)}</b></td><td>${esc(v.mezzo?[v.mezzo.marca,v.mezzo.modello].filter(Boolean).join(' '):'')}</td><td class="num">${v.nRif}</td><td class="num">${accLit(v.litri)}</td>
+        <td class="num"><input class="input" type="number" min="0" style="width:96px;text-align:right" data-acckm="${esc(v.targa)}" value="${v.km||''}" aria-label="Km di ${esc(v.targa)}"></td>
+        <td class="num">${accLit(v.litriAmm)}</td><td class="num">${accEur(r2(v.importo))}</td><td>${v.avvisi.map(x=>`<span class="sub">${esc(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`
+      :'<div class="panel"><p>Nessun rifornimento ammesso in questo trimestre. I rifornimenti si prendono dai <b>Movimenti</b> delle carte carburante (tipo «Rifornimento», con litri, targa e prodotto): controlla anche le esclusioni qui sotto.</p></div>'}
+    ${c.esclusi.length?`<h3 style="margin:18px 0 6px">Rifornimenti non ammessi (${c.esclusi.length})</h3>
+      ${Object.keys(nomiTipo).filter(k=>perTipo[k]).map(k=>`<details ${k==='da correggere'?'open':''} style="margin-bottom:8px"><summary><b>${nomiTipo[k]}</b> · ${perTipo[k].length} · ${accLit(perTipo[k].reduce((s,x)=>s+x.litri,0))} l</summary>
+        <div class="tablewrap" style="max-height:260px"><table class="grid mini"><thead><tr><th>Data</th><th>Targa</th><th>Prodotto</th><th class="num">Litri</th><th>Motivo</th></tr></thead><tbody>
+        ${perTipo[k].slice(0,300).map(x=>`<tr><td class="nowrap">${fmtD(x.data)}</td><td class="nowrap">${esc(x.targa||'–')}</td><td>${esc(x.prodotto)}</td><td class="num">${numF.format(x.litri)}</td><td>${esc(x.motivo)}</td></tr>`).join('')}</tbody></table></div></details>`).join('')}`:''}
+    <div class="panel" style="margin-top:14px;font-size:13px"><b>Come si usa il credito.</b> Dichiarazione trimestrale entro il mese successivo (per questo trimestre: <b>${fmtD(c.scadenza)}</b>). Dal 1° ottobre 2026 la compensazione in F24 (codice tributo <b>6740</b>) richiede l’invio telematico E.D.I. e il silenzio-assenso è di 30 giorni. Il calcolo è uno strumento di supporto: la dichiarazione si invia con il software dell’Agenzia, controllando i quadri.</div>`;
+  const main=$('#main');
+  main.querySelector('#accAnno').onchange=e=>{u.anno=e.target.value;renderAccise();};
+  main.querySelector('#accTr').onchange=e=>{u.t=e.target.value;renderAccise();};
+  main.querySelectorAll('[data-acckm]').forEach(i=>i.onchange=()=>accSalvaKm(u.anno,u.t,i.dataset.acckm,i.value));
+  const xl=main.querySelector('[data-accxl]');if(xl)xl.onclick=()=>accExcel(c);
+}
+function accSalvaKm(anno,t,targa,v){
+  const n=Math.max(0,parseInt(v,10)||0);
+  let r=S.acck.find(k=>String(k.anno)===String(anno)&&String(k.trimestre)===String(t)&&normTarga(k.targa)===normTarga(targa));
+  if(!r){r={id:uid(),codice:nextCode(MODS.acck),anno:+anno,trimestre:+t,targa:normTarga(targa),km:n};S.acck.push(r);}
+  else r.km=n;
+  markDirty();renderAccise();
+}
+function renderAcciseVeicoli(){
+  const u=ui('accVei');u.f=u.f||'tutti';
+  const oggi=todayISO();
+  const l=S.mezzi.filter(m=>!ARCH(m)&&!FUORI_FLOTTA(m.stato)).map(m=>({m,v:accVeicolo(m)}));
+  const pesanti=l.filter(x=>x.v.massa>=7500||x.v.incompleto&&!x.v.massa);
+  const vis=(u.f==='ammessi'?l.filter(x=>x.v.ok):u.f==='completare'?l.filter(x=>x.v.incompleto&&(x.v.massa>=7500||!x.v.massa)):u.f==='pesanti'?l.filter(x=>x.v.massa>=7500):l)
+    .sort((a,b)=>(b.v.ok-a.v.ok)||String(a.m.targa).localeCompare(String(b.m.targa)));
+  const nol=m=>{const r=S.rows.find(x=>normTarga(x.targa)===normTarga(m.targa)&&x.inizio&&x.fine&&oggi>=x.inizio&&oggi<=x.fine);return r?r.locataria:'';};
+  $('#main').innerHTML=`${pageHead('Rimborso accise gasolio','Quali veicoli della flotta hanno i requisiti: massa da 7,5 t (75 quintali) in su, Euro 5 o superiore, gasolio.')}${accTabs()}
+    <div class="toolbar"><div class="field"><label for="accVf">Mostra</label><select class="input" id="accVf">
+      ${[['tutti','Tutti i veicoli'],['pesanti','Da 7,5 t in su'],['ammessi','Solo ammessi'],['completare','Da completare (dati mancanti)']].map(([k,l2])=>`<option value="${k}" ${u.f===k?'selected':''}>${l2}</option>`).join('')}</select></div>
+      <span class="muted" style="align-self:end">${l.filter(x=>x.v.ok).length} ammessi · ${pesanti.length} da 7,5 t in su · ${l.length} in flotta</span></div>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Targa</th><th>Veicolo</th><th class="num">Massa kg</th><th>Classe</th><th>Alimentazione</th><th>Esito</th><th>Oggi</th></tr></thead><tbody>
+    ${vis.map(({m,v})=>{const c=nol(m);return `<tr><td class="nowrap"><b>${esc(m.targa)}</b></td><td>${esc([m.marca,m.modello].filter(Boolean).join(' '))}</td><td class="num">${v.massa?numF.format(v.massa):'–'}</td><td>${esc(m.euro||'–')}</td><td>${esc(m.alimentazione||'–')}</td>
+      <td>${v.ok?'<span class="pill ok">Ammesso</span>':`<span class="pill ${v.incompleto?'bad':'end'}">${v.incompleto?'Da completare':'Escluso'}</span><span class="sub">${esc(v.motivi.join(' · '))}</span>`}</td>
+      <td>${c?`<span class="sub">a noleggio a ${esc(c)}: rimborso al cliente</span>`:v.ok?'<span class="sub">in uso diretto</span>':''}</td></tr>`;}).join('')||'<tr><td colspan="7" class="muted">Nessun veicolo</td></tr>'}</tbody></table></div>`;
+  $('#main').querySelector('#accVf').onchange=e=>{u.f=e.target.value;renderAccise();};
+}
+function renderAcciseAliquote(){
+  genericList('accal',{uiKey:'accal',title:'Rimborso accise gasolio',tabsHtml:accTabs(),
+    sub:'Accisa in vigore per periodo: il rimborso è l’accisa meno l’aliquota agevolata (Parametri, 403,22 €/1.000 l). Aggiorna la tabella quando l’Agenzia pubblica la nota del trimestre.',
+    searchPh:'Periodo, prodotto o fonte',search:['dal','al','prodotto','fonte','quadro'],
+    buttons:[{l:S.accal.length?'Aggiungi le aliquote ufficiali mancanti':'Carica le aliquote ufficiali (ottobre 2026)',primary:!S.accal.length,fn:()=>{const n=accCaricaUfficiali();toast(n?`${n} aliquote aggiunte.`:'Le aliquote ufficiali ci sono già.');renderAccise();}}],
+    empty:'Nessuna aliquota nel registro: il calcolo usa quelle ufficiali di ottobre 2026. Premi «Carica le aliquote ufficiali» per averle qui e poterle modificare.',
+    filters:[{k:'prodotto',label:'Prodotto',opts:()=>ACC_PROD,all:'Tutti'}],
+    cols:[{l:'Dal',v:r=>fmtD(r.dal)},{l:'Al',v:r=>fmtD(r.al)},{l:'Prodotto',v:r=>esc(r.prodotto||'')},{l:'Accisa €/1.000 l',v:r=>r.accisa===''?'':numF.format(+r.accisa),num:true},
+      {l:'Rimborso €/1.000 l',v:r=>r.accisa===''?'':numF.format(Math.max(0,r2(+r.accisa-accAgevolata()))),num:true},{l:'Quadro',v:r=>esc(r.quadro||'')},{l:'Fonte',v:r=>esc(r.fonte||'')}],
+    sort:(a,b)=>a.prodotto===b.prodotto?(a.dal<b.dal?1:-1):(a.prodotto<b.prodotto?-1:1)});
+}
+function renderAcciseRegole(){
+  $('#main').innerHTML=`${pageHead('Rimborso accise gasolio','Le regole su cui si basa il calcolo (art. 24-ter D.Lgs. 504/1995): controllale con il consulente e con le note dell’Agenzia delle dogane.')}${accTabs()}
+    <div class="panel" style="font-size:14px;line-height:1.6">
+    <h3>Chi può chiederlo</h3>
+    <ul><li>Imprese che esercitano il trasporto merci con veicoli di massa complessiva <b>≥ 7,5 t</b>, iscritte all’<b>Albo degli autotrasportatori</b> (conto terzi, anche REN) o con <b>licenza conto proprio</b>.</li>
+    <li>Il veicolo è in proprietà, leasing o locazione/comodato senza conducente. Se è <b>noleggiato senza conducente</b>, il rimborso spetta al <b>cliente che lo usa</b>, non a chi lo noleggia: il gestionale lo esclude e prepara l’elenco per ogni cliente (Esporta Excel).</li></ul>
+    <h3>Quali veicoli</h3><ul><li>Massa da 7,5 t; classe <b>Euro 5 o superiore</b>. Euro 4 e inferiori sono esclusi (dal 1/1/2021).</li><li>Per i trattori conta il veicolo motore, non il semirimorchio.</li></ul>
+    <h3>Quale gasolio</h3><ul><li>Solo gasolio (e HVO tal quale) acquistato in Italia, con la <b>targa in fattura</b>. Esclusi AdBlue, lubrificanti, servizi e rifornimenti all’estero.</li>
+    <li>HVO: se non si sa se è «conforme» (criteri di sostenibilità e materie prime) si applica la prudenza: l’aliquota minore fra le due.</li></ul>
+    <h3>Quanto</h3><ul><li>Rimborso = accisa in vigore il giorno del rifornimento − <b>403,22 €/1.000 l</b>. Nel 2026 cambia più volte nello stesso trimestre (da 69,68 a 269,68 €/1.000 l): per questo si usa la tabella «Aliquote» per data.</li>
+    <li>Al massimo <b>1 litro per km</b> per veicolo nel trimestre: inserisci i km di ogni veicolo nella tabella del calcolo (da tachigrafo o telematica).</li>
+    <li>L’IVA non c’entra: il rimborso è un importo per litro. Si arrotonda una sola volta, sul totale di ogni Quadro.</li></ul>
+    <h3>Come e quando</h3><ul><li>Dichiarazione <b>trimestrale</b>, entro il mese successivo (se cade di sabato o festivo, il primo giorno lavorativo).</li>
+    <li>Compensazione in F24 con codice tributo <b>6740</b> entro il 31 dicembre dell’anno dopo; <b>dal 1° ottobre 2026 solo invio telematico E.D.I.</b> e silenzio-assenso a 30 giorni.</li>
+    <li>Conserva fatture, carte carburante, km, carta di circolazione, contratti e iscrizione all’Albo/REN.</li></ul>
+    <p class="muted" style="font-size:12.5px">Le aliquote del 2026 vengono da informative dell’Agenzia riportate da associazioni di categoria; il 4° trimestre 2026 è dedotto dalle aliquote in vigore (nessuna nota ancora pubblicata). Sono interpretazioni del programma, non regole scritte dall’Agenzia: la ripartizione proporzionale dei litri oltre il limite di 1 l/km, il criterio di arrotondamento e la numerazione dei quadri.</p></div>`;
+}
+
+/* ---------- Excel ---------- */
+async function accExcel(c){
+  const wb=new ExcelJS.Workbook();wb.creator='Gestionale flotta';wb.created=new Date();
+  const ini=(ws)=>{ws.getRow(1).font={bold:true};ws.views=[{state:'frozen',ySplit:1}];ws.columns.forEach(x=>{x.width=Math.max(x.width||12,14);});};
+  const w1=wb.addWorksheet('Quadri');
+  w1.addRow(['Quadro','Prodotto','Dal','Al','Accisa €/1000 l','Rimborso €/1000 l','Litri','Importo €']);
+  for(const o of c.quadri)w1.addRow([o.quadro,o.prodotto,o.dal,o.al,o.accisa,o.rimborso,o.litri,o.importo]);
+  w1.addRow(['Totale','','','','','',c.litri,c.tot]);w1.getRow(w1.rowCount).font={bold:true};ini(w1);
+  const w2=wb.addWorksheet('Per veicolo');
+  w2.addRow(['Targa','Veicolo','Rifornimenti','Litri fatturati','Km trimestre','Litri ammessi','Importo €','Note']);
+  for(const v of c.veicoli)w2.addRow([v.targa,v.mezzo?[v.mezzo.marca,v.mezzo.modello].filter(Boolean).join(' '):'',v.nRif,v.litri,v.km||null,r2(v.litriAmm),r2(v.importo),v.avvisi.join('; ')]);ini(w2);
+  const w3=wb.addWorksheet('Rifornimenti ammessi');
+  w3.addRow(['Data','Targa','Prodotto','Luogo','Litri fatturati','Litri ammessi','Quadro','Rimborso €/1000 l','Importo €']);
+  for(const x of c.ammessi.sort((a,b)=>a.data<b.data?-1:1))w3.addRow([x.data,x.targa,x.prodotto,x.luogo,x.litri,r2(x.litriAmm),x.quadro,x.rimborso,r2(x.importo)]);ini(w3);
+  const w4=wb.addWorksheet('Non ammessi');
+  w4.addRow(['Data','Targa','Prodotto','Litri','Tipo','Motivo']);
+  for(const x of c.esclusi.sort((a,b)=>a.data<b.data?-1:1))w4.addRow([x.data,x.targa,x.prodotto,x.litri,x.tipo,x.motivo]);ini(w4);
+  const w5=wb.addWorksheet('Per cliente (noleggi)');
+  w5.addRow(['Cliente','Contratto','Targa','Data','Prodotto','Litri']);
+  for(const x of c.noleggi.sort((a,b)=>String(a.cliente).localeCompare(String(b.cliente))||(a.data<b.data?-1:1)))w5.addRow([x.cliente,x.contratto,x.targa,x.data,x.prodotto,x.litri]);ini(w5);
+  await saveFile(`Rimborso_accise_${c.anno}_T${c.t}_${stampNow()}.xlsx`,new Blob([await wb.xlsx.writeBuffer()],{type:XLSX_MIME}));
+}
+
+/* ---------- aggancio all'app ---------- */
+AMM_TABS.push('accise');
+VIEWS.accise=()=>renderAccise();
+(()=>{
+  const g=MENU.find(x=>x.g==='Amministrazione');
+  if(g&&!g.items.some(([k])=>k==='accise'))g.items.push(['accise','Rimborso accise gasolio']);
+  const a=typeof AREE!=='undefined'&&AREE.find(x=>x.k==='amm');
+  if(a){if(!a.tabs.includes('accise'))a.tabs.push('accise');for(const s of ['accal','acck'])if(!a.store.includes(s))a.store.push(s);
+    if(typeof AREA_DI_TAB!=='undefined')AREA_DI_TAB.accise='amm';
+    if(typeof AREE_DI_STORE!=='undefined')for(const s of ['accal','acck'])(AREE_DI_STORE[s]=AREE_DI_STORE[s]||[]).includes('amm')||AREE_DI_STORE[s].push('amm');}
+})();
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
