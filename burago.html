@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.28';
+const APP_VERSION='2026.10.29';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -5367,7 +5367,7 @@ function renderMezzi(){
   genericList('mezzi',{
     tabsHtml:banner+archBanner,
     rowFilter:r=>!ARCH(r),
-    buttons:[{l:'Acquisisci da libretto',fn:()=>libFilePick({refresh:()=>renderMezzi()})}],
+    buttons:[{l:'Acquisisci da libretto',fn:()=>libFilePick({refresh:()=>renderMezzi()})},{l:'Importa polizze',fn:()=>polApri()}],
     sub:'Anagrafica completa con i dati della carta di circolazione e la catena proprietario, contraente e utilizzatore.',
     after:(()=>{const tit=S.soc.filter(x=>x.titolare==='Sì').map(x=>x.ragione);
       const conUt=S.mezzi.filter(m=>m.utilizzatore&&!ARCH(m)&&!FUORI_FLOTTA(m.stato));const inU=S.mezzi.filter(m=>!ARCH(m)&&dispo(m).label==='In uso').length;
@@ -17388,7 +17388,8 @@ const G_CONCETTI={
   fp:'passive passiva xml',
   dip:'dipendente dipendenti autista autisti conducente assegnazione assegnazioni patente',
   gio:'giornaliera giornaliere consegna riconsegna ritiro turno',
-  doc:'documento documenti allegato allegati libretto libretti polizza polizze',
+  doc:'documento documenti allegato allegati libretto libretti',
+  pol:'polizza polizze assicurazione assicurazioni assicurativa assicurative tagliando tagliandi quietanza quietanze rca certificato',
   scad:'scadenza scadenze scade scadono revisione bollo assicurazione scadenziario rca',
   costi:'spese spesa costi costo riepilogo report margine margini quanto spendo spendiamo',
   canone:'canone canoni importo importi prezzo listino',
@@ -17543,6 +17544,10 @@ function gCatalogo(){
     risp:()=>({passi:[gMenu('mezzi'),
       {testo:'Spunta le targhe di cui ti servono i documenti.',sel:()=>document.querySelector('#main tbody input[type=checkbox]'),fatto:()=>ui('mezzi').sel&&ui('mezzi').sel.size>0},
       {testo:'Nella barra della selezione premi **Esporta documenti…**: scegli per ogni targa e per ogni tipo che cosa estrarre, poi **Esporta ZIP**.',sel:()=>document.querySelector('[data-selbar]'),fatto:()=>!!document.querySelector('.modal')}],sezione:'mezzi'})}));
+  T.push(gCompito({id:'importa-polizze',c:['pol'],v:['importa','crea','modifica'],peso:3,titolo:'Importare le polizze assicurative dei mezzi (con la copia allegata)',
+    risp:()=>({testo:'Scegli il PDF della compagnia (anche uno solo con le polizze di tutta la flotta) o le foto: il gestionale legge targa, polizza, scadenze e premi, ti mostra l’anteprima e, alla conferma, aggiorna la scheda di ogni mezzo e vi allega la copia con le sole sue pagine.',
+      passi:[gMenu('mezzi'),{testo:'Premi **Importa polizze** e scegli il file.',sel:()=>[...document.querySelectorAll('#main button')].find(b=>/Importa polizze/.test(b.textContent)),fatto:()=>!!document.querySelector('.modal')},
+      {testo:'Aspetta la lettura (le scansioni richiedono qualche minuto), poi controlla targa, polizza e scadenza: puoi correggerle. Premi **Importa**.',sel:()=>document.querySelector('.modal .box'),fatto:()=>false}],sezione:'mezzi',scrivi:'mezzi'})}));
   T.push(gCompito({id:'costi-cdc',c:['cdc','costi'],v:['trova'],peso:3,titolo:'Vedere i costi di un centro di costo',
     risp:e=>gRispCostiCdc(e)}));
   T.push(gCompito({id:'costi-cdc-carte',c:['cdc','carta','costi'],v:['trova'],peso:2,titolo:'Riepilogo di carburante e pedaggi per centro di costo',
@@ -17883,6 +17888,384 @@ function gProponi(t,e,q,altre){
     else if(e.key==='?'&&!/INPUT|TEXTAREA|SELECT/.test(tag)&&S.wb&&!document.querySelector('.modal')){e.preventDefault();gApriPannello();}
   });
 })();
+
+
+/* =====================================================================
+   IMPORTAZIONE DELLE POLIZZE ASSICURATIVE (quietanze e tagliandi)
+   ---------------------------------------------------------------------
+   Si sceglie il PDF (anche un unico file con le polizze di tutta la flotta,
+   come quello della compagnia: per ogni mezzo il certificato con la carta
+   verde e la quietanza, con i versi bianchi in mezzo) o le foto/scansioni.
+   Il gestionale:
+     1. legge ogni pagina (testo del PDF, oppure lettura ottica per le scansioni;
+        le pagine bianche si saltano);
+     2. riconosce per ogni pagina la targa, il numero di polizza e di
+        applicazione, le date, i premi, la compagnia e il proprietario;
+     3. raggruppa le pagine per targa e le abbina ai mezzi dell'anagrafica
+        (correggendo le letture dubbie con le targhe che conosce);
+     4. mostra l'anteprima, modificabile, e solo dopo la conferma aggiorna
+        la scheda del mezzo e vi allega UNA copia della polizza con le sole
+        pagine di quel mezzo (tipo «Polizza assicurativa», con la scadenza).
+   Il numero di polizza letto dalla scansione si confronta fra tutte le
+   pagine del file: vince la lettura più frequente, così un errore di una
+   cifra su una pagina non passa.
+   ===================================================================== */
+
+/* ---------- campi nuovi nella scheda del mezzo ---------- */
+{
+  const g=MODS.mezzi.groups.find(x=>x.f.some(f=>f.k==='polizza')).f;
+  if(!g.some(f=>f.k==='rcaApplicazione')){
+    const i=g.findIndex(f=>f.k==='rcaScad');
+    g.splice(i+1,0,
+      fd('rcaApplicazione','Applicazione / certificato n.','text',{hint:'Per le polizze cumulative: il numero del veicolo nella polizza'}),
+      fd('rcaEffetto','Decorrenza polizza','date'),
+      fd('rcaPremio','Premio annuo lordo RCA (€)','eur'),
+      fd('rcaRata','Ultima rata pagata (€)','eur'));
+    ammCampi(MODS.mezzi);
+  }
+}
+
+/* ---------- 1. capire una pagina ---------- */
+const polIt=s=>{if(s==null)return null;const n=parseFloat(String(s).replace(/\./g,'').replace(',','.'));return isNaN(n)?null:n;};
+const polImporti=s=>(String(s||'').match(/\d{1,3}(?:\.\d{3})*,\d{2}/g)||[]).map(polIt);
+const polData=s=>{const m=/(\d{2})\/(\d{2})\/(\d{4})/.exec(s||'');if(!m)return '';const d=`${m[3]}-${m[2]}-${m[1]}`;return isNaN(Date.parse(d))?'':d;};
+const POL_TARGA=/\b([A-Z]{2})\s?(\d{3})\s?([A-Z]{2})\b/g;
+const POL_COMPAGNIE=[['Unipol',/unipol/i],['Generali',/generali/i],['Allianz',/allianz/i],['AXA',/\baxa\b/i],['Zurich',/zurich/i],['Reale Mutua',/reale\s*mutua/i],
+  ['Cattolica',/cattolica/i],['Vittoria',/vittoria\s+assicur/i],['HDI',/\bhdi\b/i],['Groupama',/groupama/i],['Sara',/\bsara\s+assicur/i],['ITAS',/\bitas\b/i],
+  ['Amissima',/amissima/i],['Itelyum',/itelyum/i],['Net Insurance',/net\s*insurance/i],['Verti',/\bverti\b/i],['Linear',/\blinear\b/i],['Sogessur',/sogessur/i]];
+function polPagina(testo){
+  const t=String(testo||'');
+  const r={tipo:'altro',targa:'',polizza:'',applicazione:'',effetto:'',scadenza:'',dal:'',al:'',pagata:'',emessa:'',netto:null,imposte:null,ssn:null,lordo:null,
+    premioAnnuo:null,franchigia:null,compagnia:'',proprietario:'',proprietarioPiva:'',car:t.replace(/[^A-Za-z0-9]/g,'').length};
+  const quiet=/QUIETANZA|POLIZZA\s+CUMULATIVA|Totale\s+da\s+pagare/i.test(t);
+  const cert=/CERTIFICATO\s+DI\s+ASSICURAZIONE|CARTA\s+(?:VERDE|INTERNAZIONALE)|INTERNATIONAL\s+MOTOR|TARGA\s+VEICOLO/i.test(t);
+  r.tipo=quiet?'quietanza':cert?'certificato':'altro';
+  for(const [n,re] of POL_COMPAGNIE)if(re.test(t)){r.compagnia=n==='Unipol'?'Unipol Assicurazioni':n;break;}
+  if(!r.compagnia){const m=/([A-Z][A-Za-z&' ]{2,24}?)\s+Assicurazioni\s+S\.?\s?p\.?\s?A/.exec(t);if(m)r.compagnia=m[1].trim()+' Assicurazioni';}
+  /* targa: nella quietanza sotto «Targa assicurata», nel certificato sotto «Targa veicolo» */
+  const cerca=(re)=>{const i=t.search(re);if(i<0)return '';const s=t.slice(i,i+260);POL_TARGA.lastIndex=0;const m=POL_TARGA.exec(s);return m?m[1]+m[2]+m[3]:'';};
+  r.targa=cerca(/Targa\s+assicurata/i)||cerca(/TARGA\s+VEICOLO/i);
+  if(!r.targa){POL_TARGA.lastIndex=0;const m=POL_TARGA.exec(t);if(m)r.targa=m[1]+m[2]+m[3];}
+  /* numero di polizza: ramo/agenzia/gruppo/numero, anche con spazi e barre sbagliate */
+  const mp=/(\d)\s*[\/1Il|]?\s*(\d{5})\s*[\/|]\s*(\d{3})\s*[\/|]\s*(\d)\s?(\d{8})/.exec(t.replace(/\b[Il]\b/g,'1'));
+  if(mp)r.polizza=`${mp[1]}/${mp[2]}/${mp[3]}/${mp[4]}${mp[5]}`;
+  const ma=/App\w{3,8}ione\s*[:.]?\s*(\d{1,5})/i.exec(t);if(ma)r.applicazione=ma[1];
+  const dd=(re)=>{const m=re.exec(t);return m?polData(m[1]):'';};
+  r.effetto=dd(/Effetto\s+p\w{3,6}\s+(\d{2}\/\d{2}\/\d{4})/i);
+  r.scadenza=dd(/Scadenza\s+polizza\s+(\d{2}\/\d{2}\/\d{4})/i);
+  r.dal=dd(/Effetto\s+(\d{2}\/\d{2}\/\d{4})\s+ore/i);
+  r.pagata=dd(/pagamento\s+del\s+premio\s+\S+\s+stato\s+effettuato\s+il\s+(\d{2}\/\d{2}\/\d{4})/i);
+  r.emessa=dd(/Emessa\s+\S{1,3}\s+(\d{2}\/\d{2}\/\d{4})/i);
+  if(!r.scadenza||!r.dal){   /* il certificato: «dalle ore 24 del … alle ore 24 del …» */
+    const i=t.search(/PERIODO\s+DI\s+ASSICURAZIONE/i);
+    if(i>=0){const ds=(t.slice(i,i+400).match(/\d{2}\/\d{2}\/\d{4}/g)||[]).map(polData).filter(Boolean);
+      if(ds.length>=2){if(!r.dal)r.dal=ds[0];if(!r.scadenza)r.scadenza=ds[1];}}
+  }
+  /* premi: la riga sotto «Premio netto … Totale premio lordo» */
+  let ip=t.search(/T[a-z]{4}e\s+prem\w{2,4}\s+lord\w\s*[\r\n]/i);if(ip<0)ip=t.search(/Rata\s+alla\s+firma/i);
+  if(ip>=0){const a=polImporti(t.slice(ip,ip+260));
+    if(a.length>=4){[r.netto,r.imposte,r.ssn,r.lordo]=a;}
+    else if(a.length===3){[r.imposte,r.ssn,r.lordo]=a;r.netto=Math.round((a[2]-a[0]-a[1])*100)/100;}   /* «Premio netto» non letto */
+    if(r.lordo!=null&&r.netto!=null){const somma=Math.round((r.netto+r.imposte+r.ssn)*100)/100;if(Math.abs(somma-r.lordo)>0.011)r.lordo=somma;}}
+  /* garanzie: premio annuo lordo e franchigia sulla riga della garanzia */
+  const ig=t.search(/Garanzie\s+prestate/i),ie=t.search(/TOTALE\s*PREMIO/i);
+  if(ig>=0){let seg=t.slice(ig,ie>ig?ie:ig+900);const ic=seg.search(/Condizioni\s+aggiuntive/i);if(ic>0)seg=seg.slice(0,ic);
+    const a=polImporti(seg).filter(x=>x<100000);   /* i massimali sono in milioni: restano franchigia e premio */
+    if(a.length>=1){r.premioAnnuo=a[a.length-1];const f=a.length>=2?a[a.length-2]:null;if(f!=null&&f<10000)r.franchigia=f;}}
+  const mpr=/Proprietario\s*\n+\s*([^\n]+)/i.exec(t.slice(Math.max(0,t.search(/DATI\s+PERSONALI/i))));
+  if(mpr){const x=/^(.*?)\s+P\.?\s?IVA\s*:?\s*(\d{11})?/i.exec(mpr[1]);r.proprietario=(x?x[1]:mpr[1]).trim();r.proprietarioPiva=x&&x[2]||'';}
+  return r;
+}
+
+/* ---------- 2. la targa: correzione con le targhe note ---------- */
+const POL_L2D={O:'0',Q:'0',D:'0',I:'1',L:'1',Z:'2',S:'5',B:'8',G:'6',T:'7'},POL_D2L={'0':'O','1':'I','2':'Z','5':'S','8':'B','6':'G','7':'T'};
+function polTargaNorm(s){
+  const t=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');if(t.length!==7)return t;
+  return [...t].map((c,i)=>(i>=2&&i<=4)?(POL_L2D[c]||c):(POL_D2L[c]||c)).join('');
+}
+const polDist=(a,b)=>{if(a.length!==b.length)return 9;let n=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])n++;return n;};
+function polTargaNota(t){
+  const x=normTarga(t);if(!x)return {targa:'',nota:''};
+  const note=S.mezzi.map(m=>normTarga(m.targa)).filter(Boolean);
+  if(note.includes(x))return {targa:x,nota:''};
+  const y=polTargaNorm(x);if(note.includes(y))return {targa:y,nota:`letta «${x}», corretta in ${y}`};
+  const v=[...new Set(note.filter(n=>polDist(n,y)===1))];
+  if(v.length===1)return {targa:v[0],nota:`letta «${x}», la più simile in anagrafica è ${v[0]}: controlla`,dubbia:true};
+  return {targa:y,nota:'targa non presente in anagrafica',assente:true};
+}
+
+/* ---------- 3. leggere i file pagina per pagina ---------- */
+async function polInchiostro(canvas){
+  const w=240,h=Math.max(1,Math.round(240*canvas.height/canvas.width));
+  const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(canvas,0,0,w,h);
+  const d=x.getImageData(0,0,w,h).data;let n=0;for(let i=0;i<d.length;i+=4)if((d[i]+d[i+1]+d[i+2])/3<160)n++;
+  return n/(w*h);
+}
+/* ritorna [{file, idx, testo, bianca}] ; usa il testo del PDF se c'è, altrimenti la lettura ottica */
+async function polLeggi(files,say,annulla){
+  const pagine=[];
+  for(const file of files){
+    const nm=String(file.name||'').toLowerCase(),isPdf=/\.pdf$/.test(nm)||file.type==='application/pdf';
+    if(isPdf){
+      const pdfjs=await ensurePdfjs();
+      const doc=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+      for(let p=1;p<=doc.numPages;p++){
+        if(annulla())return pagine;
+        say(`${file.name}: pagina ${p} di ${doc.numPages}`,p-1,doc.numPages);
+        const page=await doc.getPage(p),vp=page.getViewport({scale:1});
+        const tc=await page.getTextContent();
+        const nativo=libLayoutText(libWordsFromPdf(tc.items||[],vp.height));
+        const sc=Math.min(3.2,Math.max(1.6,2000/vp.width)),v2=page.getViewport({scale:sc});
+        const cv=document.createElement('canvas');cv.width=Math.round(v2.width);cv.height=Math.round(v2.height);
+        await page.render({canvasContext:cv.getContext('2d'),viewport:v2}).promise;
+        const ink=await polInchiostro(cv);
+        let testo=nativo,bianca=ink<0.004&&nativo.replace(/[^A-Za-z0-9]/g,'').length<60;
+        if(!bianca&&nativo.replace(/[^A-Za-z0-9]/g,'').length<400){
+          try{testo=await libOCR(cv,m=>say(`${file.name}: pagina ${p} di ${doc.numPages} – ${m}`,p-1,doc.numPages));}catch(e){return {errore:e.message||String(e),pagine};}
+          if(nativo&&nativo.length>10)testo=nativo+'\n'+testo;
+        }
+        pagine.push({file,idx:p-1,testo,bianca});
+      }
+    }else{
+      if(annulla())return pagine;
+      say(`${file.name}: lettura ottica`,pagine.length);
+      const url=URL.createObjectURL(file);
+      try{
+        const img=await new Promise((ok,ko)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>ko(new Error('immagine non leggibile'));i.src=url;});
+        const sc=Math.min(3,Math.max(1,2000/img.naturalWidth)),cv=document.createElement('canvas');cv.width=Math.round(img.naturalWidth*sc);cv.height=Math.round(img.naturalHeight*sc);
+        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        const ink=await polInchiostro(cv);let testo='';
+        if(ink>=0.004){try{testo=await libOCR(cv,m=>say(`${file.name} – ${m}`,pagine.length));}catch(e){return {errore:e.message||String(e),pagine};}}
+        pagine.push({file,idx:0,testo,bianca:ink<0.004});
+      }finally{URL.revokeObjectURL(url);}
+    }
+  }
+  return pagine;
+}
+
+/* ---------- 4. raggruppare le pagine per mezzo ---------- */
+function polRaggruppa(pagine){
+  const lette=pagine.map(p=>({...p,r:p.bianca?null:polPagina(p.testo)}));
+  /* il numero di polizza più frequente (con le sole cifre sicure): vince la maggioranza */
+  const voti=new Map();
+  for(const p of lette)if(p.r&&p.r.polizza){const k=p.r.polizza.slice(1);voti.set(k,(voti.get(k)||0)+1);}
+  const best=[...voti.entries()].sort((a,b)=>b[1]-a[1])[0];
+  const gruppi=[];let corrente=null;
+  const targhe=new Map();
+  for(const p of lette){
+    if(!p.r){if(corrente)corrente.vuote.push(p);continue;}
+    const r=p.r;
+    if(!r.targa&&r.tipo==='altro'){if(corrente)corrente.altre.push(p);continue;}
+    const tn=r.targa?polTargaNota(r.targa):{targa:'',nota:''};
+    /* una nuova pagina appartiene al gruppo aperto se la targa è uguale, o quasi, e non ha ancora quel tipo di pagina */
+    let g=null;
+    if(corrente&&r.targa){
+      const stessa=corrente.targa===tn.targa||polDist(polTargaNorm(corrente.targaLetta),polTargaNorm(r.targa))<=1;
+      if(stessa&&!corrente.pagine.some(x=>x.r.tipo===r.tipo&&r.tipo!=='altro'))g=corrente;
+    }
+    if(!g){g={targa:tn.targa,targaLetta:r.targa,nota:tn.nota,dubbia:!!tn.dubbia,assente:!!tn.assente,pagine:[],vuote:[],altre:[]};gruppi.push(g);}
+    g.pagine.push(p);
+    /* se la targa letta in un'altra pagina è in anagrafica, vince quella */
+    if(tn.targa&&(!g.targa||(g.assente&&!tn.assente)||(g.dubbia&&!tn.dubbia&&!tn.assente))){g.targa=tn.targa;g.nota=tn.nota;g.dubbia=!!tn.dubbia;g.assente=!!tn.assente;g.targaLetta=r.targa;}
+    corrente=g;
+  }
+  for(const g of gruppi){
+    const rs=g.pagine.map(p=>p.r),pr=rs.find(x=>x.tipo==='quietanza')||rs[0];
+    const prima=k=>{for(const x of [pr,...rs]){if(x&&x[k]!==''&&x[k]!=null)return x[k];}return pr[k]===''||pr[k]==null?'':pr[k];};
+    g.dati={polizza:prima('polizza'),applicazione:prima('applicazione'),effetto:prima('effetto'),scadenza:prima('scadenza'),dal:prima('dal'),pagata:prima('pagata'),
+      emessa:prima('emessa'),netto:prima('netto'),imposte:prima('imposte'),ssn:prima('ssn'),lordo:prima('lordo'),premioAnnuo:prima('premioAnnuo'),franchigia:prima('franchigia'),
+      compagnia:prima('compagnia'),proprietario:prima('proprietario'),proprietarioPiva:prima('proprietarioPiva')};
+    /* numero di polizza: correzione col voto della maggioranza */
+    if(best){
+      const d=g.dati;const cifre=(d.polizza||'').slice(1);
+      if(!d.polizza||cifre!==best[0]){
+        const dist=d.polizza?[...cifre].filter((c,i)=>c!==best[0][i]).length:99;
+        if(dist<=3||!d.polizza){d.polizzaLetta=d.polizza;d.polizza=(d.polizza?d.polizza[0]:'1')+best[0];}
+      }
+      /* il ramo (prima cifra) più frequente fra le pagine */
+      const rami=new Map();for(const x of lette)if(x.r&&x.r.polizza&&x.r.polizza.slice(1)===best[0])rami.set(x.r.polizza[0],(rami.get(x.r.polizza[0])||0)+1);
+      const ramo=[...rami.entries()].sort((a,b)=>b[1]-a[1])[0];
+      if(ramo)g.dati.polizza=ramo[0]+g.dati.polizza.slice(1);
+    }
+    /* il premio annuo si controlla con la rata: rata × 12 / mesi del periodo pagato */
+    {const d=g.dati;g.avvisi=[];
+      const da=d.dal||d.effetto,mesi=da&&d.scadenza?Math.round((Date.parse(d.scadenza)-Date.parse(da))/86400000/30.4):0;
+      if(d.premioAnnuo!=null&&d.lordo!=null&&mesi>=1){const att=d.lordo*12/mesi;
+        if(Math.abs(d.premioAnnuo-att)>0.03*att){g.avvisi.push(`premio annuo letto ${eur(d.premioAnnuo)} non coerente con la rata: non lo importo`);d.premioAnnuo=null;}}
+      else if(d.premioAnnuo!=null&&d.premioAnnuo<=0)d.premioAnnuo=null;
+      if(d.premioAnnuo==null&&d.lordo!=null&&!g.avvisi.length)g.avvisi.push('premio annuo non letto');}
+    g.pageIdx=g.pagine.map(p=>({file:p.file,idx:p.idx}));
+    g.nPagFile=g.pagine.length+g.vuote.length+g.altre.length;
+  }
+  return gruppi;
+}
+
+/* ---------- 5. cosa succederebbe ---------- */
+function polEsito(g){
+  const m=g.targa?mezzoBy(g.targa):null;
+  const d=g.dati;const av=[];let stato='nuovo';
+  if(!g.targa){stato='no';av.push('targa non letta');}
+  else if(!m){stato='no';av.push('la targa non è in anagrafica');}
+  else{
+    const at=attachFor('mezzi',m.targa).filter(a=>a.tipo==='Polizza assicurativa');
+    if(at.some(a=>a.scadenza&&d.scadenza&&a.scadenza===d.scadenza)||(m.rcaScad&&d.scadenza&&m.rcaScad===d.scadenza&&at.length&&m.polizza===d.polizza&&(m.rcaApplicazione||'')===(d.applicazione||''))){stato='gia';av.push('polizza con questa scadenza già allegata');}
+    else if(m.rcaScad&&d.scadenza&&m.rcaScad>d.scadenza){stato='vecchia';av.push(`più vecchia della scadenza già registrata (${fmtD(m.rcaScad)})`);}
+    else if(m.rcaScad||m.polizza)stato='aggiorna';
+  }
+  for(const x of g.avvisi||[])av.push(x);
+  if(g.dubbia)av.push(g.nota);
+  else if(g.nota&&!g.assente)av.push(g.nota);
+  if(!d.scadenza)av.push('scadenza non letta');
+  else if(d.scadenza<todayISO())av.push('polizza già scaduta');
+  if(!d.polizza)av.push('numero di polizza non letto');
+  if(d.polizzaLetta)av.push(`numero letto «${d.polizzaLetta}», uso quello del resto del file`);
+  if(m&&d.proprietario&&m.proprietaria){const x=normSoc(d.proprietario),y=normSoc(m.proprietaria);
+    if(x&&y&&!x.includes(y)&&!y.includes(x))av.push(`proprietario in polizza: ${d.proprietario}`);}
+  return {m,stato,av};
+}
+
+/* ---------- 6. applicare ---------- */
+async function polCrea(g){
+  const PD=await pdfLibCarica();
+  const out=await PD.PDFDocument.create();
+  const cache=new Map();
+  const pag=g.includiVuote?[...g.pagine,...g.vuote,...g.altre].sort((a,b)=>(a.file===b.file?a.idx-b.idx:0)):g.pagine;
+  for(const p of pag){
+    const isPdf=/\.pdf$/i.test(p.file.name)||p.file.type==='application/pdf';
+    if(isPdf){
+      let src=cache.get(p.file);if(!src){src=await PD.PDFDocument.load(new Uint8Array(await p.file.arrayBuffer()),{ignoreEncryption:true});cache.set(p.file,src);}
+      const [cp]=await out.copyPages(src,[p.idx]);out.addPage(cp);
+    }else{
+      const url=URL.createObjectURL(p.file);
+      try{
+        const img=await new Promise((ok,ko)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>ko(new Error('immagine'));i.src=url;});
+        const cv=document.createElement('canvas');cv.width=img.naturalWidth;cv.height=img.naturalHeight;cv.getContext('2d').drawImage(img,0,0);
+        const jpg=await new Promise(ok=>cv.toBlob(ok,'image/jpeg',0.9));
+        const em=await out.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+        const pg=out.addPage([em.width,em.height]);pg.drawImage(em,{x:0,y:0,width:em.width,height:em.height});
+      }finally{URL.revokeObjectURL(url);}
+    }
+  }
+  return await out.save();
+}
+async function polApplica(gruppi,opt){
+  let n=0,att=0,errori=[];
+  for(const g of gruppi){
+    const e=polEsito(g);if(!e.m||e.stato==='no')continue;
+    const d=g.dati,m=e.m;
+    try{
+      if(opt.allega&&e.stato!=='gia'){
+        const bytes=await polCrea(g);
+        const nome=`Polizza_${m.targa}_${d.scadenza||todayISO()}.pdf`;
+        const f=new File([bytes],nome,{type:'application/pdf'});
+        const a=await addAttachment(f,'mezzi',m.targa,'Polizza assicurativa',d.scadenza||'');
+        if(a){a.descrizione=[d.compagnia,d.polizza&&('polizza '+d.polizza),d.applicazione&&('app. '+d.applicazione)].filter(Boolean).join(' – ');a.dataDocumento=d.pagata||d.emessa||d.dal||'';att++;}
+      }
+      if(opt.aggiorna&&e.stato!=='vecchia'){
+        if(d.compagnia)m.compagnia=d.compagnia;
+        if(d.polizza)m.polizza=d.polizza;
+        if(d.scadenza)m.rcaScad=d.scadenza;
+        if(d.applicazione)m.rcaApplicazione=d.applicazione;
+        if(d.effetto)m.rcaEffetto=d.effetto;
+        if(d.premioAnnuo!=null)m.rcaPremio=d.premioAnnuo;
+        if(d.lordo!=null)m.rcaRata=d.lordo;
+        if(typeof stoNota==='function')stoNota(m.targa,'Polizza assicurativa importata',`${d.compagnia||''} ${d.polizza||''} fino al ${fmtD(d.scadenza)}`.trim());
+      }
+      n++;
+    }catch(err){errori.push(`${m.targa}: ${err.message||err}`);}
+  }
+  markDirty();
+  return {n,att,errori};
+}
+
+/* ---------- 7. la finestra ---------- */
+function polApri(files){
+  if(!files){
+    const i=document.createElement('input');i.type='file';i.multiple=true;i.accept='.pdf,.png,.jpg,.jpeg,.webp,.bmp,application/pdf,image/*';
+    i.onchange=()=>{const f=[...i.files];if(f.length)polApri(f);};i.click();return;
+  }
+  const m=document.createElement('div');m.className='modal';document.body.appendChild(m);
+  const st={fase:'leggi',msg:'',fatte:0,tot:0,annulla:false,gruppi:[],off:new Set(),allega:true,aggiorna:true};
+  const chiudi=()=>{st.annulla=true;m.remove();};
+  const box=(titolo,corpo,acts)=>{m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:min(1180px,96vw);max-height:92vh;display:flex;flex-direction:column"><h3>${titolo}</h3><div style="overflow:auto;flex:1;padding-right:4px">${corpo}</div><div class="acts" style="align-items:center">${acts}</div></div>`;};
+  const paintLeggi=()=>{
+    const pct=st.tot?Math.round(100*st.fatte/st.tot):0;
+    box('Lettura delle polizze',`<div class="panel"><p id="polMsg">${esc(st.msg||'Preparazione…')}</p>
+      <div style="height:10px;border-radius:6px;background:var(--line,#dde7ee);overflow:hidden"><div id="polBar" style="height:100%;width:${pct}%;background:var(--gold,#27b7bc);transition:width .2s"></div></div>
+      <p class="muted" style="margin-top:10px">Le pagine bianche si saltano; le scansioni si leggono con la lettura ottica (la prima volta serve internet per scaricare il motore di lettura, poi resta nel browser). Per decine di pagine servono alcuni minuti: puoi lasciare la finestra aperta.</p></div>`,
+      '<button class="btn" data-a="0">Annulla</button>');
+    m.querySelector('[data-a="0"]').onclick=chiudi;
+  };
+  const aggiornaLeggi=(msg,fatte,tot)=>{st.msg=msg;st.fatte=fatte;if(tot)st.tot=tot;
+    const a=m.querySelector('#polMsg'),b=m.querySelector('#polBar');if(a)a.textContent=msg;if(b)b.style.width=(st.tot?Math.round(100*fatte/st.tot):0)+'%';};
+  const sel=()=>st.gruppi.filter((g,i)=>!st.off.has(i)&&['nuovo','aggiorna'].includes(polEsito(g).stato));
+  const paintAnteprima=()=>{
+    const righe=st.gruppi.map((g,i)=>{
+      const e=polEsito(g),d=g.dati,ok=['nuovo','aggiorna'].includes(e.stato);
+      const pill={nuovo:'<span class="pill ok">Nuova</span>',aggiorna:'<span class="pill ok">Aggiorna</span>',gia:'<span class="pill end">Già presente</span>',vecchia:'<span class="pill bad">Più vecchia</span>',no:'<span class="pill bad">Da correggere</span>'}[e.stato];
+      return `<tr>
+        <td><input type="checkbox" data-s="${i}" ${ok&&!st.off.has(i)?'checked':''} ${ok?'':'disabled'} aria-label="Importa"></td>
+        <td class="nowrap"><input class="input" style="width:104px;text-transform:uppercase" data-e="${i}|targa" value="${esc(g.targa)}"></td>
+        <td>${e.m?esc([e.m.marca,e.m.modello].filter(Boolean).join(' ')||'–'):'<span class="muted">–</span>'}</td>
+        <td class="nowrap"><input class="input" style="width:170px" data-e="${i}|polizza" value="${esc(d.polizza||'')}"><span class="sub">${d.applicazione?'app. '+esc(d.applicazione):''}</span></td>
+        <td class="nowrap">${d.dal?fmtD(d.dal):d.effetto?fmtD(d.effetto):'–'}</td>
+        <td class="nowrap"><input class="input" type="date" data-e="${i}|scadenza" value="${esc(d.scadenza||'')}"></td>
+        <td class="num">${d.premioAnnuo!=null?eur(d.premioAnnuo):'–'}<span class="sub">${d.lordo!=null?'rata '+eur(d.lordo):''}</span></td>
+        <td class="num">${g.pagine.length}${g.nPagFile>g.pagine.length?`<span class="sub">di ${g.nPagFile}</span>`:''}</td>
+        <td>${pill}${e.av.length?`<span class="sub">${esc(e.av.join(' · '))}</span>`:''}</td></tr>`;}).join('');
+    const nSel=sel().length;
+    const conteggi=['nuovo','aggiorna','gia','vecchia','no'].map(k=>[k,st.gruppi.filter(g=>polEsito(g).stato===k).length]).filter(x=>x[1]);
+    box(`Polizze lette: ${st.gruppi.length} ${st.gruppi.length===1?'mezzo':'mezzi'}`,
+      `<div class="muted" style="margin-bottom:8px">Controlla i dati letti: puoi correggere targa, numero di polizza e scadenza prima di importare. Le righe «Già presente» e «Più vecchia» non vengono toccate.</div>
+      ${st.gruppi.length?`<div class="tablewrap" style="max-height:52vh"><table class="grid mini"><thead><tr><th></th><th>Targa</th><th>Mezzo</th><th>Polizza</th><th>Decorrenza</th><th>Scadenza</th><th class="num">Premio annuo</th><th class="num">Pagine</th><th>Esito</th></tr></thead><tbody>${righe}</tbody></table></div>`
+        :'<div class="panel"><p>Non ho riconosciuto nessuna polizza in questi file. Controlla che siano le quietanze o i certificati di assicurazione e che le pagine siano leggibili.</p></div>'}
+      <div style="display:flex;flex-wrap:wrap;gap:6px 24px;margin-top:12px">
+        <label class="check"><input type="checkbox" id="polAgg" ${st.aggiorna?'checked':''}> Aggiorna la scheda del mezzo (compagnia, polizza, scadenza RCA, premio)</label>
+        <label class="check"><input type="checkbox" id="polAll" ${st.allega?'checked':''}> Allega la copia della polizza (solo le pagine di quel mezzo)</label>
+        <label class="check"><input type="checkbox" id="polVuote" ${st.vuote?'checked':''}> Includi anche le pagine bianche</label></div>`,
+      `<span class="muted" style="margin-right:auto">${conteggi.map(([k,n])=>`${n} ${({nuovo:'nuove',aggiorna:'da aggiornare',gia:'già presenti',vecchia:'più vecchie',no:'da correggere'})[k]}`).join(' · ')}</span>
+       <button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1" ${nSel&&(st.aggiorna||st.allega)?'':'disabled'}>Importa ${nSel} ${nSel===1?'polizza':'polizze'}</button>`);
+    m.querySelectorAll('[data-s]').forEach(x=>x.onchange=()=>{x.checked?st.off.delete(+x.dataset.s):st.off.add(+x.dataset.s);paintAnteprima();});
+    m.querySelectorAll('[data-e]').forEach(x=>x.onchange=()=>{
+      const [i,k]=x.dataset.e.split('|'),g=st.gruppi[+i];
+      if(k==='targa'){const t=polTargaNota(x.value);g.targa=t.targa;g.nota=t.nota;g.dubbia=!!t.dubbia;g.assente=!!t.assente;}
+      else g.dati[k]=k==='polizza'?x.value.trim():x.value;
+      paintAnteprima();});
+    m.querySelector('#polAgg').onchange=e=>{st.aggiorna=e.target.checked;paintAnteprima();};
+    m.querySelector('#polAll').onchange=e=>{st.allega=e.target.checked;paintAnteprima();};
+    m.querySelector('#polVuote').onchange=e=>{st.vuote=e.target.checked;for(const g of st.gruppi)g.includiVuote=st.vuote;};
+    m.querySelector('[data-a="0"]').onclick=chiudi;
+    m.querySelector('[data-a="1"]').onclick=async()=>{
+      const scelti=sel();if(!scelti.length)return;
+      busy(true,'Importazione delle polizze');
+      try{
+        const r=await polApplica(scelti,{allega:st.allega,aggiorna:st.aggiorna});
+        m.remove();
+        if(r.errori.length)toast(`Importate ${r.n} polizze, ${r.errori.length} con errori: ${r.errori[0]}`,true);
+        else toast(`${r.n} ${r.n===1?'polizza importata':'polizze importate'}${r.att?`, ${r.att} copie allegate`:''}.`);
+        render();
+      }finally{busy(false);}
+    };
+  };
+  paintLeggi();
+  (async()=>{
+    try{
+      const pagine=await polLeggi(files,aggiornaLeggi,()=>st.annulla);
+      if(st.annulla)return;
+      if(pagine&&pagine.errore&&!(pagine.pagine||[]).length){
+        box('Lettura non riuscita',`<div class="panel"><p>${esc(pagine.errore)}</p></div>`,'<button class="btn primary" data-a="0">Chiudi</button>');
+        m.querySelector('[data-a="0"]').onclick=chiudi;return;}
+      const lista=Array.isArray(pagine)?pagine:pagine.pagine;
+      st.gruppi=polRaggruppa(lista);
+      if(pagine&&pagine.errore)toast('Lettura interrotta: '+pagine.errore,true);
+      paintAnteprima();
+    }catch(e){
+      console.warn('polizze',e);
+      box('Lettura non riuscita',`<div class="panel"><p>${esc(e.message||String(e))}</p></div>`,'<button class="btn primary" data-a="0">Chiudi</button>');
+      m.querySelector('[data-a="0"]').onclick=chiudi;
+    }
+  })();
+}
 
 
 (async()=>{try{await msAvvio();}catch(e){console.warn('accesso',e);}render();})();
