@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.31';
+const APP_VERSION='2026.10.32';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -17389,6 +17389,8 @@ const G_CONCETTI={
   dip:'dipendente dipendenti autista autisti conducente assegnazione assegnazioni patente',
   gio:'giornaliera giornaliere consegna riconsegna ritiro turno',
   doc:'documento documenti allegato allegati libretto libretti',
+  amz:'amazon dlo3 fatturato fatturazione cortex fasr scorecard forecast prefattura pre-fattura portale sincronizza sincronizzazione',
+  amz:'amazon dlo3 portale fatturato fatture scorecard forecast fasr rotte sincronizza sincronizzazione prefatture pre-fatture',
   tac:'tachigrafo tachigrafi cronotachigrafo cronotachigrafi cronografo cronografi ddd scarico scarichi ore guida riposi conducente conducenti carta',
   acc:'accise accisa gasolio rimborso carburante agevolato 7,5 75 quintali dogane quadro quadri',
   pol:'polizza polizze assicurazione assicurazioni assicurativa assicurative tagliando tagliandi quietanza quietanze rca certificato',
@@ -17558,6 +17560,14 @@ function gCatalogo(){
     risp:()=>({testo:'Per ogni scarico registra data, autista o targa e periodo coperto, e allega il file originale .ddd: va conservato intatto per almeno 12 mesi. Lo scadenzario ti avvisa prima dei 28 giorni (carte) e dei 90 giorni (unità di bordo).',
       passi:[gMenu('tachigrafo'),{testo:'Nello **Scadenzario** premi **Registra** sulla riga di chi hai scaricato.',sel:()=>document.querySelector('#main [data-tacreg]')||document.querySelector('#main [data-tacnew]'),fatto:()=>!!document.querySelector('.drawer,.modal')},
       {testo:'Compila la data, poi allega il file .ddd dalla scheda **Allegati** del record.',sel:()=>document.querySelector('.drawer'),fatto:()=>false}],sezione:'tachigrafo',scrivi:'tacsc'})}));
+  T.push(gCompito({id:'amazon-sync',c:['amz'],v:['importa','trova','crea','modifica'],peso:4,titolo:'Sincronizzare il portale Amazon DLO3 (fatturato, fatture, scorecard, costi)',
+    risp:()=>({testo:'Il gestionale legge la cartella FAST_RENT_PORTALE (o il suo ZIP): fatturato per giornata, fatture Amazon, pre-fatture, scorecard e forecast. Si può ripetere quando vuoi senza doppioni. I costi che nel portale mancano (carburante, flotta) li completa dal centro di costo Amazon.',
+      passi:[gMenu('amazon'),{testo:'Premi **Sincronizza dal portale** e scegli la cartella o lo ZIP.',sel:()=>document.querySelector('#main [data-amzsync]'),fatto:()=>!!document.querySelector('.modal')},
+      {testo:'Controlla l’anteprima e premi **Importa**. Poi guarda **Costi e margini** e **Fabbisogno mezzi**.',sel:()=>document.querySelector('.modal .box'),fatto:()=>false}],sezione:'amazon',scrivi:'amzgg'})}));
+  T.push(gCompito({id:'amazon-sync',c:['amz'],v:['importa','crea','modifica','trova'],peso:4,titolo:'Sincronizzare il portale Amazon DLO3 e vedere fatturato, costi e margine',
+    risp:()=>({testo:'Il gestionale legge il portale (cartella FAST_RENT_PORTALE o ZIP) e aggiorna giornate, fatture, pre-fatture, scorecard e previsioni senza doppioni. I costi mancanti li completa dal centro di costo Amazon.',
+      passi:[gMenu('amazon'),{testo:'Premi **Sincronizza dal portale** e scegli la cartella o lo ZIP.',sel:()=>document.querySelector('#main [data-amzsync]'),fatto:()=>!!document.querySelector('.modal')},
+      {testo:'Controlla l’anteprima e premi **Importa**. Poi guarda **Settimane** (confronto con le fatture Amazon) e **Costi e margini**.',sel:()=>document.querySelector('.modal .box'),fatto:()=>false}],sezione:'amazon',scrivi:'amzgg'})}));
   T.push(gCompito({id:'costi-cdc',c:['cdc','costi'],v:['trova'],peso:3,titolo:'Vedere i costi di un centro di costo',
     risp:e=>gRispCostiCdc(e)}));
   T.push(gCompito({id:'costi-cdc-carte',c:['cdc','carta','costi'],v:['trova'],peso:2,titolo:'Riepilogo di carburante e pedaggi per centro di costo',
@@ -18817,6 +18827,611 @@ VIEWS.tachigrafo=()=>renderTachigrafo();
   if(a){if(!a.tabs.includes('tachigrafo'))a.tabs.push('tachigrafo');for(const s of ['tacsc','tacct'])if(!a.store.includes(s))a.store.push(s);
     if(typeof AREA_DI_TAB!=='undefined')AREA_DI_TAB.tachigrafo='amm';
     if(typeof AREE_DI_STORE!=='undefined')for(const s of ['tacsc','tacct'])(AREE_DI_STORE[s]=AREE_DI_STORE[s]||[]).includes('amm')||AREE_DI_STORE[s].push('amm');}
+})();
+
+
+/* =====================================================================
+   AMAZON DLO3: fatturato settimanale, fatture Amazon, pre-fatture,
+   scorecard, forecast e costi, in un solo posto e incrociati con i dati
+   della flotta.
+   Il «Portale DLO3» (cartella FAST_RENT_PORTALE) resta l'archivio di chi lo
+   usa: qui lo si SINCRONIZZA tutte le volte che serve, scegliendo la cartella
+   o lo ZIP. La sincronizzazione è ripetibile: aggiorna per data, settimana e
+   numero di fattura, non duplica e non cancella mai.
+   Dal gestionale arrivano le informazioni che al portale mancano: carburante
+   e costi della flotta del centro di costo Amazon, mezzi disponibili,
+   previsioni confrontate con la flotta.
+   ===================================================================== */
+if(typeof PARAMS_EXTRA!=='undefined'){
+  [['amazonCdc',45,'Amazon DLO3: nome (o parte del nome) del centro di costo','Amazon'],
+   ['amazonTariffa',46,'Amazon DLO3: tariffa rotta standard (€), per le previsioni',279.28],
+   ['amazonFlex',47,'Amazon DLO3: margine di mezzi di scorta sulle rotte (%)',10],
+   ['amazonUltimaSync',48,'Amazon DLO3: ultima sincronizzazione (automatico)','']]
+  .forEach(p=>{if(!PARAMS_EXTRA.some(x=>x[0]===p[0]))PARAMS_EXTRA.push(p);});
+}
+const amzCdcNome=()=>String((S.par&&S.par.amazonCdc)||'Amazon').trim().toLowerCase();
+const amzTariffa=()=>{const n=parseFloat(S.par&&S.par.amazonTariffa);return n>0?n:279.28;};
+const amzFlexPct=()=>{const n=parseFloat(S.par&&S.par.amazonFlex);return n>=0?n:10;};
+
+/* ---------- le schede ---------- */
+MODS.amzgg={sheet:'Amazon giornate',store:'amzgg',title:'Giornate Amazon DLO3',code:'AG',wide:true,
+ groups:[{t:'Giornata',f:[
+  fd('data','Data','date',{req:true,span:'s3'}),fd('settimana','Settimana','text',{span:'s3'}),
+  fd('rotte','Rotte','int',{span:'s2'}),fd('rotte6','Rotte 6 ore','int',{span:'s2'}),fd('mfn','MFN Pickup','int',{span:'s2'}),
+  fd('abort','Abort / Late cancel','int',{span:'s2'}),fd('training','Training','int',{span:'s2'}),fd('bonus','Bonus coverage','int',{span:'s2'}),
+  fd('km','Km (FuelAllowance)','int',{span:'s2'}),fd('coeff','Coefficiente gasolio €/km','num',{span:'s2'}),
+  fd('impRotte','Rotte €','num',{span:'s2'}),fd('impAbort','Abort €','num',{span:'s2'}),fd('imp6','6 ore €','num',{span:'s2'}),
+  fd('impTraining','Training €','num',{span:'s2'}),fd('impBonus','Bonus €','num',{span:'s2'}),fd('impFuel','Gasolio €','num',{span:'s2'}),
+  fd('impMfn','MFN €','num',{span:'s2'}),fd('stimato','Totale calcolato €','num',{span:'s3'}),
+  fd('ufficiale','Imponibile fattura Amazon €','num',{span:'s3',hint:'Compare quando la fattura della settimana è approvata'}),
+  fd('totale','Totale valido €','num',{span:'s3'}),fd('confermata','Giornata confermata','bool',{def:'No',span:'s3'}),
+  fd('fonte','Fonte','text',{span:'s6'})]}]};
+MODS.amzdoc={sheet:'Amazon documenti',store:'amzdoc',title:'Documenti Amazon DLO3',code:'AD',attach:true,wide:true,
+ groups:[{t:'Documento',f:[
+  fd('tipo','Tipo','sel',{req:true,opts:['Fattura Amazon','Pre-fattura','Scorecard'],span:'s3'}),fd('chiave','Chiave (numero / settimana)','text',{req:true,span:'s3'}),
+  fd('dal','Dal','date',{span:'s3'}),fd('al','Al','date',{span:'s3'}),fd('settimana','Settimana','text',{span:'s3'}),
+  fd('imponibile','Imponibile €','num',{span:'s3'}),fd('iva','IVA €','num',{span:'s3'}),fd('totale','Totale €','num',{span:'s3'}),
+  fd('stato','Stato','text',{span:'s3'}),fd('pagata','Pagata','bool',{def:'No',span:'s3'}),
+  fd('punteggio','Punteggio scorecard','num',{span:'s3'}),fd('livello','Livello scorecard','text',{span:'s3'}),fd('classifica','Classifica','int',{span:'s3'}),
+  fd('dettaglio','Dettaglio (dati letti)','area',{span:'s6'}),fd('sha','Impronta file','text',{span:'s6'}),fd('note','Note','area',{span:'s6'})]}]};
+MODS.amzco={sheet:'Amazon costi',store:'amzco',title:'Costi mensili Amazon DLO3',code:'AC',wide:true,
+ groups:[{t:'Mese',f:[
+  fd('mese','Mese (AAAA-MM)','text',{req:true,span:'s3'}),fd('flotta','Costo flotta €','num',{span:'s3'}),fd('dipendenti','Costo dipendenti €','num',{span:'s3'}),
+  fd('tfr','TFR €','num',{span:'s3'}),fd('carburante','Costo carburante €','num',{span:'s3'}),fd('device','Costo device €','num',{span:'s3'}),
+  fd('tariffaFlotta','Flotta €/mezzo/giorno','num',{span:'s3'}),fd('tariffaDevice','Device €/telefono/mese','num',{span:'s3'}),
+  fd('origine','Origine dei valori','area',{span:'s6'})]}]};
+MODS.amzfc={sheet:'Amazon previsioni',store:'amzfc',title:'Previsioni Amazon DLO3',code:'AF',wide:true,
+ groups:[{t:'Previsione',f:[
+  fd('tipo','Tipo','sel',{req:true,opts:['Giornaliera','Settimanale'],span:'s3'}),fd('data','Data (o inizio settimana)','date',{req:true,span:'s3'}),
+  fd('settimana','Settimana','text',{span:'s3'}),fd('rotte','Rotte previste','int',{span:'s3'}),fd('rotteMax','Rotte massime','int',{span:'s3'}),fd('rotteMedie','Rotte medie','int',{span:'s3'}),
+  fd('fonte','File di origine','text',{span:'s6'})]}]};
+ammRegistraModuli(['amzgg','amzdoc','amzco','amzfc']);
+/* l'identificativo Amazon dell'autista, per collegare la scorecard ai dipendenti */
+if(!MODS.dip.fmap||!MODS.dip.fmap.idAmazon){
+  MODS.dip.groups[MODS.dip.groups.length-1].f.push(fd('idAmazon','ID autista Amazon (scorecard)','up',{span:'s3'}));
+  ammCampi(MODS.dip);
+}
+
+/* ---------- sorgenti: cartella, ZIP o file scelti ---------- */
+const AMZ_SALTA=/(^|\/)(\.venv|__pycache__|node_modules|\.git|backup|backup_costi|backup_controlli|__MACOSX)(\/|$)/i;
+async function amzDaZip(file){
+  const z=await JSZip.loadAsync(file);const out=[];
+  z.forEach((p,e)=>{if(e.dir||AMZ_SALTA.test(p))return;out.push({path:p,get:async()=>new File([await e.async('blob')],p.split('/').pop())});});
+  return out;
+}
+async function amzDaCartella(dir,base){
+  const out=[];
+  for await(const [n,h] of dir.entries()){
+    const p=(base?base+'/':'')+n;
+    if(AMZ_SALTA.test(p+(h.kind==='directory'?'/':'')))continue;
+    if(h.kind==='directory')out.push(...await amzDaCartella(h,p));
+    else out.push({path:p,get:()=>h.getFile()});
+  }
+  return out;
+}
+async function amzSorgenti(files){
+  const out=[];
+  for(const f of files){
+    if(/\.zip$/i.test(f.name)){out.push(...await amzDaZip(f));continue;}
+    const p=f.webkitRelativePath||f.name;if(AMZ_SALTA.test(p))continue;
+    out.push({path:p,get:async()=>f});
+  }
+  return out;
+}
+const amzTrova=(src,re)=>src.filter(s=>re.test(s.path));
+function amzScegli(src,re){
+  const l=amzTrova(src,re);if(!l.length)return null;
+  l.sort((a,b)=>(/FAST_RENT_PORTALE/i.test(b.path)-/FAST_RENT_PORTALE/i.test(a.path))||a.path.length-b.path.length);
+  return l[0];
+}
+const amzJson=async(s)=>{if(!s)return null;try{return JSON.parse(await (await s.get()).text());}catch(e){return null;}};
+
+/* ---------- lettura dei fogli ---------- */
+const amzNum=v=>{if(v==null||v==='')return null;if(typeof v==='object'&&v.result!==undefined)v=v.result;const n=typeof v==='number'?v:parseFloat(String(v).replace(',','.'));return isFinite(n)?n:null;};
+const amzData=v=>{if(v==null||v==='')return '';if(typeof v==='object'&&!(v instanceof Date)&&v.result!==undefined)v=v.result;
+  if(v instanceof Date)return v.toISOString().slice(0,10);
+  if(typeof v==='number')return new Date(Date.UTC(1899,11,30)+v*86400000).toISOString().slice(0,10);
+  const m=/^(\d{4}-\d{2}-\d{2})/.exec(String(v));return m?m[1]:'';};
+const amzTesto=v=>{if(v==null)return '';if(typeof v==='object'&&!(v instanceof Date)){if(v.richText)return v.richText.map(x=>x.text).join('');if(v.result!==undefined)return String(v.result);if(v.text)return String(v.text);}return String(v);};
+const amzKind=(label,k)=>{const l=String(label||'').toLowerCase();
+  if(k)return k;if(/fuelallowance/.test(l))return 'Fuel';if(/bonus coverage/.test(l))return 'Bonus';if(/late cancel|abort/.test(l))return 'Abort';if(/training/.test(l))return 'Training';if(/6 hour|6 ore/.test(l))return '6 ore';return 'Rotta';};
+const AMZ_MFN_TARIFFA=178;
+/* le tariffe del foglio TARIFFE: righe 2..7, colonna B lun–sab, C domenica */
+function amzTariffe(wb){
+  const ws=wb.getWorksheet('TARIFFE'),t={};
+  if(!ws)return t;
+  for(let r=2;r<=7;r++)t['TARIFFE!B'+r]=amzNum(ws.getCell(r,2).value),t['TARIFFE!C'+r]=amzNum(ws.getCell(r,3).value);
+  return t;
+}
+function amzTariffaCella(ws,tar,riga,col,coeff){
+  let v=ws.getCell(riga,col).value;
+  const f=v&&typeof v==='object'&&v.formula?v.formula:(typeof v==='string'&&v[0]==='='?v.slice(1):'');
+  if(f){
+    const m=/^TARIFFE!\$?([A-Z]+)\$?(\d+)$/.exec(f.replace(/\s/g,''));
+    if(m)return tar['TARIFFE!'+m[1]+m[2]]??0;
+    if(/^\$?B\$?4$/.test(f.replace(/\s/g,'')))return coeff||0;
+    const r=v.result;return amzNum(r)||0;
+  }
+  return amzNum(v)||0;
+}
+/* un foglio WEEK → sette giornate, con la stessa logica del portale */
+function amzSettimana(ws,tar,mfn){
+  const inizio=amzData(ws.getCell('B3').value);if(!inizio)return [];
+  const rawc=amzNum(ws.getCell('B4').value),coeff=rawc==null?0:rawc;
+  const giorni=[];
+  for(let ix=0;ix<7;ix++){
+    const data=addDays(inizio,ix),col=4+ix;
+    const g={data,settimana:ws.name,rotte:0,rotte6:0,mfn:0,abort:0,training:0,bonus:0,km:0,coeff:rawc==null?'':coeff,
+      impRotte:0,impAbort:0,imp6:0,impTraining:0,impBonus:0,impFuel:0,impMfn:0};
+    for(let r=7;r<=21;r++){
+      const q=amzNum(ws.getCell(r,col).value)||0;if(!q)continue;
+      const kind=amzKind(amzTesto(ws.getCell(r,1).value),amzTesto(ws.getCell(r,15).value)||(r===12?'Fuel':''));
+      const prezzo=r===12?coeff:amzTariffaCella(ws,tar,r,ix===0?3:2,coeff);
+      const imp=Math.round(q*prezzo*100)/100;
+      if(kind==='Rotta'){g.rotte+=q;g.impRotte+=imp;}
+      else if(kind==='Abort'){g.abort+=q;g.impAbort+=imp;}
+      else if(kind==='6 ore'){g.rotte6+=q;g.imp6+=imp;}
+      else if(kind==='Training'){g.training+=q;g.impTraining+=imp;}
+      else if(kind==='Bonus'){g.bonus+=q;g.impBonus+=imp;}
+      else if(kind==='Fuel'){g.km+=q;g.impFuel+=imp;}
+    }
+    const m=(mfn&&mfn[data])||0;g.mfn=m;g.impMfn=Math.round(m*AMZ_MFN_TARIFFA*100)/100;
+    for(const k of ['impRotte','impAbort','imp6','impTraining','impBonus','impFuel','impMfn'])g[k]=Math.round(g[k]*100)/100;
+    g.stimato=Math.round((g.impRotte+g.impAbort+g.imp6+g.impTraining+g.impBonus+g.impFuel+g.impMfn)*100)/100;
+    giorni.push(g);
+  }
+  return giorni;
+}
+async function amzLeggiFatturazione(file){
+  const wb=new ExcelJS.Workbook();await wb.xlsx.load(await file.arrayBuffer());
+  const tar=amzTariffe(wb);
+  const ts=wb.getWorksheet('TARIFFE');
+  const tariffa=ts?amzNum(ts.getCell(2,2).value):null;
+  return {wb,tar,tariffa};
+}
+const amzIsWeek=n=>/^W\d+(?:[_-]\d{4})?$/.test(n);
+
+/* ---------- lettura dei PDF: fattura Amazon e scorecard ---------- */
+const amzEU=s=>parseFloat(String(s).replace(/\./g,'').replace(',','.'));
+async function amzRighePdf(file){
+  const pdfjs=await ensurePdfjs();
+  const doc=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  const righe=[];
+  for(let p=1;p<=Math.min(doc.numPages,12);p++){
+    const tc=await (await doc.getPage(p)).getTextContent();
+    const items=(tc.items||[]).filter(i=>String(i.str||'').trim()).map(i=>({s:String(i.str).trim(),x:i.transform[4],y:i.transform[5]}));
+    items.sort((a,b)=>b.y-a.y||a.x-b.x);
+    let cur=null;
+    for(const it of items){
+      if(cur&&Math.abs(cur.y-it.y)<3.5)cur.t.push(it);else{cur={y:it.y,t:[it]};righe.push(cur);}
+    }
+  }
+  return righe.map(r=>r.t.sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ').replace(/\s+/g,' ').trim()).filter(Boolean);
+}
+async function amzLeggiFattura(file){
+  const L=await amzRighePdf(file),raw=L.join('\n');
+  const num=/INV-[A-Z0-9-]+/.exec(raw),per=/(\d{2}\/\d{2}\/\d{4})\s+a\s+(\d{2}\/\d{2}\/\d{4})/.exec(raw);
+  if(!num||!per||!L.some(l=>/Dettagli fattura/.test(l)))throw new Error('formato non riconosciuto');
+  const iso=s=>s.split('/').reverse().join('-');
+  const dal=iso(per[1]),al=iso(per[2]);
+  const importo=lab=>{for(const l of L){const m=new RegExp(lab.replace(/[()€]/g,'\\$&')+'\\s+([\\d.]+,\\d{2})').exec(l);if(m)return amzEU(m[1]);}return null;};
+  const sub=importo('Sub-totale (€)'),iva=importo('Importo IVA (€)'),tot=importo('Importo totale (€)');
+  const i0=L.findIndex(l=>/Dettagli fattura/.test(l)),entries=[];
+  const re=/^(\d{2}\/\d{2}\/\d{4})\s+(.*?)\s+(\d+(?:[.,]\d+)?)\s+([\d.]+,\d{2})\s+VAT\s*\d+\s+\d+%\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})$/;
+  for(const l of L.slice(i0+1)){
+    const m=re.exec(l);
+    if(m){entries.push({data:iso(m[1]),nome:m[2],qta:amzEU(m[3]),prezzo:amzEU(m[4]),iva:amzEU(m[5]),totale:amzEU(m[6])});continue;}
+    if(entries.length&&!/^\d{2}\/\d{2}\/\d{4}/.test(l)&&!/^(Data|Descrizione|Pagina|Page)\b/.test(l)&&l.length<80)entries[entries.length-1].nome+=' '+l;
+  }
+  for(const e of entries){e.netto=Math.round((e.totale-e.iva)*100)/100;e.kind=amzKind(e.nome);}
+  const somma=Math.round(entries.reduce((s,e)=>s+e.netto,0)*100)/100;
+  return {numero:num[0],dal,al,imponibile:sub!=null?sub:somma,iva,totale:tot,entries,somma,
+    avviso:sub!=null&&Math.abs(somma-sub)>0.04?`somma delle righe ${somma} diversa dall'imponibile ${sub}`:''};
+}
+async function amzLeggiScorecard(file){
+  const L=await amzRighePdf(file),t=L.join('\n');
+  const w=/Week\s+(\d+)\s*[-–]?\s*(20\d{2})/.exec(t)||/Week\s+(\d+)\s*\n?\s*(20\d{2})/.exec(t);
+  const sc=/Overall Score:\s*(\d+(?:\.\d+)?)\s*\|?\s*(Fantastic|Great|Fair|Poor)/i.exec(t);
+  const rk=/Rank at DLO3:\s*(\d+)/i.exec(t);
+  const autisti=[];
+  for(const l of L){const m=/^\d+\s+(A[A-Z0-9]{10,16})\s+(\d+)\s+(\d+(?:\.\d+)?)%/.exec(l);if(m&&!autisti.some(a=>a.id===m[1]))autisti.push({id:m[1],consegne:+m[2],dcr:+m[3]});}
+  return {settimana:w?'W'+w[1]:'',anno:w?+w[2]:null,punteggio:sc?+sc[1]:null,livello:sc?sc[2][0].toUpperCase()+sc[2].slice(1).toLowerCase():'',classifica:rk?+rk[1]:null,autisti};
+}
+
+/* ---------- forecast ---------- */
+const amzDomenicaSett=(anno,w)=>{ /* la settimana Amazon N inizia di domenica = lunedì ISO N − 1 giorno */
+  const j4=new Date(Date.UTC(anno,0,4)),dow=(j4.getUTCDay()+6)%7;
+  const lun=new Date(Date.UTC(anno,0,4-dow+(w-1)*7));return toISO(new Date(lun.getTime()-86400000));};
+async function amzLeggiForecast(file){
+  const wb=new ExcelJS.Workbook();await wb.xlsx.load(await file.arrayBuffer());
+  const ws=wb.worksheets[0];if(!ws)return [];
+  const anno=(/(\d{2})\.(\d{2})\.(20\d{2})/.exec(file.name)||[])[3]||String(new Date().getUTCFullYear());
+  const out=[];let wk='';
+  const r1=ws.getRow(1),r2=ws.getRow(3);
+  for(let c=3;c<=ws.columnCount;c+=3){
+    const lab=amzTesto(r1.getCell(c).value)||wk;wk=lab;
+    const m=/(\d+)/.exec(lab);if(!m)continue;
+    const mx=amzNum(r2.getCell(c).value),tot=amzNum(r2.getCell(c+1).value),med=amzNum(r2.getCell(c+2).value);
+    if(mx==null&&tot==null)continue;
+    out.push({tipo:'Settimanale',data:amzDomenicaSett(+anno,+m[1]),settimana:'W'+m[1],rotte:tot||0,rotteMax:mx||0,rotteMedie:med||0,fonte:file.name});
+  }
+  return out;
+}
+async function amzLeggiFasr(file){
+  const wb=new ExcelJS.Workbook();await wb.xlsx.load(await file.arrayBuffer());
+  const ws=wb.worksheets[0];if(!ws)return [];
+  const per=new Map();
+  ws.eachRow((row,i)=>{
+    if(i===1)return;
+    const d=amzData(row.getCell(2).value),q=amzNum(row.getCell(8).value);
+    if(!d||q==null)return;
+    const o=per.get(d)||per.set(d,{tipo:'Giornaliera',data:d,settimana:'W'+(amzNum(row.getCell(1).value)||''),rotte:0,rotteMax:0,rotteMedie:0,fonte:file.name}).get(d);
+    o.rotte+=q;
+  });
+  return [...per.values()];
+}
+
+/* ---------- la sincronizzazione ---------- */
+async function amzLeggiTutto(src,say){
+  const rep={giorni:[],doc:[],costi:[],prev:[],tariffa:null,avvisi:[],file:{}};
+  const sFat=amzScegli(src,/FAST_RENT_DLO3_FATTURAZIONE\.xlsx$/i);
+  if(sFat){
+    say('Lettura del fatturato settimanale…');rep.file.fatturazione=sFat.path;
+    const {wb,tar,tariffa}=await amzLeggiFatturazione(await sFat.get());rep.tariffa=tariffa;
+    const mfn=(await amzJson(amzScegli(src,/FAST_RENT_MFN_PICKUP\.json$/i)))||{};
+    const conf=new Set((await amzJson(amzScegli(src,/giornate_confermate\.json$/i)))||[]);
+    for(const ws of wb.worksheets){
+      if(!amzIsWeek(ws.name))continue;
+      for(const g of amzSettimana(ws,tar,mfn)){
+        const vuoto=!g.rotte&&!g.rotte6&&!g.mfn&&!g.abort&&!g.training&&!g.bonus&&!g.km;
+        if(vuoto&&!conf.has(g.data))continue;
+        g.confermata=conf.has(g.data)?'Sì':'No';rep.giorni.push(g);
+      }
+    }
+  }else rep.avvisi.push('Non ho trovato FAST_RENT_DLO3_FATTURAZIONE.xlsx: il fatturato non è stato aggiornato.');
+  /* costi */
+  const sCo=amzScegli(src,/FAST_RENT_DLO3_COSTI\.xlsx$/i);
+  if(sCo){
+    const wb=new ExcelJS.Workbook();await wb.xlsx.load(await (await sCo.get()).arrayBuffer());
+    const ws=wb.worksheets[0],tfr=(await amzJson(amzScegli(src,/FAST_RENT_TFR_MENSILE\.json$/i)))||{};
+    const per=new Map();
+    ws.eachRow((row,i)=>{
+      if(i===1)return;const mese=amzTesto(row.getCell(1).value).trim();if(!/^20\d{2}-\d{2}$/.test(mese))return;
+      const hasDev=/device/i.test(amzTesto(ws.getRow(1).getCell(5).value));
+      per.set(mese,{mese,flotta:amzNum(row.getCell(2).value),dipendenti:amzNum(row.getCell(3).value),carburante:amzNum(row.getCell(4).value),
+        device:hasDev?amzNum(row.getCell(5).value):null,tariffaFlotta:amzNum(row.getCell(7).value),tariffaDevice:amzNum(row.getCell(8).value),tfr:tfr[mese]??null});
+    });
+    for(const [m,v] of Object.entries(tfr))if(!per.has(m))per.set(m,{mese:m,tfr:v});
+    rep.costi=[...per.values()];
+  }
+  /* fatture, pre-fatture, scorecard */
+  const stati=(await amzJson(amzScegli(src,/FATTURE_AMAZON\/stati_fatture\.json$/i)))||{};
+  const regF=await amzJson(amzScegli(src,/FATTURE_AMAZON\/registro_fatture\.json$/i));
+  for(const r of regF||[]){
+    const f=src.find(s=>s.path.endsWith('FATTURE_AMAZON/'+r.file));
+    const st=stati[r.sha256]||{};
+    const d={tipo:'Fattura Amazon',chiave:r.invoice_number,dal:r.from,al:r.to,settimana:'',sha:r.sha256,
+      stato:st.dispute&&st.dispute.active?'Contestata':st.approved?'Approvata':'Da verificare',pagata:st.paid?'Sì':'No',
+      note:st.dispute&&st.dispute.active?`Contestazione: ${st.dispute.note||''} (${st.dispute.amount||0} €)`:'',_file:f,_nome:r.original_name||r.invoice_number+'.pdf'};
+    if(f){say(`Lettura fattura ${r.invoice_number}…`);
+      try{const p=await amzLeggiFattura(await f.get());d.imponibile=p.imponibile;d.iva=p.iva;d.totale=p.totale;d.dal=p.dal;d.al=p.al;d.dettaglio=JSON.stringify(p.entries.map(e=>[e.data,e.kind,e.qta,e.netto]));d._entries=p.entries;if(p.avviso)rep.avvisi.push(`${r.invoice_number}: ${p.avviso}`);}
+      catch(e){rep.avvisi.push(`${r.invoice_number}: PDF non letto (${e.message})`);}}
+    else rep.avvisi.push(`${r.invoice_number}: il PDF non è nella cartella`);
+    rep.doc.push(d);
+  }
+  const regP=await amzJson(amzScegli(src,/PRE_FATTURE_AMAZON\/registro_prefatture\.json$/i));
+  for(const r of regP||[]){
+    const f=src.find(s=>s.path.endsWith('PRE_FATTURE_AMAZON/'+r.file));
+    rep.doc.push({tipo:'Pre-fattura',chiave:`${r.week} v${r.version}`,dal:r.from,al:r.to,settimana:r.week,sha:r.sha256,stato:r.status||'',note:r.note||'',_file:f,_nome:r.original_name||r.file});
+  }
+  const regS=await amzJson(amzScegli(src,/SCORECARD_AMAZON\/registro_scorecard\.json$/i));
+  for(const r of regS||[]){
+    const f=src.find(s=>s.path.endsWith('SCORECARD_AMAZON/'+r.file));
+    const d={tipo:'Scorecard',chiave:r.key,settimana:r.week,sha:r.sha256,stato:'',_file:f,_nome:r.original_name||r.file};
+    if(f){say(`Lettura scorecard ${r.key}…`);try{const p=await amzLeggiScorecard(await f.get());d.punteggio=p.punteggio;d.livello=p.livello;d.classifica=p.classifica;d.dettaglio=JSON.stringify(p.autisti);}catch(e){rep.avvisi.push(`Scorecard ${r.key}: non letta (${e.message})`);}}
+    rep.doc.push(d);
+  }
+  const bq=await amzJson(amzScegli(src,/BONUS_QUALITA_REGISTRO\.json$/i));
+  for(const [k,b] of Object.entries(bq||{}))rep.doc.push({tipo:'Scorecard',chiave:'Bonus '+k,settimana:'W'+k.split('-W')[1],stato:{riconosciuto:'Bonus riconosciuto',non_riconosciuto:'Bonus non riconosciuto',da_verificare:'Bonus da verificare'}[b.state]||'',totale:b.amount||0,note:b.note||'',_solo:true});
+  /* forecast */
+  for(const s of amzTrova(src,/Forecast[^/]*\.xlsx$/i)){say('Lettura forecast…');try{rep.prev.push(...await amzLeggiForecast(await s.get()));}catch(e){rep.avvisi.push(`${s.path}: ${e.message}`);}}
+  const fasr=amzTrova(src,/FASR[^/]*\.xlsx$/i).sort((a,b)=>{const k=p=>{const m=/(\d{2})\.(\d{2})\.(20\d{2})/.exec(p);return m?m[3]+m[2]+m[1]:'';};return k(a.path)<k(b.path)?-1:1;});
+  for(const s of fasr){say('Lettura previsioni FASR…');try{rep.prev.push(...await amzLeggiFasr(await s.get()));}catch(e){rep.avvisi.push(`${s.path}: ${e.message}`);}}
+  return rep;
+}
+/* ripartisce l'imponibile delle fatture approvate sui giorni, come fa il portale */
+function amzUfficiale(giorni,docs){
+  for(const d of docs){
+    if(d.tipo!=='Fattura Amazon'||d.stato!=='Approvata'||!d._entries||d.imponibile==null)continue;
+    const per={};for(const e of d._entries)per[e.data]=(per[e.data]||0)+e.netto;
+    const gg=giorni.filter(g=>g.data>=d.dal&&g.data<=d.al).sort((a,b)=>a.data<b.data?-1:1);if(!gg.length)continue;
+    const tot=Object.values(per).reduce((a,b)=>a+b,0)||0;let ass=0;
+    gg.forEach((g,i)=>{
+      const c=i===gg.length-1?Math.round(d.imponibile*100)-ass:(tot?Math.round(d.imponibile*100*(per[g.data]||0)/tot):0);
+      ass+=c;g.ufficiale=c/100;
+    });
+  }
+}
+const amzTot=g=>{g.totale=g.ufficiale!==''&&g.ufficiale!=null?g.ufficiale:g.stimato;return g;};
+function amzUpsert(store,mod,chiaveFn,nuovo,campi,esito){
+  const k=chiaveFn(nuovo),r0=S[store].find(x=>chiaveFn(x)===k);
+  if(r0){let cambiato=false;for(const f of campi){const v=nuovo[f];if(v===undefined||v===null||v==='')continue;if(String(r0[f]??'')!==String(v)){r0[f]=v;cambiato=true;}}
+    if(cambiato)esito.agg++;else esito.inv++;return r0;}
+  const r={id:uid(),codice:nextCode(MODS[mod],nuovo.data||nuovo.dal||'')};for(const f of MODS[mod].fields)r[f.k]=f.def??'';
+  for(const f of campi)if(nuovo[f]!==undefined&&nuovo[f]!==null)r[f]=nuovo[f];
+  S[store].push(r);esito.nuovi++;return r;
+}
+async function amzApplica(rep,say){
+  const es={giorni:{nuovi:0,agg:0,inv:0},doc:{nuovi:0,agg:0,inv:0},costi:{nuovi:0,agg:0,inv:0},prev:{nuovi:0,agg:0,inv:0},allegati:0};
+  amzUfficiale(rep.giorni,rep.doc);
+  const cg=['data','settimana','rotte','rotte6','mfn','abort','training','bonus','km','coeff','impRotte','impAbort','imp6','impTraining','impBonus','impFuel','impMfn','stimato','ufficiale','totale','confermata','fonte'];
+  for(const g of rep.giorni){g.fonte='Portale DLO3';amzTot(g);amzUpsert('amzgg','amzgg',x=>x.data,g,cg,es.giorni);}
+  const cd=['tipo','chiave','dal','al','settimana','imponibile','iva','totale','stato','pagata','punteggio','livello','classifica','dettaglio','sha','note'];
+  for(const d of rep.doc){
+    const r=amzUpsert('amzdoc','amzdoc',x=>x.tipo+'|'+x.chiave,d,cd,es.doc);
+    if(d._file&&!d._solo){
+      const ha=attachFor('amzdoc',r.codice).some(a=>a.file===d._nome);
+      if(!ha){try{const f=await d._file.get();const a=await addAttachment(new File([f],d._nome,{type:'application/pdf'}),'amzdoc',r.codice,d.tipo==='Fattura Amazon'?'Fattura':'Altro');if(a)es.allegati++;}catch(e){}}
+    }
+  }
+  const cc=['mese','flotta','dipendenti','tfr','carburante','device','tariffaFlotta','tariffaDevice'];
+  for(const c of rep.costi){
+    const r=amzUpsert('amzco','amzco',x=>x.mese,c,cc,es.costi);
+    if(!/Portale/.test(r.origine||''))r.origine=((r.origine?r.origine+'\n':'')+'Portale DLO3: valori compilati nel file dei costi').trim();
+  }
+  const cp=['tipo','data','settimana','rotte','rotteMax','rotteMedie','fonte'];
+  for(const p of rep.prev)amzUpsert('amzfc','amzfc',x=>x.tipo+'|'+x.data,p,cp,es.prev);
+  if(rep.tariffa&&S.par){S.par.amazonTariffa=rep.tariffa;}
+  S.par=S.par||{};S.par.amazonUltimaSync=new Date().toISOString();
+  markDirty();return es;
+}
+
+/* ---------- calcoli e incroci con il gestionale ---------- */
+const amzMese=d=>String(d||'').slice(0,7);
+const amzCdcDelGestionale=()=>{const t=amzCdcNome();return S.cdc.filter(c=>((c.nome||'')+' '+(c.etichetta||'')).toLowerCase().includes(t));};
+function amzMezziFlotta(){
+  const labs=new Set(amzCdcDelGestionale().map(c=>c.etichetta||cdcLabel(c)));
+  const set=new Set();
+  for(const m of S.mezzi)if(labs.has(m.centroCosto)&&!ARCH(m)&&!FUORI_FLOTTA(m.stato))set.add(normTarga(m.targa));
+  return {labs,n:set.size};
+}
+const amzRichiesti=r=>Math.ceil(r*(1+amzFlexPct()/100)-1e-9);
+/* i costi del centro di costo Amazon dal gestionale, per mese e voce */
+function amzCostiGestionale(anni){
+  const cdc=amzCdcDelGestionale(),out={};
+  if(!cdc.length)return out;
+  const labs=new Set(cdc.map(c=>c.etichetta||cdcLabel(c)));
+  const socs=[...new Set(cdc.map(c=>c.societa).filter(Boolean))];
+  for(const anno of anni)for(const soc of socs){
+    let c;try{c=cdcCostiCalcola(soc,anno);}catch(e){continue;}
+    for(const r of c.righe){
+      if(!labs.has(r.key))continue;
+      for(const [voce,v] of r.voci)for(const [mese,imp] of Object.entries(v.mesi)){
+        const o=out[mese]||(out[mese]={carburante:0,flotta:0,dipendenti:0,voci:{}});
+        o.voci[voce]=(o.voci[voce]||0)+imp;
+        if(/^carburante$/i.test(voce))o.carburante+=imp;
+        else if(/personale|stipend|dipendent|retribuz|contribut/i.test(voce))o.dipendenti+=imp;
+        else o.flotta+=imp;
+      }
+    }
+  }
+  return out;
+}
+function amzMesi(){
+  const set=new Set();
+  for(const g of S.amzgg)set.add(amzMese(g.data));for(const c of S.amzco)set.add(c.mese);
+  return [...set].filter(Boolean).sort();
+}
+function amzConti(){
+  const mesi=amzMesi(),anni=[...new Set(mesi.map(m=>m.slice(0,4)))];
+  const gest=amzCostiGestionale(anni),tab={};
+  const giorniRichiesti=m=>S.amzgg.filter(g=>amzMese(g.data)===m).reduce((s,g)=>s+amzRichiesti((+g.rotte||0)+(+g.rotte6||0)+(+g.mfn||0)),0);
+  for(const m of mesi){
+    const gg=S.amzgg.filter(g=>amzMese(g.data)===m);
+    const ricavi=gg.reduce((s,g)=>s+(+g.totale||0),0),stim=gg.reduce((s,g)=>s+(+g.stimato||0),0);
+    const ufficiali=gg.filter(g=>g.ufficiale!==''&&g.ufficiale!=null).length;
+    const co=S.amzco.find(c=>c.mese===m)||{},ge=gest[m]||{};
+    const rich=giorniRichiesti(m);
+    const voce=(k,portale,dalGest)=>{
+      if(portale!==''&&portale!=null&&!isNaN(+portale))return {v:+portale,o:'portale'};
+      if(dalGest)return {v:r2(dalGest),o:'gestionale'};
+      return {v:null,o:'manca'};
+    };
+    let flotta=voce('flotta',co.flotta,ge.flotta);
+    if(flotta.o==='manca'&&co.tariffaFlotta>0&&rich)flotta={v:r2(rich*co.tariffaFlotta),o:'portale'};
+    const dip=voce('dipendenti',co.dipendenti,ge.dipendenti);
+    const dipTot=dip.v==null&&co.tfr==null?dip:{v:r2((dip.v||0)+(+co.tfr||0)),o:dip.o==='manca'?'portale':dip.o};
+    const carb=voce('carburante',co.carburante,ge.carburante);
+    let dev=voce('device',co.device,0);
+    if(dev.o==='manca'&&co.tariffaDevice>0&&rich){const gm=new Date(Date.UTC(+m.slice(0,4),+m.slice(5),0)).getUTCDate();dev={v:r2(rich*co.tariffaDevice/gm),o:'portale'};}
+    const voci={flotta,dipendenti:dipTot,carburante:carb,device:dev};
+    const noti=Object.values(voci).filter(x=>x.v!=null).length;
+    const costi=r2(Object.values(voci).reduce((s,x)=>s+(x.v||0),0));
+    tab[m]={mese:m,giorni:gg.length,ricavi:r2(ricavi),stimato:r2(stim),ufficiali,voci,costi,margine:r2(ricavi-costi),noti,rich,
+      tariffaImplicita:flotta.v!=null&&rich?r2(flotta.v/rich):null,gestVoci:ge.voci||{}};
+  }
+  return {mesi,tab,haCdc:amzCdcDelGestionale().length>0};
+}
+function amzSettimaneTab(){
+  const per={};
+  for(const g of S.amzgg){const k=g.settimana||g.data;const o=per[k]||(per[k]={sett:g.settimana||'',dal:g.data,al:g.data,stimato:0,totale:0,rotte:0,km:0,giorni:0});
+    o.dal=g.data<o.dal?g.data:o.dal;o.al=g.data>o.al?g.data:o.al;o.stimato+=+g.stimato||0;o.totale+=+g.totale||0;o.rotte+=(+g.rotte||0)+(+g.rotte6||0)+(+g.mfn||0);o.km+=+g.km||0;o.giorni++;}
+  const out=Object.values(per).sort((a,b)=>a.dal<b.dal?1:-1);
+  for(const o of out){
+    const fa=S.amzdoc.filter(d=>d.tipo==='Fattura Amazon'&&d.dal===o.dal).sort((a,b)=>String(b.codice).localeCompare(a.codice))[0];
+    const pf=S.amzdoc.filter(d=>d.tipo==='Pre-fattura'&&d.dal===o.dal).sort((a,b)=>String(b.chiave).localeCompare(String(a.chiave)))[0];
+    const sc=S.amzdoc.find(d=>d.tipo==='Scorecard'&&d.settimana===o.sett&&d.punteggio);
+    const bq=S.amzdoc.find(d=>d.tipo==='Scorecard'&&/^Bonus/.test(d.chiave)&&d.settimana===o.sett);
+    Object.assign(o,{fa,pf,sc,bq,diff:fa&&fa.imponibile!==''?r2((+fa.imponibile||0)-o.stimato):null});
+  }
+  return out;
+}
+/* il fabbisogno di mezzi: previsione contro flotta */
+function amzFabbisogno(){
+  const mf=amzMezziFlotta(),oggi=todayISO();
+  const giorn=S.amzfc.filter(p=>p.tipo==='Giornaliera'&&p.data>=oggi).sort((a,b)=>a.data<b.data?-1:1);
+  const eff=new Map(S.amzgg.map(g=>[g.data,g]));
+  const righe=giorn.map(p=>{const r=+p.rotte||0,rich=amzRichiesti(r),e=eff.get(p.data);
+    return {data:p.data,prev:r,rich,flotta:mf.n,diff:mf.n-rich,ricavo:r2(r*amzTariffa()),effettive:e?(+e.rotte||0)+(+e.rotte6||0)+(+e.mfn||0):null,fonte:p.fonte};});
+  const sett=S.amzfc.filter(p=>p.tipo==='Settimanale').sort((a,b)=>a.data<b.data?-1:1).map(p=>{
+    const giorniMax=Math.max(+p.rotteMax||0,0),rich=amzRichiesti(giorniMax);
+    return {sett:p.settimana,dal:p.data,tot:+p.rotte||0,max:giorniMax,medie:+p.rotteMedie||0,rich,flotta:mf.n,diff:mf.n-rich,ricavo:r2((+p.rotte||0)*amzTariffa())};});
+  return {mf,righe,sett};
+}
+
+/* ---------- pagina ---------- */
+const amzE=n=>n==null||n===''?'–':eur(+n);
+function amzTabs(){
+  const t=ui('amzTab').tab||'p';
+  const b=(k,l)=>`<button class="${t===k?'on':''}" data-sub="amzTab:${k}">${l}</button>`;
+  return `<div class="subtabs">${b('p','Panoramica')}${b('s','Settimane')}${b('c','Costi e margini')}${b('f','Fabbisogno mezzi')}${b('d','Documenti')}</div>`;
+}
+function renderAmazon(){
+  const t=ui('amzTab').tab||'p';
+  if(t==='s')return renderAmzSettimane();
+  if(t==='c')return renderAmzCosti();
+  if(t==='f')return renderAmzFabbisogno();
+  if(t==='d')return genericList('amzdoc',{uiKey:'amzdoc',title:'Amazon DLO3',tabsHtml:amzTabs(),sub:'Fatture Amazon, pre-fatture e scorecard, con il PDF allegato.',
+    searchPh:'Numero, settimana, stato',search:['tipo','chiave','settimana','stato'],buttons:[{l:'Sincronizza dal portale',primary:true,fn:()=>amzApri()}],
+    filters:[{k:'tipo',label:'Tipo',opts:()=>['Fattura Amazon','Pre-fattura','Scorecard'],all:'Tutti'}],
+    cols:[{l:'Tipo',v:r=>esc(r.tipo||'')},{l:'Documento',v:r=>esc(r.chiave||'')},{l:'Periodo',v:r=>r.dal?`${fmtD(r.dal)} – ${fmtD(r.al)}`:esc(r.settimana||'')},
+      {l:'Imponibile',v:r=>r.imponibile===''||r.imponibile==null?(r.punteggio?`Punteggio ${r.punteggio}`:''):eur(+r.imponibile),num:true},{l:'Stato',v:r=>esc(r.stato||'')+(r.pagata==='Sì'?' · pagata':'')},{l:'PDF',v:r=>attachFor('amzdoc',r.codice).length?'✓':''}],
+    sort:(a,b)=>(a.dal||'')<(b.dal||'')?1:-1});
+  return renderAmzPanoramica();
+}
+function amzUltimaSync(){const u=S.par&&S.par.amazonUltimaSync;return u?new Date(u).toLocaleString('it-IT'):'';}
+function renderAmzPanoramica(){
+  const c=amzConti(),sett=amzSettimaneTab(),fb=amzFabbisogno();
+  const oggi=todayISO(),mese=oggi.slice(0,7),m=c.tab[mese]||c.tab[c.mesi[c.mesi.length-1]]||null;
+  const ultima=sett[0];
+  const mancanti=[];
+  if(!S.amzgg.length)mancanti.push('Nessun dato del portale: premi «Sincronizza dal portale» e scegli la cartella FAST_RENT_PORTALE o lo ZIP.');
+  if(S.amzgg.length&&!c.haCdc)mancanti.push(`Nel gestionale non c’è un centro di costo con «${esc(S.par&&S.par.amazonCdc||'Amazon')}» nel nome: senza, carburante e costi della flotta non si possono completare (Parametri, riga 45).`);
+  for(const x of c.mesi){const t=c.tab[x];if(t.giorni&&t.noti<4)mancanti.push(`${x}: costi noti ${t.noti} su 4 (${Object.entries(t.voci).filter(([k,v])=>v.v==null).map(([k])=>k).join(', ')} mancanti).`);}
+  const senzaFatt=sett.filter(s=>!s.fa&&s.al<oggi).slice(0,5);
+  for(const s of senzaFatt)mancanti.push(`Settimana ${s.sett||fmtD(s.dal)}: manca la fattura Amazon.`);
+  const kpi=(l,v,s)=>`<div class="panel" style="flex:1;min-width:170px;margin:0"><small class="muted">${l}</small><div style="font:700 22px/1.2 inherit">${v}</div>${s?`<small class="muted">${s}</small>`:''}</div>`;
+  const prossimi=fb.righe.slice(0,7),corti=prossimi.filter(r=>r.diff<0);
+  $('#main').innerHTML=`${pageHead('Amazon DLO3','Fatturato, fatture, scorecard e costi del servizio, uniti ai dati della flotta.','<button class="btn primary" data-amzsync>Sincronizza dal portale</button>')}${amzTabs()}
+    <p class="muted" style="margin:6px 0 12px">${amzUltimaSync()?`Ultima sincronizzazione: ${esc(amzUltimaSync())}.`:'Mai sincronizzato.'} Il portale resta l’archivio di origine: sincronizza quando lo aggiorni.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px">
+      ${kpi('Fatturato '+(m?m.mese:'del mese'),m?amzE(m.ricavi):'–',m?`${m.giorni} giornate · ${m.ufficiali} da fattura Amazon`:'')}
+      ${kpi('Costi '+(m?m.mese:''),m?amzE(m.costi):'–',m?`${m.noti} voci su 4`:'')}
+      ${kpi('Margine',m?`<span class="${m.margine<0?'late':''}">${amzE(m.margine)}</span>`:'–',m&&m.noti<4?'<span class="late">costi incompleti</span>':'')}
+      ${kpi('Ultima settimana',ultima?amzE(ultima.totale):'–',ultima?esc(ultima.sett||fmtD(ultima.dal))+(ultima.sc?` · scorecard ${esc(ultima.sc.livello)} (${ultima.sc.punteggio})`:''):'')}
+      ${kpi('Mezzi in flotta',fb.mf.n,corti.length?`<span class="late">${corti.length} giorni sotto il fabbisogno</span>`:'centro di costo Amazon')}</div>
+    ${mancanti.length?`<h3 style="margin:10px 0 6px">Informazioni mancanti</h3><div class="panel"><ul style="margin:0;padding-left:18px">${mancanti.slice(0,12).map(x=>`<li>${x}</li>`).join('')}</ul>
+      ${c.mesi.some(x=>{const t=c.tab[x];return Object.values(t.voci).some(v=>v.o==='gestionale');})?'<p style="margin-top:8px"><button class="btn" data-amzcompleta>Salva nel registro i costi completati dal gestionale</button></p>':''}</div>`:'<div class="panel">Nessuna informazione mancante.</div>'}`;
+  const mn=$('#main');mn.querySelector('[data-amzsync]').onclick=()=>amzApri();
+  const cb=mn.querySelector('[data-amzcompleta]');if(cb)cb.onclick=()=>{const n=amzSalvaCompletati();toast(n?`${n} costi salvati dal gestionale.`:'Niente da salvare.');renderAmazon();};
+}
+function amzSalvaCompletati(){
+  const c=amzConti();let n=0;
+  for(const m of c.mesi){
+    const t=c.tab[m];let r=S.amzco.find(x=>x.mese===m);
+    for(const [k,v] of Object.entries(t.voci)){
+      if(v.o!=='gestionale')continue;
+      if(!r){r={id:uid(),codice:nextCode(MODS.amzco,m+'-01')};for(const f of MODS.amzco.fields)r[f.k]=f.def??'';r.mese=m;S.amzco.push(r);}
+      if(r[k]===''||r[k]==null){r[k]=v.v;n++;r.origine=((r.origine?r.origine+'\n':'')+`Gestionale: ${k} dal centro di costo Amazon (${todayISO()})`).trim();}
+    }
+  }
+  if(n)markDirty();return n;
+}
+function renderAmzSettimane(){
+  const l=amzSettimaneTab();
+  $('#main').innerHTML=`${pageHead('Amazon DLO3','Fatturato calcolato dalle quantità, confronto con la fattura Amazon, pre-fattura e scorecard di ogni settimana.','<button class="btn primary" data-amzsync>Sincronizza dal portale</button>')}${amzTabs()}
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Settimana</th><th>Periodo</th><th class="num">Rotte</th><th class="num">Km</th><th class="num">Calcolato</th><th class="num">Fattura Amazon</th><th class="num">Differenza</th><th>Fattura</th><th>Pre-fattura</th><th>Scorecard</th></tr></thead><tbody>
+    ${l.map(s=>`<tr><td><b>${esc(s.sett||'')}</b></td><td class="nowrap">${fmtD(s.dal)} – ${fmtD(s.al)}</td><td class="num">${numF.format(s.rotte)}</td><td class="num">${numF.format(s.km)}</td><td class="num">${amzE(s.stimato)}</td>
+      <td class="num">${s.fa&&s.fa.imponibile!==''?amzE(s.fa.imponibile):'–'}</td><td class="num ${s.diff&&Math.abs(s.diff)>0.05?'late':''}">${s.diff==null?'–':amzE(s.diff)}</td>
+      <td>${s.fa?`<span class="pill ${s.fa.stato==='Approvata'?'ok':s.fa.stato==='Contestata'?'bad':'end'}">${esc(s.fa.stato)}</span>${s.fa.pagata==='Sì'?' <span class="sub">pagata</span>':''}<span class="sub">${esc(s.fa.chiave)}</span>`:(s.al<todayISO()?'<span class="late">manca</span>':'')}</td>
+      <td>${s.pf?esc(s.pf.stato):''}</td><td>${s.sc?`${esc(s.sc.livello)} · ${s.sc.punteggio}${s.sc.classifica?` · #${s.sc.classifica}`:''}`:''}${s.bq?`<span class="sub">${esc(s.bq.stato)}</span>`:''}</td></tr>`).join('')||'<tr><td colspan="10" class="muted">Nessuna settimana: sincronizza dal portale.</td></tr>'}</tbody></table></div>
+    <p class="muted" style="font-size:12.5px;margin-top:8px">Il «calcolato» è quantità × tariffe del portale (gasolio = km × coefficiente della settimana). Quando una fattura è approvata, nel totale valido vale il suo imponibile, ripartito sui giorni.</p>`;
+  $('#main').querySelector('[data-amzsync]').onclick=()=>amzApri();
+}
+function renderAmzCosti(){
+  const c=amzConti();
+  const chip=v=>v.v==null?'<span class="pill bad">manca</span>':`${eur(v.v)}${v.o==='gestionale'?' <span class="pill ok" title="Calcolato dai dati del gestionale (centro di costo Amazon)">gestionale</span>':''}`;
+  $('#main').innerHTML=`${pageHead('Amazon DLO3','Ricavi, costi e margine per mese. Le voci mancanti nel portale sono completate con i dati del gestionale.','<button class="btn primary" data-amzsync>Sincronizza dal portale</button>')}${amzTabs()}
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Mese</th><th class="num">Giornate</th><th class="num">Ricavi</th><th class="num">Flotta</th><th class="num">Dipendenti</th><th class="num">Carburante</th><th class="num">Device</th><th class="num">Costi</th><th class="num">Margine</th><th class="num">€/mezzo/giorno</th></tr></thead><tbody>
+    ${c.mesi.map(m=>{const t=c.tab[m];return `<tr><td><b>${m}</b></td><td class="num">${t.giorni}</td><td class="num">${amzE(t.ricavi)}</td><td class="num">${chip(t.voci.flotta)}</td><td class="num">${chip(t.voci.dipendenti)}</td><td class="num">${chip(t.voci.carburante)}</td><td class="num">${chip(t.voci.device)}</td>
+      <td class="num">${amzE(t.costi)}</td><td class="num ${t.margine<0?'late':''}"><b>${amzE(t.margine)}</b>${t.noti<4?'<span class="sub">parziale</span>':''}</td><td class="num">${t.tariffaImplicita==null?'–':eur(t.tariffaImplicita)}</td></tr>`;}).join('')||'<tr><td colspan="10" class="muted">Nessun dato: sincronizza dal portale.</td></tr>'}</tbody></table></div>
+    ${c.haCdc?'':`<div class="panel" style="margin-top:10px">Nel gestionale non c’è un centro di costo con «${esc(S.par&&S.par.amazonCdc||'Amazon')}» nel nome: crealo (Anagrafiche › Centri di costo) o cambia il nome in Parametri, riga 45. Poi assegna i mezzi e le carte carburante a quel centro.</div>`}
+    <p class="muted" style="font-size:12.5px;margin-top:8px">Costi dal gestionale: carburante dei movimenti delle carte, canoni, fatture passive e verbali del centro di costo. I valori del portale hanno sempre la precedenza. «Dipendenti» include il TFR del portale. Il costo del personale non è nel gestionale se non lo registri con una voce «personale».</p>`;
+  $('#main').querySelector('[data-amzsync]').onclick=()=>amzApri();
+}
+function renderAmzFabbisogno(){
+  const fb=amzFabbisogno();
+  $('#main').innerHTML=`${pageHead('Amazon DLO3','Rotte previste da Amazon (forecast e FASR) contro i mezzi disponibili nel centro di costo Amazon.','<button class="btn primary" data-amzsync>Sincronizza dal portale</button>')}${amzTabs()}
+    <p class="muted">Mezzi in flotta nel centro di costo Amazon: <b>${fb.mf.n}</b>. Mezzi necessari = rotte previste + ${amzFlexPct()}% di scorta (Parametri, riga 47).</p>
+    <h3 style="margin:12px 0 6px">Prossimi giorni (FASR)</h3>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Data</th><th class="num">Rotte previste</th><th class="num">Mezzi necessari</th><th class="num">Mezzi in flotta</th><th class="num">Differenza</th><th class="num">Ricavo previsto</th></tr></thead><tbody>
+    ${fb.righe.map(r=>`<tr><td class="nowrap">${fmtD(r.data)}</td><td class="num">${r.prev}</td><td class="num">${r.rich}</td><td class="num">${r.flotta}</td><td class="num ${r.diff<0?'late':''}"><b>${r.diff>0?'+':''}${r.diff}</b></td><td class="num">${eur(r.ricavo)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Nessuna previsione giornaliera futura: sincronizza dal portale con i file FASR.</td></tr>'}</tbody></table></div>
+    <h3 style="margin:16px 0 6px">Forecast settimanale</h3>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Settimana</th><th>Dal</th><th class="num">Rotte totali</th><th class="num">Giorno di punta</th><th class="num">Medie</th><th class="num">Mezzi necessari</th><th class="num">Differenza</th><th class="num">Ricavo previsto</th></tr></thead><tbody>
+    ${fb.sett.map(r=>`<tr><td><b>${esc(r.sett)}</b></td><td>${fmtD(r.dal)}</td><td class="num">${r.tot}</td><td class="num">${r.max}</td><td class="num">${r.medie}</td><td class="num">${r.rich}</td><td class="num ${r.diff<0?'late':''}"><b>${r.diff>0?'+':''}${r.diff}</b></td><td class="num">${eur(r.ricavo)}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nessun forecast: sincronizza dal portale con il file Forecast.</td></tr>'}</tbody></table></div>
+    <p class="muted" style="font-size:12.5px;margin-top:8px">Il ricavo previsto considera solo le rotte alla tariffa standard (${eur(amzTariffa())}); gasolio, abort e bonus si aggiungono a consuntivo.</p>`;
+  $('#main').querySelector('[data-amzsync]').onclick=()=>amzApri();
+}
+
+/* ---------- la finestra di sincronizzazione ---------- */
+function amzApri(){
+  const m=document.createElement('div');m.className='modal';document.body.appendChild(m);
+  const st={fase:'scegli',msg:'',rep:null,fine:null};
+  const chiudi=()=>{m.remove();};
+  const box=(titolo,corpo,acts)=>{m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:min(820px,96vw);max-height:90vh;overflow:auto"><h3>${titolo}</h3>${corpo}<div class="acts" style="margin-top:14px;justify-content:flex-end">${acts}</div></div>`;};
+  const leggi=async(files)=>{
+    st.fase='leggi';box('Lettura del portale',`<div class="panel"><p id="amzMsg">Preparazione…</p></div>`,'');
+    const say=t=>{const e=m.querySelector('#amzMsg');if(e)e.textContent=t;};
+    try{
+      const src=files.path?files:await amzSorgenti(files);
+      const rep=await amzLeggiTutto(src,say);st.rep=rep;anteprima();
+    }catch(e){box('Sincronizzazione non riuscita',`<div class="panel"><p>${esc(e.message||String(e))}</p></div>`,'<button class="btn" data-x>Chiudi</button>');m.querySelector('[data-x]').onclick=chiudi;}
+  };
+  const anteprima=()=>{
+    const r=st.rep,gg=r.giorni.length,nuovi=r.giorni.filter(g=>!S.amzgg.some(x=>x.data===g.data)).length;
+    const docN=r.doc.filter(d=>!d._solo).length;
+    box('Anteprima della sincronizzazione',`<div class="panel"><ul style="margin:0;padding-left:18px">
+      <li><b>${gg}</b> giornate di fatturato (${nuovi} nuove, ${gg-nuovi} da aggiornare)</li>
+      <li><b>${r.doc.filter(d=>d.tipo==='Fattura Amazon').length}</b> fatture Amazon, <b>${r.doc.filter(d=>d.tipo==='Pre-fattura').length}</b> pre-fatture, <b>${r.doc.filter(d=>d.tipo==='Scorecard'&&!d._solo).length}</b> scorecard (${docN} PDF/file da allegare)</li>
+      <li><b>${r.costi.length}</b> mesi di costi, <b>${r.prev.length}</b> righe di previsione</li>
+      ${r.tariffa?`<li>Tariffa rotta standard del portale: ${eur(r.tariffa)}</li>`:''}</ul>
+      ${r.avvisi.length?`<p style="margin-top:10px"><b>Da controllare</b></p><ul style="margin:0;padding-left:18px">${r.avvisi.slice(0,10).map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`:''}</div>
+      <p class="muted" style="margin-top:8px">Importando si aggiornano i dati per data, settimana e numero di fattura. Non si cancella nulla e i valori già compilati non vengono svuotati.</p>`,
+      '<button class="btn" data-x>Annulla</button><button class="btn primary" data-ok>Importa</button>');
+    m.querySelector('[data-x]').onclick=chiudi;
+    m.querySelector('[data-ok]').onclick=async()=>{
+      box('Importazione','<div class="panel"><p>Importazione in corso…</p></div>','');
+      const es=await amzApplica(st.rep,()=>{});
+      const f=x=>`${x.nuovi} nuovi, ${x.agg} aggiornati`;
+      box('Sincronizzazione completata',`<div class="panel"><ul style="margin:0;padding-left:18px"><li>Giornate: ${f(es.giorni)}</li><li>Documenti: ${f(es.doc)} · ${es.allegati} PDF allegati</li><li>Costi: ${f(es.costi)}</li><li>Previsioni: ${f(es.prev)}</li></ul></div>`,'<button class="btn primary" data-x>Chiudi</button>');
+      m.querySelector('[data-x]').onclick=()=>{chiudi();renderAmazon();};
+      renderAmazon();
+    };
+  };
+  const scegli=()=>{
+    box('Sincronizza dal portale Amazon DLO3',`<div class="panel"><p>Scegli la <b>cartella FAST_RENT_PORTALE</b> (o la cartella che la contiene) oppure lo <b>ZIP</b> del portale. Le cartelle di sistema e i backup si saltano da soli.</p>
+      <p class="muted">Si leggono il fatturato settimanale, i costi, le fatture, le pre-fatture, le scorecard e i file di forecast. Puoi ripetere quando vuoi: i dati si aggiornano senza doppioni.</p></div>`,
+      `<button class="btn" data-x>Annulla</button>${FSA?'<button class="btn" data-dir>Scegli la cartella</button>':''}<button class="btn" data-dirw>${FSA?'Cartella (altro metodo)':'Scegli la cartella'}</button><button class="btn primary" data-zip>Scegli lo ZIP</button>`);
+    m.querySelector('[data-x]').onclick=chiudi;
+    const d=m.querySelector('[data-dir]');
+    if(d)d.onclick=async()=>{try{const dir=await window.showDirectoryPicker({id:'amazon-portale',mode:'read'});leggi(await amzDaCartella(dir,''));}catch(e){if(e.name!=='AbortError')toast('Cartella non letta: '+e.message,true);}};
+    m.querySelector('[data-dirw]').onclick=()=>{const i=document.createElement('input');i.type='file';i.webkitdirectory=true;i.multiple=true;i.onchange=()=>{if(i.files.length)leggi([...i.files]);};i.click();};
+    m.querySelector('[data-zip]').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='.zip';i.onchange=()=>{if(i.files.length)leggi([...i.files]);};i.click();};
+  };
+  scegli();
+}
+
+/* ---------- aggancio ---------- */
+AMM_TABS.push('amazon');
+VIEWS.amazon=()=>renderAmazon();
+(()=>{
+  const g=MENU.find(x=>x.g==='Amministrazione');
+  if(g&&!g.items.some(([k])=>k==='amazon'))g.items.push(['amazon','Amazon DLO3']);
+  const stores=['amzgg','amzdoc','amzco','amzfc'];
+  const a=typeof AREE!=='undefined'&&AREE.find(x=>x.k==='amm');
+  if(a){if(!a.tabs.includes('amazon'))a.tabs.push('amazon');for(const s of stores)if(!a.store.includes(s))a.store.push(s);
+    if(typeof AREA_DI_TAB!=='undefined')AREA_DI_TAB.amazon='amm';
+    if(typeof AREE_DI_STORE!=='undefined')for(const s of stores)(AREE_DI_STORE[s]=AREE_DI_STORE[s]||[]).includes('amm')||AREE_DI_STORE[s].push('amm');}
 })();
 
 
