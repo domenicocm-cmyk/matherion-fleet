@@ -146,4 +146,35 @@
   allinea da solo fra contratto di noleggio, scheda del mezzo e noleggi non
   scaduti (stessa targa), con i costi del contratto fornitore accanto e le
   modifiche nello storico. Vedi CANONI.md.
-- **2026.10.23** — pubblicata il 19/10/2026
+- **2026.10.24** — pubblicata il 20/10/2026 — **Documenti dei mezzi in blocco**.
+  Dall'elenco mezzi si esportano in ZIP i documenti scelti per targa e per
+  tipo (libretti, polizze…), anche quelli collegati alla stessa targa, con
+  indice Excel e documenti mancanti. Vedi DOCUMENTI_MEZZI.md.
+- **2026.10.24** — pubblicata il 20/10/2026
+- **2026.10.25** — pubblicata il 20/10/2026 — **Guida**. Un assistente nel
+  gestionale: si scrive la domanda («come carico un sinistro?», «dove trovo i
+  costi del centro di costo Amazon?») e la Guida risponde ed evidenzia sullo
+  schermo i passaggi. Vedi GUIDA.md.
+- **2026.10.26** — pubblicata il 21/10/2026 — **Rimessa Diretta**. Con termine
+  di pagamento 0 (Parametri) i contratti e le proforma riportano «Rimessa
+  Diretta» al posto di «a 0 giorni data fattura»; lo 0 non torna più a 30.
+- **2026.10.27** — pubblicata il 22/10/2026 — **Franchigie senza IVA**. Nelle
+  proforma la franchigia/danni del sinistro è addebitata senza IVA (natura N2.2,
+  risarcimento); restano con IVA canoni, spese di gestione e gestione sinistro.
+- **2026.10.28** — pubblicata il 22/10/2026 — **Verbali: solo Global One non si
+  rinotifica**. I verbali dei mezzi a noleggio si rinotificano tutti al cliente;
+  quelli dei clienti indicati in Parametri (riga 38, predefinito «Global One»)
+  restano alla società: «Da pagare», pagati dalla società, fuori dalle Rinotifiche.
+- **2026.10.29** — pubblicata il 23/10/2026 — **Importa polizze**. Da Mezzi si
+  sceglie il PDF/le scansioni delle polizze: il gestionale legge targa, polizza,
+  scadenze e premi, raggruppa per mezzo, mostra l'anteprima e alla conferma
+  aggiorna la scheda e allega la copia con le sole pagine di quel mezzo.
+  Vedi POLIZZE.md.
+- **2026.10.30** — pubblicata il 23/10/2026 — **Rimborso accise gasolio**
+  (Amministrazione). Calcolo trimestrale per i veicoli da 7,5 t Euro 5+, con
+  l'accisa del giorno di ogni rifornimento, quadri, limite 1 l/km, esclusioni
+  motivate, tabella aliquote modificabile ed export Excel. Vedi ACCISE.md.
+- **2026.10.31** — pubblicata il 24/10/2026 — **Tachigrafo** (Amministrazione).
+  Scadenzario degli scarichi (carte 28 giorni, unità di bordo 90), archivio dei
+  file .ddd con conservazione di 12 mesi, controlli e formazione, fascicolo
+  Excel. Nuovo campo «Tachigrafo installato» in Mezzi. Vedi TACHIGRAFO.md.

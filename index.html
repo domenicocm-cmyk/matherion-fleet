@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.30';
+const APP_VERSION='2026.10.31';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -17374,6 +17374,7 @@ const G_CONCETTI={
   dip:'dipendente dipendenti autista autisti conducente assegnazione assegnazioni patente',
   gio:'giornaliera giornaliere consegna riconsegna ritiro turno',
   doc:'documento documenti allegato allegati libretto libretti',
+  tac:'tachigrafo tachigrafi cronotachigrafo cronotachigrafi cronografo cronografi ddd scarico scarichi ore guida riposi conducente conducenti carta',
   acc:'accise accisa gasolio rimborso carburante agevolato 7,5 75 quintali dogane quadro quadri',
   pol:'polizza polizze assicurazione assicurazioni assicurativa assicurative tagliando tagliandi quietanza quietanze rca certificato',
   scad:'scadenza scadenze scade scadono revisione bollo assicurazione scadenziario rca',
@@ -17538,6 +17539,10 @@ function gCatalogo(){
     risp:()=>({testo:'Il calcolo prende i rifornimenti dei Movimenti, tiene solo i veicoli da 7,5 t Euro 5 o superiore, usa l’accisa in vigore il giorno di ogni rifornimento e raccoglie i totali per Quadro. Inserisci i km di ogni veicolo per il limite di 1 litro per km.',
       passi:[gMenu('accise'),{testo:'Scegli **Anno** e **Trimestre**: vedi il credito, i quadri e i rifornimenti esclusi con il motivo.',sel:()=>document.querySelector('#main #accTr'),fatto:()=>false},
       {testo:'Scrivi i **Km del trimestre** di ogni veicolo, poi **Esporta Excel** per i quadri della dichiarazione.',sel:()=>document.querySelector('#main [data-acckm]')||document.querySelector('#main [data-accxl]'),fatto:()=>false}],sezione:'accise'})}));
+  T.push(gCompito({id:'tachigrafo-scarico',c:['tac'],v:['crea','modifica','trova'],peso:4,titolo:'Registrare lo scarico del tachigrafo (carta conducente o veicolo)',
+    risp:()=>({testo:'Per ogni scarico registra data, autista o targa e periodo coperto, e allega il file originale .ddd: va conservato intatto per almeno 12 mesi. Lo scadenzario ti avvisa prima dei 28 giorni (carte) e dei 90 giorni (unità di bordo).',
+      passi:[gMenu('tachigrafo'),{testo:'Nello **Scadenzario** premi **Registra** sulla riga di chi hai scaricato.',sel:()=>document.querySelector('#main [data-tacreg]')||document.querySelector('#main [data-tacnew]'),fatto:()=>!!document.querySelector('.drawer,.modal')},
+      {testo:'Compila la data, poi allega il file .ddd dalla scheda **Allegati** del record.',sel:()=>document.querySelector('.drawer'),fatto:()=>false}],sezione:'tachigrafo',scrivi:'tacsc'})}));
   T.push(gCompito({id:'costi-cdc',c:['cdc','costi'],v:['trova'],peso:3,titolo:'Vedere i costi di un centro di costo',
     risp:e=>gRispCostiCdc(e)}));
   T.push(gCompito({id:'costi-cdc-carte',c:['cdc','carta','costi'],v:['trova'],peso:2,titolo:'Riepilogo di carburante e pedaggi per centro di costo',
@@ -18608,6 +18613,195 @@ VIEWS.accise=()=>renderAccise();
   if(a){if(!a.tabs.includes('accise'))a.tabs.push('accise');for(const s of ['accal','acck'])if(!a.store.includes(s))a.store.push(s);
     if(typeof AREA_DI_TAB!=='undefined')AREA_DI_TAB.accise='amm';
     if(typeof AREE_DI_STORE!=='undefined')for(const s of ['accal','acck'])(AREE_DI_STORE[s]=AREE_DI_STORE[s]||[]).includes('amm')||AREE_DI_STORE[s].push('amm');}
+})();
+
+
+/* =====================================================================
+   TACHIGRAFO: scarichi di carte conducente e unità di bordo, archivio dei
+   file originali (.ddd), controlli periodici e formazione.
+   Regole usate (Reg. UE 165/2014, da verificare con il consulente; lo
+   schema del nuovo Codice della Strada, A.G. 448, non indica gli intervalli):
+     · carta conducente: scarico almeno ogni 28 giorni;
+     · unità di bordo: almeno ogni 90 giorni;
+     · dati conservati almeno 12 mesi, nel file originale.
+   Gli intervalli e la conservazione sono nei Parametri.
+   Il gestionale NON legge il contenuto dei .ddd: lo archivia e tiene lo
+   scadenzario; l'analisi delle infrazioni resta al software del fornitore.
+   ===================================================================== */
+if(typeof PARAMS_EXTRA!=='undefined'){
+  [['tacGgCarta',41,'Tachigrafo: scarico carta conducente ogni (giorni)',28],
+   ['tacGgVeicolo',42,'Tachigrafo: scarico unità di bordo ogni (giorni)',90],
+   ['tacPreavviso',43,'Tachigrafo: avviso in anticipo di (giorni)',7],
+   ['tacConserva',44,'Tachigrafo: conservazione dei dati (mesi)',12]]
+  .forEach(p=>{if(!PARAMS_EXTRA.some(x=>x[0]===p[0]))PARAMS_EXTRA.push(p);});
+}
+const tacNum=(k,d)=>{const n=parseInt(S.par&&S.par[k],10);return n>0?n:d;};
+const tacGgCarta=()=>tacNum('tacGgCarta',28),tacGgVei=()=>tacNum('tacGgVeicolo',90),tacPre=()=>tacNum('tacPreavviso',7),tacMesi=()=>tacNum('tacConserva',12);
+const TAC_TIPI=['Carta conducente','Unità di bordo'];
+const TAC_CTRL=['Controllo periodico','Formazione conducente','Istruzioni consegnate','Verifica dispositivo','Altro'];
+
+MODS.tacsc={sheet:'Tachigrafo scarichi',store:'tacsc',title:'Scarichi tachigrafo',code:'TS',attach:true,wide:true,
+ canDelete:r=>{const lim=addMonths(r.dataScarico||todayISO(),tacMesi());return lim>todayISO()?`Questo scarico va conservato fino al ${fmtD(lim)} (${tacMesi()} mesi): non si può eliminare prima.`:'';},
+ groups:[{t:'Scarico',f:[
+  fd('tipo','Cosa è stato scaricato','sel',{req:true,opts:TAC_TIPI,def:TAC_TIPI[0],span:'s3'}),
+  fd('dataScarico','Data dello scarico','date',{req:true,span:'s3'}),
+  fd('dipendente','Autista (carta conducente)','ref',{ref:'dip',span:'s3'}),
+  fd('targa','Targa (unità di bordo)','ref',{ref:'mezzo',span:'s3',plate:true}),
+  fd('dal','Dati dal','date',{span:'s3'}),fd('al','Dati fino al','date',{span:'s3'}),
+  fd('modalita','Modalità','sel',{opts:['Scarico remoto','Chiavetta / scaricatore','Presso officina'],span:'s3'}),
+  fd('esito','Esito','sel',{opts:['Regolare','File non leggibile','Da rifare'],def:'Regolare',span:'s3'}),
+  fd('analisi','Analisi infrazioni eseguita','sel',{opts:['Sì','No'],def:'No',span:'s3'}),
+  fd('note','Note','area',{span:'s6'})]}]};
+MODS.tacct={sheet:'Tachigrafo controlli',store:'tacct',title:'Controlli e formazione tachigrafo',code:'TC',attach:true,wide:true,
+ groups:[{t:'Controllo o formazione',f:[
+  fd('tipo','Tipo','sel',{req:true,opts:TAC_CTRL,def:TAC_CTRL[0],span:'s3'}),fd('data','Data','date',{req:true,span:'s3'}),
+  fd('dipendente','Autista','ref',{ref:'dip',span:'s3'}),fd('targa','Targa','ref',{ref:'mezzo',span:'s3',plate:true}),
+  fd('esito','Esito','sel',{opts:['Regolare','Rilievi da correggere','Irregolarità'],def:'Regolare',span:'s3'}),
+  fd('eseguitoDa','Eseguito da','text',{span:'s3'}),fd('prossima','Prossimo controllo','date',{span:'s3'}),
+  fd('note','Rilievi e azioni correttive','area',{span:'s6'})]}]};
+ammRegistraModuli(['tacsc','tacct']);
+if(typeof DOC_TIPI!=='undefined'){for(const t of ['Scarico tachigrafo','Verbale controllo tachigrafo'])if(!DOC_TIPI.includes(t))DOC_TIPI.push(t);}
+if(typeof ATT_DEF!=='undefined'){ATT_DEF.tacsc='Scarico tachigrafo';ATT_DEF.tacct='Verbale controllo tachigrafo';}
+/* il mezzo dichiara se ha il tachigrafo; se non lo dice, vale la massa (> 3,5 t) */
+if(!MODS.mezzi.fmap||!MODS.mezzi.fmap.tachigrafo){
+  const g=MODS.mezzi.groups[MODS.mezzi.groups.length-1].f;
+  g.push(fd('tachigrafo','Tachigrafo installato','sel',{opts:['Sì','No'],span:'s3',hint:'Vuoto: si presume obbligatorio sopra 3,5 t di massa'}));
+  ammCampi(MODS.mezzi);
+}
+
+/* ---------- scadenzario ---------- */
+const tacDiff=(a,b)=>Math.round((Date.parse(b)-Date.parse(a))/86400000);
+function tacStato(ultimo,gg){
+  const oggi=todayISO();
+  if(!ultimo)return {k:'mai',scad:'',giorni:null,l:'Mai scaricato'};
+  const scad=new Date(Date.parse(ultimo)+gg*86400000).toISOString().slice(0,10),g=tacDiff(oggi,scad);
+  return {k:g<0?'scaduto':g<=tacPre()?'presto':'ok',scad,giorni:g,l:g<0?`Scaduto da ${-g} giorni`:g<=tacPre()?`Scade tra ${g} giorni`:`Scade tra ${g} giorni`};
+}
+function tacNecessario(m){
+  if(m.tachigrafo==='Sì')return true;if(m.tachigrafo==='No')return false;
+  const massa=+m.massa>0?+m.massa:(+m.massaMax>0?+m.massaMax:0);return massa>3500;
+}
+function tacScadenzario(){
+  const out=[];
+  const ult=(filtro)=>S.tacsc.filter(filtro).filter(s=>s.esito!=='Da rifare'&&s.dataScarico).map(s=>s.dataScarico).sort().pop()||'';
+  for(const d of S.dip){
+    if(d.stato==='Cessato')continue;
+    if(!(d.tachNumero||/autista/i.test(d.mansione||'')))continue;
+    const u=ult(s=>s.tipo===TAC_TIPI[0]&&s.dipendente===d.codice);
+    out.push({tipo:TAC_TIPI[0],chi:dipName(d),rif:d.codice,dettaglio:d.tachNumero?`Carta ${d.tachNumero}`:'Carta non indicata',cartaScad:d.tachScadenza||'',ultimo:u,st:tacStato(u,tacGgCarta()),gg:tacGgCarta()});
+  }
+  for(const m of S.mezzi){
+    if(ARCH(m)||FUORI_FLOTTA(m.stato)||!tacNecessario(m))continue;
+    const u=ult(s=>s.tipo===TAC_TIPI[1]&&normTarga(s.targa)===normTarga(m.targa));
+    out.push({tipo:TAC_TIPI[1],chi:m.targa,rif:m.targa,dettaglio:[m.marca,m.modello].filter(Boolean).join(' '),cartaScad:'',ultimo:u,st:tacStato(u,tacGgVei()),gg:tacGgVei()});
+  }
+  const ord={scaduto:0,mai:1,presto:2,ok:3};
+  return out.sort((a,b)=>ord[a.st.k]-ord[b.st.k]||(a.st.scad<b.st.scad?-1:1));
+}
+/* controlli e formazione: ultimo per autista */
+function tacControlli(){
+  const dr=S.dip.filter(d=>d.stato!=='Cessato'&&(d.tachNumero||/autista/i.test(d.mansione||'')));
+  const oggi=todayISO();
+  return dr.map(d=>{
+    const f=S.tacct.filter(c=>c.dipendente===d.codice&&c.tipo==='Formazione conducente').map(c=>c.data).sort().pop()||'';
+    const i=S.tacct.filter(c=>c.dipendente===d.codice&&c.tipo==='Istruzioni consegnate').map(c=>c.data).sort().pop()||'';
+    return {d,formazione:f,istruzioni:i,manca:!f||!i};
+  });
+}
+/* i file da conservare: quando si possono eliminare */
+const tacConservaFino=s=>addMonths(s.dataScarico||todayISO(),tacMesi());
+
+/* ---------- pagina ---------- */
+function tacTabs(){
+  const t=ui('tacTab').tab||'s';
+  const b=(k,l)=>`<button class="${t===k?'on':''}" data-sub="tacTab:${k}">${l}</button>`;
+  return `<div class="subtabs">${b('s','Scadenzario')}${b('d','Scarichi e file')}${b('c','Controlli e formazione')}${b('r','Regole')}</div>`;
+}
+function renderTachigrafo(){
+  const t=ui('tacTab').tab||'s';
+  if(t==='d')return genericList('tacsc',{uiKey:'tacsc',title:'Tachigrafo',tabsHtml:tacTabs(),
+    sub:'Ogni scarico con il file originale (.ddd) allegato: premi Allegati sulla riga. Il file va conservato intatto per almeno '+tacMesi()+' mesi.',
+    searchPh:'Autista, targa, tipo',search:['tipo','dipendente','targa','dataScarico','esito'],
+    buttons:[{l:'Registra scarico',primary:true,fn:()=>openRecord('tacsc',null)},{l:'Fascicolo Excel',fn:()=>tacExcel()}],
+    filters:[{k:'tipo',label:'Tipo',opts:()=>TAC_TIPI,all:'Tutti'}],
+    cols:[{l:'Data scarico',v:r=>fmtD(r.dataScarico)},{l:'Tipo',v:r=>esc(r.tipo||'')},
+      {l:'Autista / mezzo',v:r=>esc(r.tipo===TAC_TIPI[0]?(REF.dip.label(r.dipendente)||''):(r.targa||''))},
+      {l:'Periodo coperto',v:r=>r.dal||r.al?`${fmtD(r.dal)} – ${fmtD(r.al)}`:''},{l:'Modalità',v:r=>esc(r.modalita||'')},{l:'Esito',v:r=>esc(r.esito||'')},
+      {l:'File',v:r=>{const n=attachFor('tacsc',r.codice).length;return n?`${n} ✓`:'<span class="late">manca</span>';}},{l:'Conservare fino al',v:r=>fmtD(tacConservaFino(r))}],
+    sort:(a,b)=>a.dataScarico<b.dataScarico?1:-1});
+  if(t==='c')return renderTacControlli();
+  if(t==='r')return renderTacRegole();
+  return renderTacScadenzario();
+}
+function renderTacScadenzario(){
+  const l=tacScadenzario();
+  const n=k=>l.filter(x=>x.st.k===k).length;
+  const kpi=(t,v,s)=>`<div class="panel" style="flex:1;min-width:150px;margin:0"><small class="muted">${t}</small><div style="font:700 22px/1.2 inherit">${v}</div></div>`;
+  $('#main').innerHTML=`${pageHead('Tachigrafo','Scarico dei dati: carte conducente ogni '+tacGgCarta()+' giorni, unità di bordo ogni '+tacGgVei()+' giorni. I dati si conservano almeno '+tacMesi()+' mesi.',
+    '<button class="btn primary" data-tacnew>Registra scarico</button>')}${tacTabs()}
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0">${kpi('Scaduti',`<span class="${n('scaduto')?'late':''}">${n('scaduto')}</span>`)}${kpi('Mai scaricati',`<span class="${n('mai')?'late':''}">${n('mai')}</span>`)}${kpi('In scadenza',n('presto'))}${kpi('Regolari',n('ok'))}</div>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Tipo</th><th>Autista / targa</th><th>Dettaglio</th><th>Ultimo scarico</th><th>Prossimo entro</th><th>Stato</th><th></th></tr></thead><tbody>
+    ${l.map(x=>`<tr><td>${esc(x.tipo)}</td><td class="nowrap"><b>${esc(x.chi)}</b></td><td>${esc(x.dettaglio)}${x.cartaScad&&x.cartaScad<todayISO()?' <span class="late">carta scaduta '+fmtD(x.cartaScad)+'</span>':''}</td>
+      <td>${x.ultimo?fmtD(x.ultimo):'–'}</td><td>${x.st.scad?fmtD(x.st.scad):'–'}</td>
+      <td><span class="pill ${x.st.k==='ok'?'ok':x.st.k==='presto'?'end':'bad'}">${esc(x.st.l)}</span></td>
+      <td><button class="btn ghost" data-tacreg="${esc(x.tipo)}|${esc(x.rif)}">Registra</button></td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nessun autista con carta o mezzo con tachigrafo. Indica «Carta tachigrafica n.» nei Dipendenti e controlla «Tachigrafo installato» nei Mezzi.</td></tr>'}</tbody></table></div>
+    <p class="muted" style="font-size:12.5px;margin-top:8px">Il mezzo con massa sopra 3,5 t è considerato soggetto a tachigrafo, salvo diversa indicazione nella scheda mezzo. Un autista compare se ha il numero della carta o la mansione «Autista».</p>`;
+  const m=$('#main');
+  const nuovo=(tipo,rif)=>{openRecord('tacsc',null,{preset:{tipo,dataScarico:todayISO(),...(tipo===TAC_TIPI[0]?{dipendente:rif}:{targa:rif})}});};
+  m.querySelector('[data-tacnew]').onclick=()=>nuovo(TAC_TIPI[0],'');
+  m.querySelectorAll('[data-tacreg]').forEach(b=>b.onclick=()=>{const [t,r]=b.dataset.tacreg.split('|');nuovo(t,r);});
+}
+function renderTacControlli(){
+  const c=tacControlli();
+  $('#main').innerHTML=`${pageHead('Tachigrafo','Prova di diligenza dell’impresa: controlli periodici, formazione degli autisti e istruzioni consegnate.',
+    '<button class="btn primary" data-tacnew>Registra controllo o formazione</button>')}${tacTabs()}
+    <h3 style="margin:12px 0 6px">Autisti: formazione e istruzioni</h3>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Autista</th><th>Ultima formazione</th><th>Istruzioni consegnate</th><th></th></tr></thead><tbody>
+    ${c.map(x=>`<tr><td><b>${esc(dipName(x.d))}</b></td><td>${x.formazione?fmtD(x.formazione):'<span class="late">nessuna</span>'}</td><td>${x.istruzioni?fmtD(x.istruzioni):'<span class="late">nessuna</span>'}</td>
+      <td><button class="btn ghost" data-tacc="${esc(x.d.codice)}">Registra</button></td></tr>`).join('')||'<tr><td colspan="4" class="muted">Nessun autista</td></tr>'}</tbody></table></div>
+    <div id="tacLista" style="margin-top:16px"></div>`;
+  const m=$('#main');
+  m.querySelector('[data-tacnew]').onclick=()=>openRecord('tacct',null,{preset:{data:todayISO()}});
+  m.querySelectorAll('[data-tacc]').forEach(b=>b.onclick=()=>openRecord('tacct',null,{preset:{data:todayISO(),tipo:'Formazione conducente',dipendente:b.dataset.tacc}}));
+  genericList('tacct',{uiKey:'tacct',noHead:true,target:m.querySelector('#tacLista'),searchPh:'Tipo, autista, targa',search:['tipo','dipendente','targa','esito'],
+    buttons:[],cols:[{l:'Data',v:r=>fmtD(r.data)},{l:'Tipo',v:r=>esc(r.tipo||'')},{l:'Autista',v:r=>esc(REF.dip.label(r.dipendente)||'')},{l:'Targa',v:r=>esc(r.targa||'')},
+      {l:'Esito',v:r=>esc(r.esito||'')},{l:'Prossimo',v:r=>fmtD(r.prossima)},{l:'Verbale',v:r=>attachFor('tacct',r.codice).length?'✓':''}],sort:(a,b)=>a.data<b.data?1:-1});
+}
+function renderTacRegole(){
+  $('#main').innerHTML=`${pageHead('Tachigrafo','Cosa deve fare l’impresa e come lo gestisce il programma.')}${tacTabs()}
+  <div class="panel" style="font-size:14px;line-height:1.6">
+  <h3>Obblighi (schema del nuovo Codice della Strada, art. 107; A.G. 448 in esame)</h3>
+  <ul><li>Trasferire e <b>conservare per almeno un anno</b> i dati di carte e unità di bordo.</li><li>Controllare periodicamente l’uso del tachigrafo, formare e istruire i conducenti, non dare premi che spingano a usarlo male.</li><li>Non far circolare veicoli senza tachigrafo o con dispositivo guasto o manomesso.</li>
+  <li>Sanzioni previste dallo schema (non ancora in vigore): mancato scarico o conservazione 400–1.600 €; mancati controlli o formazione 800–3.200 €; dispositivo assente o manomesso 850–3.400 €.</li>
+  <li>L’impresa può evitare la sanzione per le violazioni dei conducenti dimostrando di aver rispettato la normativa europea: 60 giorni per presentare i documenti.</li></ul>
+  <h3>Intervalli (Reg. UE 165/2014, modificabili in Parametri)</h3><ul><li>Carta conducente: ogni ${tacGgCarta()} giorni. Unità di bordo: ogni ${tacGgVei()} giorni.</li></ul>
+  <h3>Come lavora il programma</h3>
+  <ul><li>Registri ogni scarico e alleghi il <b>file originale .ddd</b>, senza convertirlo.</li><li>Lo scadenzario avvisa ${tacPre()} giorni prima; gli scarichi «Da rifare» non contano.</li>
+  <li>Uno scarico non si può eliminare prima di ${tacMesi()} mesi.</li><li>«Fascicolo Excel» raccoglie scadenzario, scarichi e controlli da portare in difesa.</li>
+  <li>Il programma non legge i .ddd: l’analisi delle infrazioni si fa con il software del fornitore, poi si segna «Analisi eseguita».</li></ul></div>`;
+}
+async function tacExcel(){
+  const wb=new ExcelJS.Workbook();wb.creator='Gestionale flotta';
+  const ini=ws=>{ws.getRow(1).font={bold:true};ws.views=[{state:'frozen',ySplit:1}];ws.columns.forEach(x=>{x.width=18;});};
+  const w1=wb.addWorksheet('Scadenzario');w1.addRow(['Tipo','Autista / targa','Dettaglio','Ultimo scarico','Prossimo entro','Stato']);
+  for(const x of tacScadenzario())w1.addRow([x.tipo,x.chi,x.dettaglio,x.ultimo,x.st.scad,x.st.l]);ini(w1);
+  const w2=wb.addWorksheet('Scarichi');w2.addRow(['Data scarico','Tipo','Autista','Targa','Dati dal','Dati fino al','Modalità','Esito','Analisi','File allegati','Conservare fino al']);
+  for(const s of S.tacsc.slice().sort((a,b)=>a.dataScarico<b.dataScarico?1:-1))w2.addRow([s.dataScarico,s.tipo,REF.dip.label(s.dipendente)||'',s.targa||'',s.dal,s.al,s.modalita,s.esito,s.analisi,attachFor('tacsc',s.codice).map(a=>a.file).join('; '),tacConservaFino(s)]);ini(w2);
+  const w3=wb.addWorksheet('Controlli e formazione');w3.addRow(['Data','Tipo','Autista','Targa','Esito','Eseguito da','Prossimo','Note']);
+  for(const c of S.tacct.slice().sort((a,b)=>a.data<b.data?1:-1))w3.addRow([c.data,c.tipo,REF.dip.label(c.dipendente)||'',c.targa||'',c.esito,c.eseguitoDa,c.prossima,c.note]);ini(w3);
+  await saveFile(`Fascicolo_tachigrafo_${stampNow()}.xlsx`,new Blob([await wb.xlsx.writeBuffer()],{type:XLSX_MIME}));
+}
+
+/* ---------- aggancio ---------- */
+AMM_TABS.push('tachigrafo');
+VIEWS.tachigrafo=()=>renderTachigrafo();
+(()=>{
+  const g=MENU.find(x=>x.g==='Amministrazione');
+  if(g&&!g.items.some(([k])=>k==='tachigrafo'))g.items.push(['tachigrafo','Tachigrafo']);
+  const a=typeof AREE!=='undefined'&&AREE.find(x=>x.k==='amm');
+  if(a){if(!a.tabs.includes('tachigrafo'))a.tabs.push('tachigrafo');for(const s of ['tacsc','tacct'])if(!a.store.includes(s))a.store.push(s);
+    if(typeof AREA_DI_TAB!=='undefined')AREA_DI_TAB.tachigrafo='amm';
+    if(typeof AREE_DI_STORE!=='undefined')for(const s of ['tacsc','tacct'])(AREE_DI_STORE[s]=AREE_DI_STORE[s]||[]).includes('amm')||AREE_DI_STORE[s].push('amm');}
 })();
 
 
