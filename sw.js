@@ -4,7 +4,7 @@
    e manifest, che cambiano di rado.
    I dati NON passano di qui: restano nel registro .xlsx della cartella di lavoro. */
 
-const VER = 'flotta-2026.10.31';
+const VER = 'flotta-2026.10.34';
 const SHELL = [
   '/',
   '/burago',
