@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.35';
+const APP_VERSION='2026.10.36';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -2855,6 +2855,7 @@ function filteredRows(){
     if(S.filt.loc&&o.locataria!==S.filt.loc)return false;
     if(S.filt.cdc&&rowCdc(o)!==S.filt.cdc)return false;
     if(S.filt.stato&&c.stato!==S.filt.stato)return false;
+    if(!perOk(o))return false;
     if(q&&![o.targa,o.modello,o.numero,o.quadro,rowCdc(o),o.locataria,o.noleggiante,o.tipologia].join(' ').toLowerCase().includes(q))return false;
     return true;
   });
@@ -2869,6 +2870,7 @@ function renderContratti(){
     <div class="field"><label for="fcc">Centro di costo</label><select class="input" id="fcc"><option value="">Tutti</option>${S.cdc.filter(c=>!S.filt.loc||c.societa===S.filt.loc).map(c=>{const v=c.etichetta||cdcLabel(c);return `<option value="${esc(v)}" ${v===S.filt.cdc?'selected':''}>${esc(S.filt.loc?c.nome:v)}</option>`;}).join('')}</select></div>
     <div class="field"><label for="fs">Stato</label><select class="input" id="fs"><option value="">Tutti</option>${['In corso','Da iniziare','Concluso'].map(s=>`<option ${s===S.filt.stato?'selected':''}>${s}</option>`).join('')}</select></div>
     <div class="field"><label for="fm">Mese di fatturazione</label><input class="input" type="month" id="fm" value="${S.par.mese.slice(0,7)}"></div>
+    ${perHtml('c')}
     <button class="btn" id="bMulti">Nuovo contratto multiplo</button>
     <button class="btn primary" id="bAdd">Nuovo contratto</button>
   </div>
@@ -2883,6 +2885,7 @@ function renderContratti(){
   $('#fcc').onchange=e=>{S.filt.cdc=e.target.value;fillContratti();};
   $('#fs').onchange=e=>{S.filt.stato=e.target.value;fillContratti();};
   $('#fm').onchange=e=>{if(!e.target.value)return;S.par.mese=e.target.value+'-01';markDirty();fillContratti();};
+  perLega('c',()=>fillContratti());
   $('#bAdd').onclick=()=>openContract(null);
   $('#bMulti').onclick=()=>openMulti([]);
   massLega();
@@ -9083,6 +9086,7 @@ function printFiltered(){
     if(S.pf.nol&&o.noleggiante!==S.pf.nol)return false;
     if(S.pf.loc.size&&!S.pf.loc.has(o.locataria))return false;
     if(S.pf.stato.size&&!S.pf.stato.has(st))return false;
+    if(!perOk(o))return false;
     if(q&&!(o.targa+' '+o.numero+' '+o.modello+' '+(o.quadro||'')).toLowerCase().includes(q))return false;
     return true;
   });
@@ -9094,6 +9098,7 @@ function renderStampa(){
   const cs={};for(const r of S.rows){const s=calc(r).stato;cs[s]=(cs[s]||0)+1;}
   $('#main').innerHTML=`<div class="printgrid">
     <div>
+      <div class="panel"><h3>Periodo dei contratti</h3><div style="display:grid;gap:8px">${perHtml('p')}</div></div>
       <div class="panel"><h3>Società che noleggia</h3>
         <select class="input" id="pNol"><option value="">Tutte</option>${nols.map(n=>`<option ${n===S.pf.nol?'selected':''}>${esc(n)}</option>`).join('')}</select></div>
       <div class="panel"><h3>Società locatarie</h3>
@@ -9139,6 +9144,7 @@ function renderStampa(){
   $('#pLoc').onchange=e=>{const v=e.target.value;e.target.checked?S.pf.loc.add(v):S.pf.loc.delete(v);fillStampa();};
   $('#pSt').onchange=e=>{const v=e.target.value;e.target.checked?S.pf.stato.add(v):S.pf.stato.delete(v);fillStampa();};
   $('#pQ').oninput=e=>{S.pf.q=e.target.value;fillStampa();};
+  perLega('p',()=>fillStampa());
   $('#pAll').onclick=()=>{printFiltered().forEach(o=>S.sel.add(o.id));fillStampa();};
   $('#pNone').onclick=()=>{S.sel.clear();fillStampa();};
   $('#pTb').onchange=e=>{const id=e.target.dataset.id;if(!id)return;e.target.checked?S.sel.add(id):S.sel.delete(id);fillStampa(true);};
@@ -16013,6 +16019,49 @@ async function pdfUnisci(docs,titolo){
   return out;
 }
 
+
+/* =====================================================================
+   FILTRO PER PERIODO (2026.10.36)
+   ---------------------------------------------------------------------
+   Si sceglie un mese, oppure un intervallo di date, e si decide cosa
+   cercare: i contratti attivi in quel periodo, quelli che iniziano o
+   quelli che scadono. Il filtro vale sia in «Contratti di noleggio» sia in
+   «Stampa contratti», così si seleziona e si stampa solo ciò che serve.
+   ===================================================================== */
+const perStato=()=>(S.per=S.per||{modo:'attivi',da:'',a:'',mese:''});
+const perAttivo=()=>{const p=perStato();return !!(p.da||p.a);};
+function perOk(o){
+  const p=perStato();if(!p.da&&!p.a)return true;
+  const i=o.inizio||'',f=o.fine||'';
+  if(p.modo==='inizio'){if(!i)return false;return (!p.da||i>=p.da)&&(!p.a||i<=p.a);}
+  if(p.modo==='fine'){if(!f)return false;return (!p.da||f>=p.da)&&(!p.a||f<=p.a);}
+  if(!i&&!f)return false;
+  return (!p.a||!i||i<=p.a)&&(!p.da||!f||f>=p.da);
+}
+function perHtml(x){
+  const p=perStato();
+  return `<div class="field"><label for="${x}Pm">Periodo dei contratti</label><select class="input" id="${x}Pm">
+      <option value="attivi" ${p.modo==='attivi'?'selected':''}>Attivi nel periodo</option>
+      <option value="inizio" ${p.modo==='inizio'?'selected':''}>Che iniziano nel periodo</option>
+      <option value="fine" ${p.modo==='fine'?'selected':''}>Che scadono nel periodo</option></select></div>
+    <div class="field"><label for="${x}Pmese">Mese</label><input class="input" type="month" id="${x}Pmese" value="${esc(p.mese||'')}"></div>
+    <div class="field"><label for="${x}Pda">Dal</label><input class="input" type="date" id="${x}Pda" value="${esc(p.da||'')}"></div>
+    <div class="field"><label for="${x}Pa">Al</label><input class="input" type="date" id="${x}Pa" value="${esc(p.a||'')}"></div>
+    <div class="field"><label>&nbsp;</label><button class="btn ghost" id="${x}Pz" ${perAttivo()?'':'disabled'}>Azzera periodo</button></div>`;
+}
+function perLega(x,cb){
+  const p=perStato(),$$=s=>document.getElementById(x+s);
+  const agg=()=>{const z=$$('Pz');if(z)z.disabled=!perAttivo();};
+  $$('Pm').onchange=e=>{p.modo=e.target.value;cb();};
+  $$('Pmese').onchange=e=>{
+    const v=e.target.value;p.mese=v;
+    if(v){const [y,m]=v.split('-').map(Number);p.da=v+'-01';p.a=v+'-'+String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0');}
+    else{p.da='';p.a='';}
+    $$('Pda').value=p.da;$$('Pa').value=p.a;agg();cb();};
+  const date=()=>{p.da=$$('Pda').value;p.a=$$('Pa').value;p.mese='';$$('Pmese').value='';agg();cb();};
+  $$('Pda').onchange=date;$$('Pa').onchange=date;
+  $$('Pz').onclick=()=>{p.da='';p.a='';p.mese='';$$('Pda').value='';$$('Pa').value='';$$('Pmese').value='';agg();cb();};
+}
 
 /* =====================================================================
    RINNOVO MASSIVO DEI CONTRATTI DI NOLEGGIO (2026.10.35)
