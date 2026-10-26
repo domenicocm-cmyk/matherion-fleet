@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.34';
+const APP_VERSION='2026.10.35';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -16030,6 +16030,133 @@ async function pdfUnisci(docs,titolo){
 
 
 /* =====================================================================
+   RINNOVO MASSIVO DEI CONTRATTI DI NOLEGGIO (2026.10.35)
+   ---------------------------------------------------------------------
+   Dalla lista «Contratti di noleggio»: si spuntano i contratti (o si
+   seleziona tutto ciò che è visibile) e si sceglie «Rinnova…». Ogni
+   contratto viene copiato con le STESSE condizioni (cliente, società,
+   mezzo, canone, km, franchigie, deposito, località, centro di costo,
+   note) e cambia solo il periodo. Numero e quadro vengono assegnati nuovi.
+   ===================================================================== */
+const rinUltimo=(y,m)=>new Date(Date.UTC(y,m+1,0)).getUTCDate();
+const rinIso=(y,m,d)=>{const t=new Date(Date.UTC(y,m,d));return toISO(t);};
+const rinPrimo=iso=>{const d=fromISO(iso);return d.getUTCDate()===1;};
+const rinFineMese=iso=>{const d=fromISO(iso);return d.getUTCDate()===rinUltimo(d.getUTCFullYear(),d.getUTCMonth());};
+/* stesso periodo per tutti: le date scelte */
+/* ognuno col suo: parte il giorno dopo la fine e dura quanto prima */
+function rinPeriodoAuto(o){
+  if(!o.inizio||!o.fine)return null;
+  const ini=addDays(o.fine,1);
+  const a=fromISO(o.inizio),b=fromISO(o.fine);
+  if(rinPrimo(o.inizio)&&rinFineMese(o.fine)){
+    const mesi=(b.getUTCFullYear()-a.getUTCFullYear())*12+b.getUTCMonth()-a.getUTCMonth()+1;
+    const i=fromISO(ini);
+    const y=i.getUTCFullYear(),m=i.getUTCMonth()+mesi-1;
+    const fy=y+Math.floor(m/12),fm=((m%12)+12)%12;
+    return {inizio:ini,fine:rinIso(fy,fm,rinUltimo(fy,fm))};
+  }
+  return {inizio:ini,fine:addDays(ini,daysBetween(o.inizio,o.fine))};
+}
+function rinPiano(rows,op){
+  const occupati=[]; /* periodi già assegnati in questa operazione, per rilevare doppioni */
+  const piano=[];
+  for(const o of rows){
+    const p=op.modo==='date'?{inizio:op.inizio,fine:op.fine}:rinPeriodoAuto(o);
+    const r={o,p,esito:'ok',nota:''};
+    if(!p||!p.inizio||!p.fine){r.esito='no';r.nota='Mancano le date del contratto di partenza';}
+    else if(p.fine<p.inizio){r.esito='no';r.nota='Fine precedente all’inizio';}
+    else if(!o.targa){r.esito='no';r.nota='Contratto senza targa';}
+    else{
+      const c=rentalAt(o.targa,p.inizio,p.fine,o.id);
+      const d=occupati.find(x=>x.targa===o.targa&&p.inizio<=x.fine&&p.fine>=x.inizio);
+      if(c){r.esito='no';r.nota=`Targa già a noleggio dal ${fmtD(c.inizio)} al ${fmtD(c.fine)}${c.numero?` (${c.numero})`:''}`;}
+      else if(d){r.esito='no';r.nota='Duplicato nella stessa operazione';}
+      else{
+        const m=mezzoBy(o.targa);
+        if(m&&m.stato&&m.stato!=='Disponibile'&&m.stato!=='Noleggiato')r.nota=`Attenzione: mezzo “${m.stato}”`;
+        occupati.push({targa:o.targa,inizio:p.inizio,fine:p.fine});
+      }
+    }
+    piano.push(r);
+  }
+  return piano;
+}
+function rinEsegui(piano){
+  const creati=[],mq=new Map();
+  for(const r of piano){
+    if(r.esito!=='ok')continue;
+    const o=r.o,n={id:uid()};
+    for(const k of Object.keys(o))if(k!=='id')n[k]=o[k];
+    n.inizio=r.p.inizio;n.fine=r.p.fine;
+    n.numero=nextNumero(n.inizio);
+    if(o.quadro){
+      if(!mq.has(o.quadro))mq.set(o.quadro,nextQuadro(n.inizio));
+      n.quadro=mq.get(o.quadro);
+    }
+    S.rows.push(n);creati.push(n);
+  }
+  if(creati.length){try{cdcAllineaLista(creati,true);}catch(e){}markDirty();}
+  return creati;
+}
+function rinDlg(){
+  const rows=massRighe();if(!rows.length)return;
+  if(soloLettura()||!puoScrivere('noleggi'))return toast('Il tuo ruolo non può creare contratti di noleggio.',true);
+  const maxFine=rows.map(o=>o.fine).filter(Boolean).sort().pop()||todayISO();
+  const d0=fromISO(addDays(maxFine,1));
+  const op=S.rinOpt=Object.assign({modo:'auto'},S.rinOpt||{});
+  op.inizio=rinIso(d0.getUTCFullYear(),d0.getUTCMonth(),1)>addDays(maxFine,1)?addDays(maxFine,1):addDays(maxFine,1);
+  if(!rinPrimo(op.inizio)){const x=fromISO(op.inizio);op.inizio=rinIso(x.getUTCFullYear(),x.getUTCMonth()+1,1);}
+  const q=fromISO(op.inizio);op.fine=rinIso(q.getUTCFullYear(),q.getUTCMonth(),rinUltimo(q.getUTCFullYear(),q.getUTCMonth()));
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-height:92vh;overflow:auto">
+    <h3>Rinnova contratti</h3>
+    <div class="muted">Ogni contratto selezionato viene copiato con <b>le stesse condizioni</b> (cliente, mezzo, canone, km, franchigie, deposito, località, centro di costo, note). Cambia solo il periodo; il numero è assegnato in automatico e il contratto di partenza resta com’è.</div>
+    <div style="margin:12px 0">
+      <label class="radio"><input type="radio" name="rm" value="auto"><span><b>Ogni contratto dal giorno dopo la sua fine</b><small>Stessa durata di prima (un mese intero resta un mese intero).</small></span></label>
+      <label class="radio"><input type="radio" name="rm" value="date"><span><b>Stesso periodo per tutti: inserisco le nuove date</b><small>Utile per rinnovare tutta la flotta per un mese preciso.</small></span></label>
+    </div>
+    <div class="fgrid" id="rinDate" style="margin-bottom:10px">
+      <div class="field s3"><label for="rinI">Nuova data di inizio</label><input class="input" type="date" id="rinI"></div>
+      <div class="field s3"><label for="rinF">Nuova data di fine</label><input class="input" type="date" id="rinF"></div>
+    </div>
+    <div class="calcbox" id="rinSum"></div>
+    <div class="tablewrap" style="max-height:320px;overflow:auto;margin-top:10px"><table class="grid mini"><thead><tr><th>Contratto</th><th>Targa</th><th>Cliente</th><th>Periodo attuale</th><th>Nuovo periodo</th><th>Esito</th></tr></thead><tbody id="rinTb"></tbody></table></div>
+    <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1" id="rinOk">Rinnova</button></div></div>`;
+  document.body.appendChild(m);
+  let piano=[];
+  const agg=()=>{
+    op.modo=m.querySelector('input[name=rm]:checked').value;
+    m.querySelector('#rinDate').style.display=op.modo==='date'?'':'none';
+    if(op.modo==='date'){op.inizio=m.querySelector('#rinI').value;op.fine=m.querySelector('#rinF').value;}
+    piano=rinPiano(rows,op);
+    const ok=piano.filter(r=>r.esito==='ok').length,no=piano.length-ok;
+    m.querySelector('#rinSum').innerHTML=`<div><small>Selezionati</small><b>${piano.length}</b></div><div><small>Verranno creati</small><b>${ok}</b></div><div><small>Saltati</small><b>${no}</b></div>`;
+    m.querySelector('#rinTb').innerHTML=piano.map(r=>`<tr><td>${esc(r.o.numero||'–')}</td><td>${esc(r.o.targa||'')}</td><td>${esc(r.o.locataria||'')}</td>
+      <td>${r.o.inizio?fmtD(r.o.inizio):'–'} → ${r.o.fine?fmtD(r.o.fine):'–'}</td>
+      <td>${r.p&&r.p.inizio?fmtD(r.p.inizio)+' → '+(r.p.fine?fmtD(r.p.fine):'–'):'–'}</td>
+      <td>${r.esito==='ok'?`<span class="pill run">Sì</span>${r.nota?` <small>${esc(r.nota)}</small>`:''}`:`<span class="pill end">Saltato</span> <small>${esc(r.nota)}</small>`}</td></tr>`).join('');
+    m.querySelector('#rinOk').disabled=!ok;
+    m.querySelector('#rinOk').textContent=ok?`Rinnova ${ok} ${ok===1?'contratto':'contratti'}`:'Rinnova';
+  };
+  m.querySelector(`input[name=rm][value=${op.modo}]`).checked=true;
+  m.querySelector('#rinI').value=op.inizio;m.querySelector('#rinF').value=op.fine;
+  m.addEventListener('input',agg);m.addEventListener('change',agg);
+  m.addEventListener('click',e=>{
+    const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+    if(a&&a.dataset.a==='1'){
+      agg();
+      const creati=rinEsegui(piano);
+      const salt=piano.length-creati.length;
+      S.csel=new Set(creati.map(x=>x.id));
+      m.remove();
+      if(S.tab==='contratti')fillContratti();else render();
+      toast(`${massPlur(creati.length,'contratto rinnovato','contratti rinnovati')}${salt?`, ${salt} saltati`:''}. Sono selezionati qui sotto: ricorda di salvare il file.`);
+    }else m.remove();
+  });
+  agg();
+}
+
+/* =====================================================================
    CONTRATTI: SELEZIONE E OPERAZIONI MASSIVE
    ---------------------------------------------------------------------
    Nella lista «Contratti di noleggio» ogni riga ha la sua casella, e sopra
@@ -16056,6 +16183,7 @@ function massAgg(){
     <button class="btn" data-m="all" ${list.length?'':'disabled'}>Seleziona i ${list.length} visibili</button>
     <button class="btn ghost" data-m="none" ${n?'':'disabled'}>Deseleziona tutto</button>
     <span style="flex:1"></span>
+    <button class="btn" data-m="rin" ${n?'':'disabled'}>Rinnova…</button>
     <button class="btn" data-m="exp" ${n?'':'disabled'}>Esporta…</button>
     <button class="btn primary" data-m="gen" ${n?'':'disabled'}>Genera contratti…</button>`;
   const all=$('#cAll');
@@ -16071,6 +16199,7 @@ function massLega(){
     else if(b.dataset.m==='none'){s.clear();fillContratti();}
     else if(b.dataset.m==='gen')massDlgGenera();
     else if(b.dataset.m==='exp')massDlgEsporta();
+    else if(b.dataset.m==='rin')rinDlg();
   };
   tb.onchange=e=>{
     const id=e.target.dataset&&e.target.dataset.sel;if(!id)return;
