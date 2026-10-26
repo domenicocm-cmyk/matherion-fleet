@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.36';
+const APP_VERSION='2026.10.37';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -19666,19 +19666,26 @@ const menuColoreDi=g=>MENU_COLORE[g]||'#64748b';
 /* ---------- l'aspetto ---------- */
 (()=>{
   const css=`
-  .side .sgroup{--gc:#64748b;display:flex;align-items:center;gap:9px;margin:13px 0 5px;padding:7px 10px;border-radius:10px;font-size:10.5px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;
-    background:color-mix(in srgb,var(--gc) 12%,transparent);color:color-mix(in srgb,var(--gc) 70%,var(--ink))}
-  .side .sgroup::before{content:"";width:9px;height:9px;flex:0 0 9px;border-radius:3px;background:var(--gc)}
+  .side .sgroup{display:flex;align-items:center;gap:6px;margin:16px 6px 5px;padding:4px 6px;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);background:none;transition:color .2s,text-shadow .2s}
   .side .sgroup .scaret{order:3;margin-left:auto;font-size:11px;opacity:.7}
-  .side .sgroup:hover{background:color-mix(in srgb,var(--gc) 20%,transparent)}
-  .side .sgroup .sbadge{order:2;background:var(--gc);color:#fff}
-  .side .sitems{--gc:#64748b;margin:0 0 4px 14px;padding-left:7px;border-left:2px solid color-mix(in srgb,var(--gc) 32%,transparent)}
-  .side .sitems .sitem{padding:7px 9px;margin-bottom:1px;border-radius:9px;font-size:12.5px;font-weight:600}
-  .side .sitems .sitem>span:first-child{gap:9px}
-  .side .sitems .sitem[data-tab]>span:first-child::before{width:17px;height:17px;flex-basis:17px;color:var(--gc);opacity:1}
-  .side .sitems .sitem:hover{background:color-mix(in srgb,var(--gc) 11%,transparent)}
-  .side .sitems .sitem[aria-current="page"]{background:color-mix(in srgb,var(--gc) 17%,var(--surface));color:var(--ink);box-shadow:inset 3px 0 var(--gc)}
-  .side .sitems .sitem[aria-current="page"] .sbadge{background:var(--gc);color:#fff}
+  .side .sgroup:hover{color:var(--gold-ink);text-shadow:0 0 12px color-mix(in srgb,var(--gold) 70%,transparent)}
+  .side .sitems{margin:0 0 4px 10px;padding-left:6px;border-left:1px solid var(--line)}
+  .side .sitems .sitem{position:relative;padding:8px 10px;margin-bottom:2px;border-radius:10px;font-size:12.5px;font-weight:600;
+    transition:background .22s,box-shadow .25s,color .2s,transform .2s}
+  .side .sitems .sitem>span:first-child::before{transition:filter .25s,opacity .2s}
+  /* effetto luminoso al passaggio del mouse e alla tastiera */
+  .side .sitems .sitem:hover,.side .sitems .sitem:focus-visible{
+    background:linear-gradient(100deg,color-mix(in srgb,var(--gold) 16%,transparent),transparent 92%);
+    color:var(--navy);transform:translateX(2px);
+    box-shadow:0 0 0 1px color-mix(in srgb,var(--gold) 38%,transparent),0 0 16px color-mix(in srgb,var(--gold) 34%,transparent)}
+  .side .sitems .sitem:hover>span:first-child::before,.side .sitems .sitem:focus-visible>span:first-child::before{
+    opacity:1;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--gold) 85%,transparent))}
+  /* voce selezionata: alone più intenso e barra luminosa */
+  .side .sitems .sitem[aria-current="page"]{
+    background:linear-gradient(100deg,color-mix(in srgb,var(--gold) 24%,var(--surface)),var(--surface-2));color:var(--navy);transform:none;
+    box-shadow:inset 3px 0 var(--gold),0 0 0 1px color-mix(in srgb,var(--gold) 55%,transparent),0 0 20px color-mix(in srgb,var(--gold) 50%,transparent),0 0 3px color-mix(in srgb,var(--gold) 80%,transparent)}
+  .side .sitems .sitem[aria-current="page"]>span:first-child::before{opacity:1;filter:drop-shadow(0 0 6px var(--gold))}
+  @media (prefers-reduced-motion:reduce){.side .sitems .sitem,.side .sgroup{transition:none}.side .sitems .sitem:hover{transform:none}}
   .sidefoot{position:sticky;bottom:-30px;margin:16px -13px -30px;padding:12px 13px 16px;background:var(--surface);border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
   .sidefoot .chi{font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.35}
   .sidefoot .chi .ruolopill{margin-left:6px}
