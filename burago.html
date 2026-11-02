@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.37';
+const APP_VERSION='2026.10.39';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -5453,6 +5453,75 @@ function renderMezzi(){
 }
 
 
+/* =====================================================================
+   ARCHIVIAZIONE MEZZI E CENTRI DI COSTO (2026.10.38)
+   ---------------------------------------------------------------------
+   Archiviato un mezzo, se è ancora abbinato a un centro di costo l'app lo
+   segnala e chiede se eliminare il centro di costo (o solo scollegare il
+   mezzo). L'eliminazione è offerta solo se nessun altro mezzo in flotta,
+   contratto non concluso, dipendente o utente lo usa ancora.
+   ===================================================================== */
+function cdcUsoDopoArchivio(lab,list){
+  const t=todayISO(),inList=new Set(list);
+  const altriMezzi=S.mezzi.filter(m=>!inList.has(m)&&m.centroCosto===lab&&!ARCH(m)&&!FUORI_FLOTTA(m.stato));
+  const contratti=S.rows.filter(r=>rowCdc(r)===lab&&(!r.fine||r.fine>=t));
+  const persone=(S.dip||[]).filter(d=>d.centroCosto===lab).length+(S.utenti||[]).filter(u=>u.centroCosto===lab).length;
+  let storico=0;
+  for(const m of Object.values(MODS)){
+    if(m.store==='cdc'||m.store==='mezzi'||m.store==='dip'||m.store==='utenti')continue;
+    if(!m.fields||!m.fields.some(f=>f.k==='centroCosto'))continue;
+    storico+=S[m.store].filter(r=>r.centroCosto===lab).length;
+  }
+  storico+=S.rows.filter(r=>rowCdc(r)===lab&&r.fine&&r.fine<t).length;
+  return {altriMezzi,contratti,persone,storico};
+}
+function cdcBoxDopoArchivio(voci){
+  return new Promise(res=>{
+    const m=document.createElement('div');m.className='modal';
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:700px;max-height:92vh;overflow:auto">
+      <h3>Centro di costo ancora abbinato</h3>
+      <div class="muted">Ho archiviato il mezzo, ma risulta ancora collegato a un centro di costo. Scegli cosa fare per ciascuno.</div>
+      ${voci.map((v,i)=>{
+        const blocchi=[];
+        if(v.uso.altriMezzi.length)blocchi.push(`${v.uso.altriMezzi.length} altri mezzi in flotta`);
+        if(v.uso.contratti.length)blocchi.push(`${v.uso.contratti.length} contratti non conclusi`);
+        if(v.uso.persone)blocchi.push(`${v.uso.persone} dipendenti o utenti`);
+        const puoElim=!blocchi.length&&!!v.cdc;
+        const def=puoElim?'elimina':'scollega';
+        return `<fieldset style="margin:12px 0;padding:10px 12px"><legend><b>${esc(v.lab)}</b></legend>
+          <div class="muted" style="margin-bottom:6px">Mezzi archiviati abbinati: <b>${esc(v.mezzi.map(x=>x.targa).join(', '))}</b>.${v.uso.storico?` Nello storico compare in ${v.uso.storico} registrazioni, che conservano il nome.`:''}</div>
+          ${blocchi.length?`<div class="alert" style="margin-bottom:6px">Non si può eliminare ora: è ancora usato da ${esc(blocchi.join(', '))}.</div>`:''}
+          ${!v.cdc?`<div class="alert" style="margin-bottom:6px">Il centro di costo non è presente nell’anagrafica Centri di costo.</div>`:''}
+          <label class="radio"><input type="radio" name="cd${i}" value="elimina" ${puoElim?'':'disabled'} ${def==='elimina'?'checked':''}><span><b>Elimina il centro di costo</b><small>Sparisce dall’anagrafica e dall’elenco di scelta; i mezzi archiviati vengono scollegati.</small></span></label>
+          <label class="radio"><input type="radio" name="cd${i}" value="scollega" ${def==='scollega'?'checked':''}><span><b>Scollega solo i mezzi archiviati</b><small>Il centro di costo resta, il mezzo non vi è più abbinato.</small></span></label>
+          <label class="radio"><input type="radio" name="cd${i}" value="tieni"><span><b>Lascia tutto com’è</b></span></label>
+        </fieldset>`;}).join('')}
+      <div class="acts"><button class="btn" data-a="0">Decidi dopo</button><button class="btn primary" data-a="1">Conferma</button></div></div>`;
+    m.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      const out=(a&&a.dataset.a==='1')?voci.map((v,i)=>(m.querySelector(`input[name=cd${i}]:checked`)||{}).value||'tieni'):null;
+      m.remove();res(out);});
+    document.body.appendChild(m);});
+}
+async function cdcDopoArchivio(list){
+  const per=new Map();
+  for(const m of list){const l=m.centroCosto;if(!l)continue;if(!per.has(l))per.set(l,[]);per.get(l).push(m);}
+  if(!per.size)return;
+  const voci=[...per].map(([lab,mezzi])=>({lab,mezzi,cdc:cdcBy(lab),uso:cdcUsoDopoArchivio(lab,list)}));
+  const sc=await cdcBoxDopoArchivio(voci);
+  if(!sc)return;
+  let el=0,sco=0;
+  voci.forEach((v,i)=>{
+    const s=sc[i];
+    if(s==='tieni')return;
+    if(s==='elimina'&&v.cdc&&!(v.uso.altriMezzi.length||v.uso.contratti.length||v.uso.persone)){
+      S.cdc=S.cdc.filter(c=>c!==v.cdc);if(S.filt&&S.filt.cdc===v.lab)S.filt.cdc='';el++;
+    }
+    for(const m of v.mezzi)if(m.centroCosto===v.lab){m.centroCosto='';sco++;}
+  });
+  if(el||sco){markDirty();renderSide();
+    toast(`${el?`${el===1?'Centro di costo eliminato':el+' centri di costo eliminati'}`:'Nessun centro di costo eliminato'}${sco?`; ${sco===1?'1 mezzo scollegato':sco+' mezzi scollegati'}`:''}.`);}
+}
+
 /* ---------- ARCHIVIO MEZZI ---------- */
 function archBox(list){
   return new Promise(res=>{
@@ -5481,6 +5550,7 @@ async function openArchivia(list,onDone){
   for(const m of list){m.archiviato='Sì';m.dataArchivio=r.data;m.motivoArchivio=r.motivo||m.stato||'';}
   markDirty();renderSide();
   toast(`${list.length} ${list.length===1?'mezzo archiviato':'mezzi archiviati'}: non compaiono più nell’elenco dei mezzi. Li trovi in Archivio mezzi.`);
+  try{await cdcDopoArchivio(list);}catch(e){console.warn('cdc dopo archivio',e);}
   if(onDone)onDone();else render();
 }
 async function ripristinaMezzi(list,onDone){
@@ -7101,6 +7171,55 @@ function sostaTesto(m){
   const c=cdcSostaDi(m),g=giorniSosta(m);
   return esc(u)+(c?' · '+esc(cdcNome(c)):'')+(g?` · da ${g} ${g===1?'giorno':'giorni'}`:'');
 }
+/* =====================================================================
+   MEZZI FERMI: TUTTO CLICCABILE (2026.10.39)
+   ---------------------------------------------------------------------
+   Nel riepilogo «Mezzi fermi» ogni voce porta dove serve: il centro di costo
+   apre la sua scheda; il luogo, il numero dei mezzi, i giorni, il costo e
+   «senza data» / «senza ubicazione» aprono l'elenco dei mezzi interessati,
+   da cui si modifica ogni scheda e si torna all'elenco.
+   ===================================================================== */
+(()=>{const st=document.createElement('style');st.id='sostaLink';
+ st.textContent=`.slink{background:none;border:0;padding:0;margin:0;font:inherit;color:var(--navy);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;text-align:inherit}
+ .slink:hover,.slink:focus-visible{color:var(--gold-ink);text-decoration:underline;text-shadow:0 0 10px color-mix(in srgb,var(--gold) 55%,transparent)}`;
+ document.head.appendChild(st);})();
+const sostaFermi=()=>mezziAttivi().filter(m=>!['A noleggio','In uso'].includes(dispo(m).label));
+const sostaLink=(txt,a)=>`<button class="slink" data-sosta="${a.t}" data-c="${esc(a.c||'')}" data-u="${esc(a.u==null?'*':a.u)}" data-f="${a.f||''}">${txt}</button>`;
+function sostaSelez(c,u,f){
+  return sostaFermi().filter(m=>(cdcSostaDi(m)||'__senza')===c
+    &&(u==='*'||ubicazioneDi(m)===u)&&(f!=='data'||!m.ubicazioneDal));
+}
+function sostaElenco(c,u,f){
+  const list=sostaSelez(c,u,f);
+  const old=document.getElementById('sostaElenco');if(old)old.remove();
+  const m=document.createElement('div');m.className='modal';m.id='sostaElenco';
+  const tit=`${c==='__senza'?'Senza centro di costo':esc(cdcNome(c))}${u!=='*'?` · ${u?esc(u):'senza ubicazione'}`:''}${f==='data'?' · senza data di fermo':''}`;
+  m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-height:92vh;overflow:auto;max-width:900px">
+    <h3>Mezzi fermi – ${tit}</h3>
+    <div class="muted">${list.length} ${list.length===1?'mezzo':'mezzi'}. Apri una scheda per indicare ubicazione, «Fermo qui dal», centro di costo della sosta o costo di mancato utilizzo.</div>
+    <div class="tablewrap" style="margin-top:10px"><table class="grid mini"><thead><tr><th>Targa</th><th>Veicolo</th><th>Ubicazione</th><th>Fermo dal</th><th class="num">Giorni</th><th class="num">Costo/giorno</th><th></th></tr></thead><tbody>
+    ${list.map(x=>`<tr><td><button class="slink" data-ap="${esc(x.id)}"><b>${esc(x.targa)}</b></button></td><td>${esc(mezzoName(x))}</td>
+      <td>${ubicazioneDi(x)?esc(ubicazioneDi(x)):'<span class="muted">–</span>'}</td><td>${x.ubicazioneDal?fmtD(x.ubicazioneDal):'<span class="muted">–</span>'}</td>
+      <td class="num">${x.ubicazioneDal?giorniSosta(x):'<span class="muted">–</span>'}</td><td class="num">${x.costoFermo?eur(x.costoFermo):'<span class="muted">–</span>'}</td>
+      <td><button class="btn ghost" data-ap="${esc(x.id)}">Modifica</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nessun mezzo.</td></tr>'}
+    </tbody></table></div>
+    <div class="acts"><button class="btn" data-x>Chiudi</button></div></div>`;
+  m.addEventListener('click',e=>{
+    if(e.target===m||e.target.closest('[data-x]')){m.remove();return;}
+    const b=e.target.closest('[data-ap]');if(!b)return;
+    const rec=S.mezzi.find(x=>x.id===b.dataset.ap);if(!rec)return;
+    m.remove();
+    openRecord('mezzi',rec,{onSaved:()=>{try{renderMezzi();}catch(err){render();}sostaElenco(c,u,f);}});
+  });
+  document.body.appendChild(m);
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-sosta]');if(!b)return;
+  e.preventDefault();
+  if(b.dataset.sosta==='cdc'){const rec=cdcBy(b.dataset.c);if(rec)openRecord('cdc',rec,{onSaved:()=>{try{renderMezzi();}catch(err){render();}}});else toast('Questo centro di costo non è in anagrafica.',true);return;}
+  sostaElenco(b.dataset.c,b.dataset.u,b.dataset.f);
+});
+
 /* Riepilogo dei fermi per centro di costo: quanti, da quanto, quanto costano. */
 function pannelloSosta(){
   const fermi=mezziAttivi().filter(m=>!['A noleggio','In uso'].includes(dispo(m).label));
@@ -7114,12 +7233,12 @@ function pannelloSosta(){
     const u=ubicazioneDi(m);if(u)x.luoghi.add(u);else x.senzaLuogo++;
   }
   const righe=Object.entries(per).sort((a,b)=>b[1].n-a[1].n).map(([c,x])=>{
-    const dove=[...x.luoghi].join(', ')+(x.senzaLuogo?(x.luoghi.size?' · ':'')+x.senzaLuogo+' senza ubicazione':'');
-    return `<tr><td>${c==='__senza'?'<span class="muted">senza centro di costo</span>':esc(cdcNome(c))}</td>
-      <td>${dove?esc(dove):'<span class="muted">–</span>'}</td>
-      <td class="num">${x.n}</td>
-      <td class="num">${x.gg?numF.format(x.gg):'<span class="muted">–</span>'}${x.senzaData?`<span class="sub">${x.senzaData} senza data</span>`:''}</td>
-      <td class="num">${x.costo?eur(x.costo):'<span class="muted">–</span>'}</td></tr>`;}).join('');
+    const dove=[...x.luoghi].map(u=>sostaLink(esc(u),{t:'el',c,u})).join(', ')+(x.senzaLuogo?(x.luoghi.size?' · ':'')+sostaLink(x.senzaLuogo+' senza ubicazione',{t:'el',c,u:''}):'');
+    return `<tr><td>${c==='__senza'?sostaLink('<span class="muted">senza centro di costo</span>',{t:'el',c}):sostaLink(esc(cdcNome(c)),{t:'cdc',c})}</td>
+      <td>${dove?dove:'<span class="muted">–</span>'}</td>
+      <td class="num">${sostaLink(x.n,{t:'el',c})}</td>
+      <td class="num">${x.gg?sostaLink(numF.format(x.gg),{t:'el',c}):'<span class="muted">–</span>'}${x.senzaData?`<span class="sub">${sostaLink(x.senzaData+' senza data',{t:'el',c,f:'data'})}</span>`:''}</td>
+      <td class="num">${x.costo?sostaLink(eur(x.costo),{t:'el',c}):'<span class="muted">–</span>'}</td></tr>`;}).join('');
   const tot=fermi.length,senzaD=fermi.filter(m=>!m.ubicazioneDal).length;
   return `<div class="panel" style="margin-top:14px"><h3>Mezzi fermi: dove stanno e chi ne porta il costo</h3>
     <p class="muted" style="font-size:12.5px;margin:-4px 0 10px">${tot} ${tot===1?'mezzo non è':'mezzi non sono'} a noleggio né in uso. I giorni partono da «Fermo qui dal» e l’importo usa il costo di mancato utilizzo della scheda mezzo: dove manca l’uno o l’altro la riga resta vuota invece di stimare.${senzaD?` Oggi ${senzaD} ${senzaD===1?'mezzo non ha':'mezzi non hanno'} la data.`:''}</p>
