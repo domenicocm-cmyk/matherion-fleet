@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.42';
+const APP_VERSION='2026.10.45';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -3052,6 +3052,7 @@ function openContract(o,isNew){
       if(!mezzoBy(x.targa))toast(`La targa ${x.targa} non è in anagrafica Mezzi: aggiungila dalla scheda Mezzi per completare i dati del veicolo.`);
       cdcAllineaLista([creating?S.rows[S.rows.length-1]:o]);
       markDirty();if(S.tab==='contratti')fillContratti();else render();
+      if(creating)cnsCoda([S.rows[S.rows.length-1]]);
     }});
 }
 
@@ -3163,6 +3164,7 @@ function openMulti(preIds){
     S.msel.clear();cdcAllineaLista(S.rows.filter(r=>r.quadro===quadro),true);markDirty();close();
     toast(`Contratto quadro ${quadro} creato con ${sel.length} veicoli. Lo trovi in Stampa contratti come contratto multiplo.`);
     S.tab='contratti';S.filt.q=quadro;render();
+    cnsCoda(S.rows.filter(r=>r.quadro===quadro));
   };
   paint();
   setTimeout(()=>d.querySelector('#m_noleggiante').focus(),30);
@@ -20303,7 +20305,7 @@ function cnsScheda(id,onClose){
     m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:1100px;width:96vw;max-height:94vh;display:flex;flex-direction:column">
       <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;justify-content:space-between">
         <div><h3 style="margin:0">${esc(r.codice)} – ${esc(r.tipo)}</h3><div class="muted">${plate(r.targa)} ${esc(mezzoName(m0))} · ${esc(chi)}${r.contratto?' · contratto '+esc(r.contratto):''}</div></div>
-        <div class="acts" style="margin:0">${r.dataRiconsegna?'':'<button class="btn primary" data-riconsegna>Registra riconsegna</button>'}<button class="btn" data-modifica>Dati</button><button class="btn" data-verbale>Stampa verbale</button><button class="btn" data-x>Chiudi</button></div></div>
+        <div class="acts" style="margin:0">${r.dataRiconsegna?'':'<button class="btn primary" data-riconsegna>Registra riconsegna</button>'}${r.dataRiconsegna?'<button class="btn" data-chiusura>Chiusura e proforma</button>':''}<button class="btn" data-modifica>Dati</button><button class="btn" data-verbale>Stampa verbale</button>${r.dipendente||r.tipo===CNS_TIPI[1]?'<button class="btn" data-adn>Addebito al dipendente</button>':''}<button class="btn" data-x>Chiudi</button></div></div>
       <div class="cnsbody" style="overflow:auto;margin-top:10px">
         <div class="calcbox">
           <div><small>Ritiro</small><b>${fmtD(r.dataConsegna)} ${esc(r.oraConsegna||'')}</b><small>${r.kmConsegna!==''&&r.kmConsegna!=null?numF.format(r.kmConsegna)+' km':'km non indicati'}</small></div>
@@ -20338,8 +20340,10 @@ function cnsScheda(id,onClose){
       cnsConfronta(l,c1,r1);}
     else if((b=t.closest('[data-danno]'))){await cnsDannoDlg(r,b.dataset.danno);paint();}
     else if((b=t.closest('[data-rmd]'))){const l=cnsDanni(r).filter(d=>d.id!==b.dataset.rmd);r.danni=JSON.stringify(l);markDirty();paint();}
+    else if(t.closest('[data-chiusura]')){cnsChiusuraDlg(r);}
     else if(t.closest('[data-riconsegna]')){await cnsRiconsegnaDlg(r);paint();renderSide();}
     else if(t.closest('[data-modifica]')){m.remove();openRecord('cns',r,{onSaved:()=>{cnsScheda(id,onClose);}});}
+    else if(t.closest('[data-adn]')){const dn=cnsDanni(r).filter(d=>d.fase==='riconsegna');m.remove();S.tab='amazon';ui('amzTab').tab='n';render();adnNuovo({dataEvento:r.dataRiconsegna||todayISO(),oraEvento:r.oraRiconsegna||'',targa:r.targa,dipendente:r.dipendente||'',rifPratica:r.codice,segnalatoDa:tktUtente(),descrizione:dn.map(d=>`${d.lato}: ${d.tipo} (${d.gravita})${d.desc?' – '+d.desc:''}`).join('\n'),importoDanno:dn.reduce((a,d)=>a+(+d.stima||0),0)||''});}
     else if(t.closest('[data-verbale]'))cnsVerbale(r);
   });
   paint();
@@ -20440,13 +20444,13 @@ async function cnsNuova(preset){
     const m=document.createElement('div');m.className='modal';
     const ora=new Date();
     const mezzi=mezziAttivi().slice().sort((a,b)=>a.targa<b.targa?-1:1);
-    m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:720px;max-height:92vh;overflow:auto"><h3>Nuova consegna</h3>
+    m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:720px;max-height:92vh;overflow:auto"><h3>${esc(p.titolo||'Nuova consegna')}</h3>
       <div class="fgrid">
         <div class="field s3"><label for="nTi">Tipo</label><select class="input" id="nTi">${CNS_TIPI.map(x=>`<option>${x}</option>`).join('')}</select></div>
         <div class="field s3"><label for="nTa">Targa</label><select class="input" id="nTa"><option value="">–</option>${mezzi.map(x=>`<option value="${esc(x.targa)}" ${x.targa===p.targa?'selected':''}>${esc(x.targa)} ${esc(mezzoName(x))}</option>`).join('')}</select></div>
         <div class="field s6" id="nCw"><label for="nCo">Contratto di noleggio</label><select class="input" id="nCo"></select></div>
         <div class="field s6" id="nDw" style="display:none"><label for="nDi">Utilizzatore</label><select class="input" id="nDi"><option value="">–</option>${REF.dip.opts().map(x=>`<option value="${esc(x.v)}">${esc(x.l)}</option>`).join('')}</select></div>
-        <div class="field s2"><label for="nD">Data di ritiro</label><input class="input" type="date" id="nD" value="${todayISO()}"></div>
+        <div class="field s2"><label for="nD">Data di ritiro</label><input class="input" type="date" id="nD" value="${p.data||todayISO()}"></div>
         <div class="field s2"><label for="nO">Ora</label><input class="input" type="time" id="nO" value="${tktP2(ora.getHours())}:${tktP2(ora.getMinutes())}"></div>
         <div class="field s2"><label for="nK">Km al ritiro</label><input class="input" type="number" id="nK" min="0"></div>
         <div class="field s3"><label for="nC">Carburante</label><select class="input" id="nC"><option value="">–</option>${CNS_CARB.map(x=>`<option>${x}</option>`).join('')}</select></div>
@@ -20455,13 +20459,13 @@ async function cnsNuova(preset){
         <div class="field s2"><label for="nCk">Costo km extra (€)</label><input class="input" type="number" step="0.01" id="nCk" min="0"></div>
         <div class="field s6"><label for="nN">Note alla consegna</label><textarea class="input" id="nN" rows="2"></textarea></div></div>
       <div class="muted" style="font-size:12.5px">Dopo il salvataggio si aprono le foto per lato e i danni già presenti.</div>
-      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">Crea e passa alle foto</button></div></div>`;
+      <div class="acts"><button class="btn" data-a="0">${esc(p.annulla||'Annulla')}</button><button class="btn primary" data-a="1">Crea e passa alle foto</button></div></div>`;
     const q=s=>m.querySelector(s);
     const contratti=()=>S.rows.filter(r=>r.targa===q('#nTa').value).sort((a,b)=>a.inizio<b.inizio?1:-1);
     const agg=()=>{
       const nol=q('#nTi').value===CNS_TIPI[0];q('#nCw').style.display=nol?'':'none';q('#nDw').style.display=nol?'none':'';
       const l=contratti();const t=todayISO();
-      q('#nCo').innerHTML=`<option value="">– nessuno –</option>`+l.map(r=>`<option value="${esc(r.numero)}" ${(r.inizio<=t&&r.fine>=t)?'selected':''}>${esc(r.numero)} – ${esc(r.locataria||'')} (${fmtD(r.inizio)} → ${fmtD(r.fine)})</option>`).join('');
+      q('#nCo').innerHTML=`<option value="">– nessuno –</option>`+l.map(r=>`<option value="${esc(r.numero)}" ${(p.contratto?r.numero===p.contratto:(r.inizio<=t&&r.fine>=t))?'selected':''}>${esc(r.numero)} – ${esc(r.locataria||'')} (${fmtD(r.inizio)} → ${fmtD(r.fine)})</option>`).join('');
       const mz=mezzoBy(q('#nTa').value);if(mz&&mz.km&&!q('#nK').dataset.t)q('#nK').value=mz.km;
       cont();};
     const cont=()=>{const r=S.rows.find(x=>x.numero===q('#nCo').value);if(r&&q('#nTi').value===CNS_TIPI[0]){q('#nKm').value=r.kmInclusi===''?'':r.kmInclusi;q('#nCk').value=r.costoKm===''?'':r.costoKm;}};
@@ -20479,12 +20483,29 @@ async function cnsNuova(preset){
       else{m.remove();res(null);}});
     document.body.appendChild(m);agg();
   });
-  if(!o)return;
+  if(!o){if(p.onDone)p.onDone(null);return;}
   const r={id:uid(),codice:nextCode(MODS.cns,o.dataConsegna),dataRiconsegna:'',oraRiconsegna:'',kmRiconsegna:'',carbRiconsegna:'',noteRiconsegna:'',
     kmPercorsi:'',kmInclusiPeriodo:'',kmEccedenti:'',importoEccedenza:'',stato:'In corso',danni:'[]',...o};
   S.cns.push(r);cnsSincronizza(r);markDirty();renderSide();
   toast(`Consegna ${r.codice} creata: ora le foto per ogni lato.`);
-  cnsScheda(r.id,()=>render());
+  cnsScheda(r.id,()=>{try{render();}catch(e){console.error(e);}if(p.onDone)p.onDone(r);});
+}
+
+/* ---------- 2026.10.44: verbale di consegna aperto in automatico alla creazione dei contratti ---------- */
+function cnsCoda(rows){
+  try{
+    if(soloLettura())return;
+    const q=(rows||[]).filter(r=>r&&r.targa&&r.numero&&!S.cns.some(c=>c.contratto===r.numero));
+    let i=0;
+    const next=()=>{
+      if(i>=q.length)return;
+      const r=q[i++];
+      cnsNuova({targa:r.targa,contratto:r.numero,data:r.inizio,
+        titolo:`Stato del veicolo alla consegna – ${r.targa}${q.length>1?` (${i} di ${q.length})`:''}`,
+        annulla:q.length>1?'Salta questo mezzo':'Non ora',onDone:next});
+    };
+    setTimeout(next,250);
+  }catch(e){console.error(e);}
 }
 function cnsVerbale(r){
   const c=cnsCalc(r),dn=cnsDanni(r),mz=mezzoBy(r.targa)||{};
@@ -20506,6 +20527,7 @@ function cnsVerbale(r){
       <tr><td>${numF.format(Math.round(c.giorni*10)/10)}</td><td>${c.perc==null?'–':numF.format(c.perc)}</td><td>${c.incl==null?'nessun limite':numF.format(c.incl)}</td><td>${c.ecc==null?'–':numF.format(c.ecc)}</td><td>${r.costoKm?eur(r.costoKm):'–'}</td><td><b>${c.importo==null?'–':eur(c.importo)}</b></td></tr></table>
       <h2>Danni</h2>${dn.length?`<table><tr><th>Lato</th><th>Quando</th><th>Tipo</th><th>Gravità</th><th>Descrizione</th><th>Stima</th></tr>${dn.map(d=>`<tr><td>${esc(d.lato)}</td><td>${d.fase==='riconsegna'?'NUOVO alla riconsegna':'Presente al ritiro'}</td><td>${esc(d.tipo)}</td><td>${esc(d.gravita)}</td><td>${esc(d.desc||'')}</td><td>${d.stima?eur(d.stima):''}</td></tr>`).join('')}</table>`:'<p>Nessun danno registrato.</p>'}
       <h2>Foto alla consegna</h2><div class="g">${fc}</div><h2>Foto alla riconsegna</h2><div class="g">${fr}</div>
+      <h2>Addebiti alla riconsegna</h2><p>${r.chiusura==='Proforma'?`Proforma <b>${esc(r.proforma||'')}</b> · ${eur(r.importoChiusura||0)} IVA esclusa`:r.chiusura==='Archiviata a zero'?'Archiviato con addebito di <b>0,00 €</b>':'Da definire'}</p>
       <div class="firme"><div>Firma di chi consegna</div><div>Firma di chi ritira</div></div>`);
     w.document.close();});
 }
@@ -20527,9 +20549,10 @@ function renderConsegne(){
       {l:'Km percorsi',cls:'num',v:r=>{const c=cnsCalc(r);return c.perc==null?'–':numF.format(c.perc);}},
       {l:'Eccedenza',cls:'num',v:r=>{const c=cnsCalc(r);return c.chiuso&&c.ecc?`<span class="late">${numF.format(c.ecc)} km</span><span class="sub">${eur(c.importo)}</span>`:'–';}},
       {l:'Foto e danni',v:r=>{const n=attachFor('cns',r.codice).length,d=cnsDanni(r).filter(x=>x.fase==='riconsegna').length;return `${n} foto${d?`<span class="sub late">${d} danni nuovi</span>`:''}`;}},
-      {l:'Stato',v:r=>pillS(r.dataRiconsegna?'Restituito':'In corso',r.dataRiconsegna?'end':'rent')}],
+      {l:'Stato',v:r=>pillS(r.dataRiconsegna?'Restituito':'In corso',r.dataRiconsegna?'end':'rent')+(r.dataRiconsegna?`<span class="sub ${(!r.chiusura||r.chiusura==='Da definire')?'late':''}">${esc(r.chiusura==='Proforma'?'proforma '+(r.proforma||''):r.chiusura==='Archiviata a zero'?'archiviata a zero':'chiusura da definire')}</span>`:'')}],
     rowActions:[{l:'Foto e danni',fn:r=>cnsScheda(r.id,()=>render())},
       {l:'Riconsegna',show:r=>!r.dataRiconsegna,fn:async r=>{if(await cnsRiconsegnaDlg(r)){renderSide();cnsScheda(r.id,()=>render());}}},
+      {l:'Chiusura e proforma',show:r=>!!r.dataRiconsegna,fn:r=>cnsChiusuraDlg(r)},
       {l:'Verbale',fn:r=>cnsVerbale(r)}]});
 }
 VIEWS.consegne=()=>renderConsegne();
@@ -20542,6 +20565,456 @@ VIEWS.consegne=()=>renderConsegne();
   const R=RUOLI.officina;if(R&&R.tabs&&!R.tabs.includes('consegne'))R.tabs.push('consegne');
   if(R&&R.scrivi&&!R.scrivi.includes('cns'))R.scrivi.push('cns');
 })();
+
+/* =====================================================================
+   DANNI AI VEICOLI: ADDEBITO AI DIPENDENTI (2026.10.43)
+   ---------------------------------------------------------------------
+   Sezione «Danni e addebiti» dentro Amazon DLO3. Chi gestisce la flotta
+   raccoglie il corredo del danno (foto, dichiarazione del conducente, mail
+   del referente, preventivo o fattura); il programma controlla che il
+   dossier sia completo, calcola l'addebito secondo le regole dell'art. 32
+   del CCNL (parametri modificabili), prepara la lettera di contestazione
+   disciplinare e la comunicazione di addebito e le invia dal programma di
+   posta con tutti gli allegati.
+   I testi e le regole sono un modello da far verificare al consulente del
+   lavoro prima dell'uso.
+   ===================================================================== */
+[['adnSoglia',55,'Addebito danni: soglia di danno addebitato per intero (€)',1000],
+ ['adnSogliaPesanti',56,'Addebito danni: soglia per mezzi oltre 35 q (€)',3000],
+ ['adnPct',57,'Addebito danni: % addebitata oltre la soglia',75],
+ ['adnTetto',58,'Addebito danni: tetto massimo (€)',5000],
+ ['adnTettoPesanti',59,'Addebito danni: tetto massimo per mezzi oltre 35 q (€)',15000],
+ ['adnPct2',60,'Addebito danni: % sul secondo danno dell’anno (regime premiale)',65],
+ ['adnPremiale',61,'Addebito danni: primo danno dell’anno non addebitato (regime premiale)','Sì'],
+ ['adnRataPct',62,'Addebito danni: rata massima, % della retribuzione base lorda mensile',20],
+ ['adnGgGiust',63,'Contestazione: giorni per le giustificazioni',5],
+ ['adnRifCcnl',64,'Contestazione: riferimento al contratto collettivo','art. 32 del CCNL Trasporti, Logistica e Spedizioni']]
+  .forEach(p=>{if(!PARAMS_EXTRA.some(x=>x[0]===p[0]))PARAMS_EXTRA.push(p);});
+const adnP=(k,d)=>{const n=parseFloat(String(S.par&&S.par[k]).replace(',','.'));return isNaN(n)?d:n;};
+const ADN_STATI=['Segnalato','Documentazione completa','Contestazione inviata','Giustificazioni ricevute','Provvedimento adottato','Addebito comunicato','Chiuso','Archiviato'];
+const ADN_PROV=['Nessuno','Richiamo scritto','Multa','Sospensione','Altro'];
+MODS.adn={sheet:'Addebiti danni',store:'adn',title:'Addebiti danni ai dipendenti',code:'AD',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'Il danno',f:[
+   fd('dipendente','Dipendente','ref',{ref:'dip',req:true,span:'s3'}),
+   fd('targa','Targa','ref',{ref:'mezzo',req:true,plate:true,span:'s3'}),
+   fd('dataEvento','Data dell’evento','date',{req:true,span:'s2'}),fd('oraEvento','Ora','time',{span:'s2'}),
+   fd('luogo','Luogo','text',{span:'s2'}),
+   fd('descrizione','Danni riportati dal veicolo','area',{req:true,span:'s6'}),
+   fd('rifPratica','Verbale, sinistro o manutenzione collegati','text',{span:'s3',hint:'Es. CN-2026-0001: le foto del verbale entrano nel dossier'}),
+   fd('segnalatoDa','Segnalato da','text',{span:'s3'})]},
+  {t:'Dossier',f:[
+   fd('dichiarazioneStato','Dichiarazione del conducente','sel',{opts:['Da richiedere','Acquisita','Non resa'],def:'Da richiedere',span:'s3'}),
+   fd('referenteNome','Referente che relaziona','text',{span:'s3'}),
+   fd('referenteEmail','Email del referente','email',{span:'s3'}),
+   fd('dichiarazione','Testo della dichiarazione','area',{span:'s6',hint:'Anche incollata; il file originale va allegato come «Dichiarazione conducente»'}),
+   fd('relazioneReferente','Testo della mail del referente','area',{span:'s6',hint:'Incolla la mail; allegane l’originale come «Mail referente»'})]},
+  {t:'Importi e condizioni',f:[
+   fd('importoDanno','Costo del danno (€)','eur',{span:'s2',hint:'Preventivo o fattura di riparazione'}),
+   fd('kasko','Coperto da Kasko o RC','sel',{opts:['No','Sì'],def:'No',span:'s2',hint:'Se sì, il dipendente risponde della sola franchigia'}),
+   fd('franchigia','Franchigia (€)','eur',{span:'s2'}),
+   fd('dolo','Dolo o colpa grave','sel',{opts:['No','Sì'],def:'No',span:'s2'}),
+   fd('incuria','Incuria aziendale segnalata','sel',{opts:['No','Sì'],def:'No',span:'s2',hint:'Mezzo in cattivo stato già segnalato: nessun addebito'}),
+   fd('pesante','Mezzo oltre 35 quintali','sel',{opts:['Automatico','Sì','No'],def:'Automatico',span:'s2',hint:'Automatico: dalla massa del mezzo (oltre 3.500 kg)'}),
+   fd('retribuzioneBase','Retribuzione base lorda mensile (€)','eur',{span:'s3',hint:'Serve solo per il piano delle trattenute'})]},
+  {t:'Procedura',f:[
+   fd('stato','Stato','sel',{opts:ADN_STATI,def:ADN_STATI[0],span:'s3'}),
+   fd('dataContestazione','Contestazione inviata il','date',{span:'s3'}),
+   fd('modoInvio','Inviata con','sel',{opts:['PEC','Raccomandata A/R','Consegna a mano','Email'],span:'s3'}),
+   fd('dataRicezione','Ricevuta dal dipendente il','date',{span:'s3'}),
+   fd('dataGiustificazioni','Giustificazioni ricevute il','date',{span:'s3'}),
+   fd('esitoGiustificazioni','Giustificazioni e valutazione','area',{span:'s6'}),
+   fd('provvedimento','Provvedimento','sel',{opts:ADN_PROV,span:'s3'}),
+   fd('dataProvvedimento','Provvedimento del','date',{span:'s3'}),
+   fd('dataAddebito','Addebito comunicato il','date',{span:'s3'}),
+   fd('inizioTrattenute','Prima trattenuta in busta di','text',{span:'s3',ph:'Es. 12/2026'}),
+   fd('note','Note','area',{span:'s6'}),
+   fd('importoAddebito','Importo addebitato','eur',{hidden:true}),fd('comunicazioni','Comunicazioni','text',{hidden:true})]}]};
+ammRegistraModuli(['adn']);
+if(typeof DOC_TIPI!=='undefined')for(const t of ['Foto danno','Dichiarazione conducente','Mail referente','Preventivo o fattura riparazione','Lettera di contestazione','Comunicazione di addebito'])if(!DOC_TIPI.includes(t))DOC_TIPI.push(t);
+if(typeof ATT_DEF!=='undefined')ATT_DEF.adn='Foto danno';
+
+/* ---------- calcolo dell'addebito ---------- */
+function adnPesante(r){
+  if(r.pesante==='Sì')return true;if(r.pesante==='No')return false;
+  const m=mezzoBy(r.targa)||{};const massa=+m.massa>0?+m.massa:(+m.massaMax>0?+m.massaMax:0);return massa>3500;
+}
+const adnAnno=r=>(r.dataEvento||'').slice(0,4);
+function adnCalcola(r){
+  const righe=[],pes=adnPesante(r),danno=+r.importoDanno||0,fr=+r.franchigia||0;
+  const out=(imp,pct,txt)=>({importo:Math.round(imp*100)/100,pct,righe:[...righe,txt].filter(Boolean),base:0});
+  if(!danno)return {importo:0,pct:0,righe:['Manca il costo del danno.'],base:0,incompleto:true};
+  if(r.incuria==='Sì')return {importo:0,pct:0,righe:['Incuria aziendale segnalata: nessun addebito.'],base:0};
+  let base=danno;
+  if(r.kasko==='Sì'){base=fr>0?Math.min(fr,danno):danno;righe.push(`Danno coperto da Kasko o RC: il dipendente risponde della sola franchigia (${eur(base)}).`);}
+  if(r.dolo==='Sì')return {...out(base,100,`Dolo o colpa grave: addebito dell’intero importo (${eur(base)}).`),base};
+  const anno=adnAnno(r);
+  const stessi=S.adn.filter(x=>x.dipendente===r.dipendente&&adnAnno(x)===anno&&x.incuria!=='Sì'&&x.stato!=='Archiviato');
+  const ord=stessi.slice().sort((a,b)=>((a.dataEvento||'')+(a.oraEvento||'')+(a.codice||''))<((b.dataEvento||'')+(b.oraEvento||'')+(b.codice||''))?-1:1);
+  const n=Math.max(1,ord.findIndex(x=>x===r||x.id===r.id)+1);
+  const prec=S.adn.filter(x=>x.dipendente===r.dipendente&&adnAnno(x)===String((+anno||0)-1)&&x.incuria!=='Sì').length;
+  const prem=String(S.par&&S.par.adnPremiale||'Sì').toLowerCase()!=='no'&&prec<3;
+  righe.push(`Evento n. ${n} dell’anno ${anno} per questo dipendente; eventi dell’anno precedente: ${prec}${prem?' (regime premiale applicabile)':' (regime premiale non applicabile)'}.`);
+  if(prem&&n===1)return {...out(0,0,'Regime premiale: il primo danno dell’anno non è addebitato.'),base};
+  if(prem&&n===2){const p=adnP('adnPct2',65);return {...out(base*p/100,p,`Regime premiale: secondo danno dell’anno, addebitato al ${p}% di ${eur(base)}.`),base};}
+  const soglia=pes?adnP('adnSogliaPesanti',3000):adnP('adnSoglia',1000),tetto=pes?adnP('adnTettoPesanti',15000):adnP('adnTetto',5000),p=adnP('adnPct',75);
+  if(base<=soglia)return {...out(base,100,`Danno fino a ${eur(soglia)}${pes?' (mezzo oltre 35 q)':''}: addebito per intero.`),base};
+  const imp=Math.min(tetto,base*p/100);
+  return {...out(imp,Math.round(imp/base*1000)/10,`Danno oltre ${eur(soglia)}: ${p}% di ${eur(base)}${base*p/100>tetto?`, limitato al tetto di ${eur(tetto)}`:''}.`),base};
+}
+function adnPiano(r,c){
+  const rb=+r.retribuzioneBase||0,imp=c.importo;
+  if(!rb||!imp)return null;
+  const max=Math.round(rb*adnP('adnRataPct',20))/100;
+  const n=Math.ceil(imp/max);
+  return {max,n,rata:Math.round(imp/n*100)/100};
+}
+MODS.adn.beforeSave=(x,rec)=>{const c=adnCalcola({...x,id:rec&&rec.id});x.importoAddebito=c.importo;};
+
+/* ---------- dossier ---------- */
+const ADN_DOC=[
+ {k:'foto',tipo:'Foto danno',l:'Corredo fotografico'},
+ {k:'dich',tipo:'Dichiarazione conducente',l:'Dichiarazione del conducente'},
+ {k:'mail',tipo:'Mail referente',l:'Mail o relazione del referente'},
+ {k:'prev',tipo:'Preventivo o fattura riparazione',l:'Preventivo o fattura di riparazione'}];
+const adnAtt=(r,tipo)=>attachFor('adn',r.codice).filter(a=>a.tipo===tipo);
+function adnFotoVerbale(r){
+  const c=r.rifPratica&&S.cns.find(x=>x.codice===r.rifPratica);
+  return c?attachFor('cns',c.codice).filter(a=>/^riconsegna\|/.test(a.descrizione||'')||/^consegna\|/.test(a.descrizione||'')):[];
+}
+function adnDossier(r){
+  const fa=adnAtt(r,'Foto danno'),fv=adnFotoVerbale(r);
+  const voci=[
+   {k:'foto',l:'Corredo fotografico',ok:fa.length+fv.length>0,det:`${fa.length} foto${fv.length?` + ${fv.length} dal verbale ${r.rifPratica}`:''}`},
+   {k:'dich',l:'Dichiarazione del conducente',ok:r.dichiarazioneStato==='Non resa'||adnAtt(r,'Dichiarazione conducente').length>0||(r.dichiarazioneStato==='Acquisita'&&!!r.dichiarazione),
+     det:r.dichiarazioneStato==='Non resa'?'non resa (da documentare)':adnAtt(r,'Dichiarazione conducente').length?`${adnAtt(r,'Dichiarazione conducente').length} file`:r.dichiarazione?'testo inserito':'da richiedere'},
+   {k:'mail',l:'Mail o relazione del referente',ok:adnAtt(r,'Mail referente').length>0||!!r.relazioneReferente,det:adnAtt(r,'Mail referente').length?`${adnAtt(r,'Mail referente').length} file`:r.relazioneReferente?'testo inserito':'mancante'},
+   {k:'prev',l:'Costo del danno',ok:(+r.importoDanno||0)>0&&adnAtt(r,'Preventivo o fattura riparazione').length>0,det:(+r.importoDanno||0)>0?`${eur(r.importoDanno)}${adnAtt(r,'Preventivo o fattura riparazione').length?'':' – manca il preventivo o la fattura'}`:'mancante'}];
+  return {voci,completo:voci.every(v=>v.ok),n:voci.filter(v=>v.ok).length};
+}
+function adnDossierDlg(id){
+  const r=S.adn.find(x=>x.id===id);if(!r)return;
+  const m=document.createElement('div');m.className='modal';
+  const paint=()=>{
+    const d=adnDossier(r);
+    m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:760px;max-height:92vh;overflow:auto"><h3>Dossier ${esc(r.codice)}</h3>
+      <div class="muted">${esc(REF.dip.label(r.dipendente)||'')} · ${plate(r.targa)} · ${fmtD(r.dataEvento)} – ${d.completo?'<b>dossier completo</b>':`mancano ${4-d.n} elementi`}</div>
+      ${ADN_DOC.map((x,i)=>{const v=d.voci[i];const l=adnAtt(r,x.tipo);
+        return `<fieldset style="margin:10px 0;padding:8px 12px"><legend>${v.ok?'✓':'○'} ${esc(x.l)} <span class="muted">– ${esc(v.det)}</span></legend>
+          ${l.map(a=>`<div style="display:flex;gap:8px;align-items:center;margin:2px 0"><span style="flex:1">${esc(a.file)}</span><button class="btn ghost" data-ao="${a.id}">Apri</button><button class="btn ghost danger" data-ad="${a.id}">Rimuovi</button></div>`).join('')}
+          <button class="btn" data-add="${i}">＋ Aggiungi ${x.k==='foto'?'foto':'file'}</button></fieldset>`;}).join('')}
+      ${r.rifPratica&&adnFotoVerbale(r).length?`<div class="muted">Le foto del verbale ${esc(r.rifPratica)} sono già incluse nel dossier.</div>`:''}
+      <div class="acts"><button class="btn" data-x>Chiudi</button></div></div>`;
+  };
+  m.addEventListener('click',async e=>{
+    const t=e.target;
+    if(t===m||t.closest('[data-x]')){m.remove();render();return;}
+    let b;
+    if((b=t.closest('[data-add]'))){const x=ADN_DOC[+b.dataset.add];
+      const inp=document.createElement('input');inp.type='file';inp.multiple=true;if(x.k==='foto'){inp.accept='image/*';inp.setAttribute('capture','environment');}
+      inp.onchange=async()=>{for(const f of inp.files){const g=x.k==='foto'?await cnsRidimensiona(f):f;await addAttachment(g,'adn',r.codice,x.tipo,'');}markDirty();paint();};inp.click();}
+    else if((b=t.closest('[data-ao]'))){const a=S.all.find(z=>z.id===b.dataset.ao);if(a)openAttachment(a);}
+    else if((b=t.closest('[data-ad]'))){const a=S.all.find(z=>z.id===b.dataset.ad);if(a&&await confirmBox('Rimuovere il file?',esc(a.file),'Rimuovi',true)){await removeAttachment(a);paint();}}
+  });
+  document.body.appendChild(m);paint();
+}
+
+/* ---------- lettere ---------- */
+function adnAzienda(){const s=S.soc.find(x=>x.titolare==='Sì')||{};return {ragione:s.ragione||'Fast Rent S.r.l.',ind:[s.indirizzo,[s.cap,s.citta].filter(Boolean).join(' '),s.prov].filter(Boolean).join(', '),piva:s.piva||'',citta:s.citta||''};}
+function adnCtx(r){
+  const d=S.dip.find(x=>x.codice===r.dipendente)||{},m=mezzoBy(r.targa)||{},az=adnAzienda(),c=adnCalcola(r);
+  const att=[];
+  const nf=adnAtt(r,'Foto danno').length+adnFotoVerbale(r).length;
+  if(nf)att.push(`documentazione fotografica (${nf} ${nf===1?'immagine':'immagini'})`);
+  if(adnAtt(r,'Dichiarazione conducente').length||r.dichiarazione)att.push('dichiarazione del conducente');
+  if(adnAtt(r,'Mail referente').length||r.relazioneReferente)att.push(`relazione${r.referenteNome?' del referente '+r.referenteNome:' del referente'}`);
+  if(adnAtt(r,'Preventivo o fattura riparazione').length)att.push('preventivo o fattura di riparazione');
+  return {d,m,az,c,att,nome:dipName(d)||REF.dip.label(r.dipendente)||'',veic:`${r.targa||''}${m.marca||m.modello?' ('+[m.marca,m.modello].filter(Boolean).join(' ')+')':''}`,
+    oggi:fmtD(todayISO()),rif:S.par.adnRifCcnl||'art. 32 del CCNL applicato',gg:adnP('adnGgGiust',5)};
+}
+const adnPag=(t,body)=>`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t)}</title><style>body{font:12pt/1.5 'Times New Roman',serif;margin:2.2cm 2.4cm;color:#000}p{margin:0 0 10pt;text-align:justify}h1{font-size:12pt;margin:14pt 0 10pt}table{border-collapse:collapse;width:100%;margin:6pt 0 10pt}td,th{border:1px solid #000;padding:3pt 6pt;font-size:11pt;text-align:left}.d{text-align:right}.no{font:13px system-ui}@media print{.no{display:none}}</style></head><body>${body}</body></html>`;
+function adnLetteraContestazione(r){
+  const x=adnCtx(r);
+  return adnPag('Contestazione disciplinare '+r.codice,`<p><b>${esc(x.az.ragione)}</b><br>${esc(x.az.ind)}${x.az.piva?'<br>P.IVA '+esc(x.az.piva):''}</p>
+  <p class="d">${esc(x.az.citta||'')}${x.az.citta?', ':''}${x.oggi}</p>
+  <p>Spett.le<br><b>Sig./Sig.ra ${esc(x.nome)}</b>${x.d.matricola?'<br>Matricola '+esc(x.d.matricola):''}${x.d.indirizzo?'<br>'+esc(x.d.indirizzo)+', '+esc([x.d.cap,x.d.citta,x.d.prov].filter(Boolean).join(' ')):''}</p>
+  <p><i>Trasmessa a mezzo ${esc(r.modoInvio||'PEC / raccomandata A/R / consegna a mano')}</i></p>
+  <h1>Oggetto: contestazione disciplinare ai sensi dell’art. 7 della Legge 20 maggio 1970, n. 300 e del ${esc(x.rif)} – danni al veicolo targato ${esc(r.targa)}</h1>
+  <p>Con la presente Le contestiamo quanto segue.</p>
+  <p>In data <b>${fmtD(r.dataEvento)}</b>${r.oraEvento?' alle ore '+esc(r.oraEvento):''}${r.luogo?', presso '+esc(r.luogo):''}, il veicolo aziendale <b>${esc(x.veic)}</b>, a Lei affidato${r.rifPratica?' (verbale '+esc(r.rifPratica)+')':''}, ha riportato i seguenti danni: ${esc(r.descrizione||'')}.</p>
+  ${x.att.length?`<p>Quanto accaduto risulta dalla seguente documentazione, che Le viene allegata o messa a disposizione: ${esc(x.att.join('; '))}.</p>`:''}
+  ${+r.importoDanno?`<p>Il danno è quantificato in <b>${eur(r.importoDanno)}</b>, come da documentazione di riparazione.</p>`:''}
+  <p>Tali fatti, ove confermati, costituirebbero violazione dei doveri di diligenza e di cura dei beni aziendali affidati (art. 2104 c.c.) e delle disposizioni del contratto collettivo applicato.</p>
+  <p>La invitiamo a presentare le Sue giustificazioni, per iscritto o chiedendo di essere sentito, anche con l’assistenza di un rappresentante dell’associazione sindacale cui aderisce o conferisce mandato, <b>entro ${x.gg} giorni dal ricevimento della presente</b>.</p>
+  <p>Decorso tale termine, o ove le giustificazioni non fossero ritenute sufficienti, ci riserviamo di adottare i provvedimenti previsti dalla legge e dal ${esc(x.rif)}, compreso, se ne ricorrono i presupposti, l’addebito del danno secondo le modalità e i limiti ivi stabiliti.</p>
+  <p>Distinti saluti.</p><p><br>Il Datore di lavoro<br>${esc(x.az.ragione)}</p>
+  ${x.att.length?`<p style="font-size:10.5pt"><b>Allegati:</b> ${esc(x.att.join('; '))}.</p>`:''}`);
+}
+function adnLetteraAddebito(r){
+  const x=adnCtx(r),c=x.c,pi=adnPiano(r,c);
+  return adnPag('Comunicazione di addebito '+r.codice,`<p><b>${esc(x.az.ragione)}</b><br>${esc(x.az.ind)}</p>
+  <p class="d">${esc(x.az.citta||'')}${x.az.citta?', ':''}${x.oggi}</p>
+  <p>Spett.le<br><b>Sig./Sig.ra ${esc(x.nome)}</b>${x.d.matricola?'<br>Matricola '+esc(x.d.matricola):''}</p>
+  <h1>Oggetto: comunicazione di addebito per danni al veicolo targato ${esc(r.targa)} – ${esc(x.rif)}</h1>
+  <p>Facciamo seguito alla contestazione disciplinare${r.dataContestazione?' del '+fmtD(r.dataContestazione):''}${r.dataGiustificazioni?' e alle Sue giustificazioni del '+fmtD(r.dataGiustificazioni):''}${r.provvedimento&&r.provvedimento!=='Nessuno'?', e al provvedimento adottato ('+esc(r.provvedimento.toLowerCase())+(r.dataProvvedimento?' del '+fmtD(r.dataProvvedimento):'')+')':''}, relative ai danni riportati il ${fmtD(r.dataEvento)} dal veicolo ${esc(x.veic)}.</p>
+  <p>Il danno, documentato dal preventivo o dalla fattura di riparazione, ammonta a <b>${eur(r.importoDanno||0)}</b>. Applicando le regole del ${esc(x.rif)}:</p>
+  <ul>${c.righe.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>
+  <p>L’importo addebitato è pertanto di <b>${eur(c.importo)}</b>.</p>
+  ${c.importo&&pi?`<p>L’importo sarà trattenuto in <b>${pi.n} ${pi.n===1?'rata mensile':'rate mensili'} di ${eur(pi.rata)}</b>${r.inizioTrattenute?', a partire dalla busta paga di '+esc(r.inizioTrattenute):''}, nel limite di ${adnP('adnRataPct',20)}% della retribuzione base lorda mensile. In caso di cessazione del rapporto il residuo sarà trattenuto dalle competenze di fine rapporto.</p>`:c.importo?`<p>Le modalità di trattenuta, in rate mensili nel limite di ${adnP('adnRataPct',20)}% della retribuzione base lorda mensile, Le saranno comunicate dall’ufficio del personale.</p>`:''}
+  <p>Resta ferma la possibilità di un confronto con la società, anche con l’assistenza sindacale.</p>
+  <p>Distinti saluti.</p><p><br>Il Datore di lavoro<br>${esc(x.az.ragione)}</p>`);
+}
+const adnWordBlob=h=>new Blob(['\ufeff',h],{type:'application/msword'});
+function adnStampa(html){const w=window.open('','_blank');if(!w)return toast('Il browser ha bloccato la finestra: consentila per vedere la lettera.',true);w.document.write(html+'<p class="no"><button onclick="print()">Stampa / salva PDF</button></p>');w.document.close();}
+
+/* ---------- invio con allegati ---------- */
+const adnB64=buf=>{let s='';const u=new Uint8Array(buf);for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(s);};
+const adnWrap=s=>s.replace(/(.{76})/g,'$1\r\n');
+const adnMime=n=>/\.jpe?g$/i.test(n)?'image/jpeg':/\.png$/i.test(n)?'image/png':/\.pdf$/i.test(n)?'application/pdf':/\.docx?$/i.test(n)?'application/msword':/\.(txt|eml)$/i.test(n)?'text/plain':'application/octet-stream';
+const adnAscii=n=>String(n||'file').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w.\- ]+/g,'_');
+async function adnEml(to,cc,subject,body,files){
+  const b='=_FR_'+Date.now().toString(36);
+  const enc=s=>'=?UTF-8?B?'+btoa(unescape(encodeURIComponent(s)))+'?=';
+  let o=`X-Unsent: 1\r\nTo: ${to}\r\n${cc?'Cc: '+cc+'\r\n':''}Subject: ${enc(subject)}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${b}"\r\n\r\n`;
+  o+=`--${b}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${adnWrap(btoa(unescape(encodeURIComponent(body))))}\r\n`;
+  for(const f of files){
+    const n=adnAscii(f.name);
+    o+=`--${b}\r\nContent-Type: ${adnMime(f.name)}; name="${n}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${n}"\r\n\r\n${adnWrap(adnB64(await f.blob.arrayBuffer()))}\r\n`;
+  }
+  return new Blob([o+`--${b}--\r\n`],{type:'message/rfc822'});
+}
+async function adnAllegati(r,lettera){
+  const out=[];
+  out.push({name:lettera.nome,blob:lettera.blob,tipo:'lettera',sel:true});
+  const veicoli=[...attachFor('adn',r.codice),...adnFotoVerbale(r)];
+  for(const a of veicoli){try{out.push({name:a.file,blob:await getBlob(a),tipo:a.tipo,sel:true});}catch(e){}}
+  return out;
+}
+function adnMailDlg(r,tipo){
+  return (async()=>{
+    const x=adnCtx(r),cont=tipo==='contestazione';
+    const html=cont?adnLetteraContestazione(r):adnLetteraAddebito(r);
+    const nome=`${cont?'Contestazione_disciplinare':'Comunicazione_addebito'}_${safe(r.codice)}_${safe(x.nome)}.doc`;
+    const all=await adnAllegati(r,{nome,blob:adnWordBlob(html)});
+    const sub=cont?`Contestazione disciplinare – danni al veicolo ${r.targa}`:`Comunicazione di addebito – danni al veicolo ${r.targa}`;
+    const body=cont
+      ?`Gentile ${x.nome},\n\nin allegato la contestazione disciplinare relativa ai danni riportati il ${fmtD(r.dataEvento)} dal veicolo ${x.veic}, con la documentazione a corredo.\n\nLa invitiamo a presentare le Sue giustificazioni entro ${x.gg} giorni dal ricevimento.\n\nCordiali saluti\n${tktUtente()||''}\n${x.az.ragione}`
+      :`Gentile ${x.nome},\n\nin allegato la comunicazione di addebito relativa ai danni riportati il ${fmtD(r.dataEvento)} dal veicolo ${x.veic}.\n\nCordiali saluti\n${tktUtente()||''}\n${x.az.ragione}`;
+    const tot=()=>all.filter(a=>a.sel).reduce((s,a)=>s+a.blob.size,0);
+    const m=document.createElement('div');m.className='modal';
+    m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:760px;max-height:94vh;overflow:auto"><h3>${cont?'Invia la contestazione':'Invia la comunicazione di addebito'} – ${esc(r.codice)}</h3>
+      <div class="fgrid">
+        <div class="field s3"><label for="adT">A (dipendente)</label><input class="input" id="adT" value="${esc(x.d.email||'')}" placeholder="indirizzo email o PEC"></div>
+        <div class="field s3"><label for="adC">Cc</label><input class="input" id="adC" value="" placeholder="facoltativo"></div>
+        <div class="field s6"><label for="adS">Oggetto</label><input class="input" id="adS" value="${esc(sub)}"></div>
+        <div class="field s6"><label for="adB">Testo</label><textarea class="input" id="adB" rows="7">${esc(body)}</textarea></div></div>
+      <h4 style="margin:8px 0 4px">Allegati <span class="muted" id="adTot"></span></h4>
+      <div id="adAll">${all.map((a,i)=>`<label class="radio" style="margin:2px 0"><input type="checkbox" data-i="${i}" checked><span>${esc(a.name)}<small>${a.tipo==='lettera'?'lettera, modificabile in Word':esc(a.tipo||'')} · ${numF.format(Math.round(a.blob.size/1024))} KB</small></span></label>`).join('')}</div>
+      <div class="alert" style="margin:10px 0;font-size:13px"><b>Come si allega.</b> «Crea bozza con allegati» scarica un messaggio già pronto (.eml) che si apre nel programma di posta del computer (Outlook, Mail) con tutti gli allegati: lo controlli e lo invii. I siti di posta (Outlook sul web, Gmail) non accettano allegati da un link: con quei pulsanti si apre il messaggio scritto e si scarica una cartella compressa con gli allegati da trascinare dentro.</div>
+      <div class="acts" style="flex-wrap:wrap"><button class="btn" data-a="0">Annulla</button>
+        <button class="btn" data-a="web:outlook">Outlook sul web + allegati</button><button class="btn" data-a="web:gmail">Gmail + allegati</button>
+        ${navigator.canShare?`<button class="btn" data-a="share">Condividi…</button>`:''}
+        <button class="btn primary" data-a="eml">Crea bozza con allegati (.eml)</button></div></div>`;
+    const agg=()=>{const t=tot();m.querySelector('#adTot').textContent=`– ${numF.format(Math.round(t/1024/102.4)/10)} MB${t>20*1024*1024?' (oltre 20 MB: alcuni server di posta lo rifiutano)':''}`;};
+    m.addEventListener('change',e=>{if(e.target.dataset&&e.target.dataset.i!=null){all[+e.target.dataset.i].sel=e.target.checked;agg();}});
+    m.addEventListener('click',async e=>{
+      const b=e.target.closest('[data-a]');if(!b&&e.target!==m)return;
+      if(!b||b.dataset.a==='0'){m.remove();return;}
+      const to=m.querySelector('#adT').value.trim(),cc=m.querySelector('#adC').value.trim(),su=m.querySelector('#adS').value,bo=m.querySelector('#adB').value;
+      const files=all.filter(a=>a.sel);
+      const a=b.dataset.a;
+      const nota=()=>{const l=(()=>{try{return JSON.parse(r.comunicazioni||'[]');}catch(e){return [];}})();l.push({t:tktAdesso(),tipo,to,n:files.length,u:tktUtente(),via:a});r.comunicazioni=JSON.stringify(l);markDirty();};
+      if(a==='eml'){
+        if(!to){m.querySelector('#adT').focus();toast('Scrivi l’indirizzo del destinatario.',true);return;}
+        await saveFile(`Bozza_${safe(r.codice)}_${cont?'contestazione':'addebito'}.eml`,await adnEml(to,cc,su,bo,files));nota();
+        toast('Bozza scaricata: aprila (doppio clic) per vederla nel programma di posta con gli allegati.');m.remove();
+        adnSegnaDlg(r,tipo);
+      }else if(a.startsWith('web:')){
+        const z=new PizZip();for(const f of files)z.file(adnAscii(f.name),new Uint8Array(await f.blob.arrayBuffer()));
+        await saveFile(`Allegati_${safe(r.codice)}.zip`,z.generate({type:'blob',compression:'DEFLATE'}));
+        avApriMail(a.slice(4),to,su,bo);nota();
+        toast('Messaggio aperto nel browser e allegati scaricati: trascina i file dalla cartella scaricata nel messaggio.');m.remove();adnSegnaDlg(r,tipo);
+      }else if(a==='share'){
+        try{const fl=files.map(f=>new File([f.blob],adnAscii(f.name),{type:adnMime(f.name)}));
+          if(navigator.canShare&&navigator.canShare({files:fl})){await navigator.share({files:fl,title:su,text:bo});nota();m.remove();adnSegnaDlg(r,tipo);}
+          else toast('Questo browser non può condividere i file: usa la bozza .eml.',true);}catch(err){if(err&&err.name!=='AbortError')toast('Condivisione non riuscita: usa la bozza .eml.',true);}
+      }
+    });
+    document.body.appendChild(m);agg();
+  })();
+}
+function adnSegnaDlg(r,tipo){
+  const cont=tipo==='contestazione';
+  if(cont&&r.dataContestazione)return;if(!cont&&r.dataAddebito)return;
+  confirmBox(cont?'Contestazione inviata?':'Addebito comunicato?',cont?`Se l’hai inviata, segnala oggi come data di invio: da qui parte il termine di ${adnP('adnGgGiust',5)} giorni per le giustificazioni.`:'Se l’hai comunicata, segnala oggi come data.',cont?'Sì, inviata oggi':'Sì, comunicato oggi').then(ok=>{
+    if(!ok)return;
+    if(cont){r.dataContestazione=todayISO();if(ADN_STATI.indexOf(r.stato)<ADN_STATI.indexOf('Contestazione inviata'))r.stato='Contestazione inviata';}
+    else{r.dataAddebito=todayISO();if(ADN_STATI.indexOf(r.stato)<ADN_STATI.indexOf('Addebito comunicato'))r.stato='Addebito comunicato';}
+    markDirty();render();});
+}
+function adnCalcoloDlg(r){
+  const c=adnCalcola(r),pi=adnPiano(r,c),d=adnDossier(r);
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:640px"><h3>Calcolo dell’addebito – ${esc(r.codice)}</h3>
+    <div class="calcbox"><div><small>Costo del danno</small><b>${eur(r.importoDanno||0)}</b></div><div><small>Percentuale</small><b>${numF.format(c.pct||0)}%</b></div><div><small>Addebito</small><b class="${c.importo?'late':''}">${eur(c.importo)}</b></div>${pi?`<div><small>Trattenute</small><b>${pi.n} × ${eur(pi.rata)}</b><small>rata massima ${eur(pi.max)}</small></div>`:''}</div>
+    <ul style="margin:10px 0">${c.righe.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>
+    ${!d.completo?`<div class="alert">Dossier incompleto: ${d.voci.filter(v=>!v.ok).map(v=>esc(v.l)).join(', ')}.</div>`:''}
+    <p class="muted" style="font-size:12.5px">Regole dal ${esc(S.par.adnRifCcnl||'CCNL')} come riportate dalla stampa di settore e modificabili in Parametri: da confermare sul testo ufficiale del contratto con il consulente del lavoro. Prima di chiedere il risarcimento è richiesto almeno un richiamo scritto.</p>
+    <div class="acts"><button class="btn" data-x>Chiudi</button></div></div>`;
+  m.addEventListener('click',e=>{if(e.target===m||e.target.closest('[data-x]'))m.remove();});document.body.appendChild(m);
+}
+
+/* ---------- vista ---------- */
+function adnNuovo(preset){openRecord('adn',null,{preset:preset||{dataEvento:todayISO(),segnalatoDa:tktUtente()},onSaved:s=>{render();}});}
+function renderAmzDanni(){
+  genericList('adn',{uiKey:'adn',title:'Amazon DLO3',tabsHtml:amzTabs(),
+    sub:'Danni ai veicoli causati dai dipendenti: dossier (foto, dichiarazione, mail del referente), contestazione disciplinare, addebito secondo l’art. 32 del CCNL e invio con allegati.',
+    searchPh:'Codice, dipendente, targa',search:['codice','dipendente','targa','stato'],noImport:true,
+    buttons:[{l:'Nuova segnalazione',primary:true,fn:()=>adnNuovo()}],
+    filters:[{k:'stato',label:'Stato',opts:()=>ADN_STATI,all:'Tutti'}],
+    ledger:l=>{const ap=l.filter(r=>!['Chiuso','Archiviato'].includes(r.stato));const gi=ap.filter(r=>r.dataContestazione&&!r.dataGiustificazioni&&addDays(r.dataRicezione||r.dataContestazione,adnP('adnGgGiust',5))<=todayISO()).length;
+      return `<div><b>${ap.length}</b><small>pratiche aperte</small></div><div><b>${ap.filter(r=>!adnDossier(r).completo).length}</b><small>con dossier incompleto</small></div><div><b>${gi}</b><small>giustificazioni scadute</small></div><div><b>${eur(l.reduce((a,r)=>a+(+r.importoAddebito||0),0))}</b><small>addebiti calcolati</small></div>`;},
+    sort:(a,b)=>(a.dataEvento<b.dataEvento?1:-1),
+    cols:[{l:'Pratica',v:r=>`<b>${esc(r.codice)}</b><span class="sub">${fmtD(r.dataEvento)} ${esc(r.luogo||'')}</span>`},
+      {l:'Dipendente',v:r=>esc(REF.dip.label(r.dipendente)||'')},{l:'Targa',v:r=>plate(r.targa)},
+      {l:'Dossier',v:r=>{const d=adnDossier(r);return `<span class="${d.completo?'':'late'}">${d.n}/4</span><span class="sub">${d.completo?'completo':esc(d.voci.filter(v=>!v.ok).map(v=>v.l.split(' ')[0].toLowerCase()).join(', '))}</span>`;}},
+      {l:'Danno',cls:'num',v:r=>r.importoDanno?eur(r.importoDanno):'–'},
+      {l:'Addebito',cls:'num',v:r=>{const c=adnCalcola(r);return c.incompleto?'–':`${eur(c.importo)}<span class="sub">${numF.format(c.pct||0)}%</span>`;}},
+      {l:'Stato',v:r=>{const sc=r.dataContestazione&&!r.dataGiustificazioni&&!['Chiuso','Archiviato'].includes(r.stato)?addDays(r.dataRicezione||r.dataContestazione,adnP('adnGgGiust',5)):'';
+        return pillS(r.stato||'',['Chiuso','Archiviato'].includes(r.stato)?'end':'rent')+(sc?`<span class="sub ${sc<todayISO()?'late':''}">giustificazioni entro ${fmtD(sc)}</span>`:'');}}],
+    rowActions:[{l:'Dossier',fn:r=>adnDossierDlg(r.id)},{l:'Calcolo',fn:r=>adnCalcoloDlg(r)},
+      {l:'Lettera di contestazione',fn:r=>adnStampa(adnLetteraContestazione(r))},
+      {l:'Invia contestazione',fn:r=>adnMailDlg(r,'contestazione')},
+      {l:'Lettera di addebito',fn:r=>adnStampa(adnLetteraAddebito(r))},
+      {l:'Invia addebito',fn:r=>adnMailDlg(r,'addebito')}]});
+}
+(()=>{
+  const old=renderAmazon;
+  renderAmazon=function(){if((ui('amzTab').tab||'p')==='n')return renderAmzDanni();return old();};
+  const t0=amzTabs;
+  amzTabs=function(){return t0().replace('</div>',`<button class="${(ui('amzTab').tab||'p')==='n'?'on':''}" data-sub="amzTab:n">Danni e addebiti</button></div>`);};
+  if(typeof VIEWS!=='undefined')VIEWS.amazon=()=>renderAmazon();
+  if(typeof AREE_DI_STORE!=='undefined')(AREE_DI_STORE.adn=AREE_DI_STORE.adn||[]).includes('amm')||AREE_DI_STORE.adn.push('amm');
+  const a=AREE.find(x=>x.k==='amm');if(a&&!a.store.includes('adn'))a.store.push('adn');
+})();
+
+/* =====================================================================
+   RICONSEGNA: KM E CONDIZIONI DAL CONTRATTO, CHIUSURA CON PROFORMA (2026.10.44)
+   ===================================================================== */
+{
+  const g=MODS.cns.groups[MODS.cns.groups.length-1].f;
+  if(!g.some(f=>f.k==='chiusura')){
+    g.push(fd('chiusura','Chiusura economica','sel',{opts:['Da definire','Proforma','Archiviata a zero'],def:'Da definire',span:'s2'}),
+           fd('proforma','Proforma','text',{span:'s2',hint:'Compilato alla chiusura'}),
+           fd('importoChiusura','Importo addebitato (€)','eur',{hidden:true}));
+    ammCampi(MODS.cns);
+  }
+}
+/* condizioni km: dal verbale, altrimenti dal contratto collegato (per numero o, in mancanza, per targa e periodo) */
+function cnsContratto(r){
+  return S.rows.find(x=>r.contratto&&x.numero===r.contratto)
+      ||S.rows.find(x=>x.targa===r.targa&&x.inizio<=(r.dataConsegna||'9999')&&x.fine>=(r.dataConsegna||''))||null;
+}
+function cnsCondizioni(r){
+  const c=cnsContratto(r)||{};
+  const km=cnsNum(r.kmMese)!=null&&cnsNum(r.kmMese)>0?r.kmMese:(c.kmInclusi!==''&&c.kmInclusi!=null?c.kmInclusi:'');
+  const ck=cnsNum(r.costoKm)!=null&&cnsNum(r.costoKm)>0?r.costoKm:(c.costoKm!==''&&c.costoKm!=null?c.costoKm:'');
+  return {kmMese:km,costoKm:ck,contratto:c};
+}
+const cnsRiconsegnaDlg0=cnsRiconsegnaDlg;
+cnsRiconsegnaDlg=function(r){
+  const cd=cnsCondizioni(r);
+  const p=new Promise(res=>{
+    const m=document.createElement('div');m.className='modal';const ora=new Date();
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:600px"><h3>Riconsegna – ${esc(r.codice)}</h3>
+      <div class="muted">${plate(r.targa)} ritirato il ${fmtD(r.dataConsegna)} ${esc(r.oraConsegna||'')}${r.contratto?' · contratto '+esc(r.contratto):''}</div>
+      <div class="fgrid" style="margin-top:8px">
+        <div class="field s2"><label for="rcD">Data</label><input class="input" type="date" id="rcD" value="${todayISO()}"></div>
+        <div class="field s2"><label for="rcO">Ora</label><input class="input" type="time" id="rcO" value="${tktP2(ora.getHours())}:${tktP2(ora.getMinutes())}"></div>
+        <div class="field s2"><label for="rcC">Carburante</label><select class="input" id="rcC"><option value="">–</option>${CNS_CARB.map(x=>`<option>${x}</option>`).join('')}</select></div>
+        <div class="field s3"><label for="rcK0">Km al ritiro (uscita)</label><input class="input" type="number" id="rcK0" min="0" value="${r.kmConsegna!==''&&r.kmConsegna!=null?r.kmConsegna:''}"></div>
+        <div class="field s3"><label for="rcK">Km alla restituzione (rientro)</label><input class="input" type="number" id="rcK" min="0"></div>
+        <div class="field s3"><label for="rcKm">Km inclusi al mese</label><input class="input" type="number" id="rcKm" min="0" value="${cd.kmMese}" placeholder="vuoto = nessun limite"></div>
+        <div class="field s3"><label for="rcCk">Costo km eccedente (€/km)</label><input class="input" type="number" step="0.01" id="rcCk" min="0" value="${cd.costoKm}"></div>
+        <div class="field s6"><label for="rcN">Note alla riconsegna</label><textarea class="input" id="rcN" rows="2"></textarea></div></div>
+      <div class="calcbox" id="rcSum" style="margin-top:8px"></div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">Registra riconsegna</button></div></div>`;
+    const q=s=>m.querySelector(s);
+    const prova=()=>({...r,kmConsegna:q('#rcK0').value,dataRiconsegna:q('#rcD').value,oraRiconsegna:q('#rcO').value,kmRiconsegna:q('#rcK').value,kmMese:q('#rcKm').value,costoKm:q('#rcCk').value});
+    const agg=()=>{const c=cnsCalc(prova());
+      q('#rcSum').innerHTML=`<div><small>Giorni</small><b>${numF.format(Math.round(c.giorni*10)/10)}</b></div><div><small>Km percorsi</small><b>${c.perc==null?'–':numF.format(c.perc)}</b></div><div><small>Km inclusi</small><b>${c.incl==null?'nessun limite':numF.format(c.incl)}</b></div><div><small>Eccedenti</small><b class="${c.ecc?'late':''}">${c.ecc==null?'–':numF.format(c.ecc)}</b></div><div><small>Da addebitare</small><b class="${c.importo?'late':''}">${c.importo==null?'–':eur(c.importo)}</b></div>`;};
+    m.addEventListener('input',agg);
+    m.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      if(a&&a.dataset.a==='1'){
+        const t=prova();
+        if(!t.dataRiconsegna||t.kmRiconsegna===''){toast('Servono la data e i km alla restituzione.',true);return;}
+        if(t.kmConsegna===''){toast('Indica i km al ritiro (uscita): servono per il calcolo.',true);return;}
+        t.kmConsegna=+t.kmConsegna;t.kmRiconsegna=+t.kmRiconsegna;
+        const msg=MODS.cns.validate(t);if(msg){toast(msg,true);return;}
+        Object.assign(r,{kmConsegna:t.kmConsegna,dataRiconsegna:t.dataRiconsegna,oraRiconsegna:t.oraRiconsegna,kmRiconsegna:t.kmRiconsegna,
+          kmMese:t.kmMese===''?'':+t.kmMese,costoKm:t.costoKm===''?'':+t.costoKm,carbRiconsegna:q('#rcC').value,noteRiconsegna:q('#rcN').value.trim()});
+        MODS.cns.beforeSave(r,r);cnsSincronizza(r);markDirty();
+        const c=cnsCalc(r);
+        toast(`Riconsegna registrata: ${numF.format(c.perc||0)} km percorsi${c.ecc?`, ${numF.format(c.ecc)} eccedenti = ${eur(c.importo)}`:''}.`);
+        m.remove();res(true);}
+      else{m.remove();res(false);}});
+    document.body.appendChild(m);agg();q('#rcK').focus();});
+  return p.then(ok=>{if(ok)setTimeout(()=>cnsChiusuraDlg(r),150);return ok;});
+};
+
+/* righe di addebito calcolate dalla riconsegna */
+function cnsRigheAddebito(r){
+  const c=cnsCalc(r),cd=cnsContratto(r)||{},iva=r2((+S.par.iva||0)*100),righe=[];
+  if(c.chiuso&&c.ecc>0&&c.importo>0)righe.push({tipo:'Km eccedenti',descrizione:`Km eccedenti${r.contratto?' contratto '+r.contratto:''}: ${numF.format(c.ecc)} km oltre i ${numF.format(c.incl)} inclusi (${fmtD(r.dataConsegna)} – ${fmtD(r.dataRiconsegna)})`,quantita:c.ecc,prezzo:+r.costoKm||0,aliquota:iva,natura:''});
+  for(const d of cnsDanni(r).filter(x=>x.fase==='riconsegna'&&+x.stima>0))
+    righe.push({tipo:'Riaddebito danni',descrizione:`Danno ${String(d.tipo||'').toLowerCase()} lato ${String(d.lato||'').toLowerCase()} (${d.gravita||''})${d.desc?' – '+d.desc:''} – verbale ${r.codice}`,quantita:1,prezzo:+d.stima,aliquota:0,natura:'N2.2'});
+  return righe;
+}
+function cnsChiusuraDlg(r,onDone){
+  if(!r||!r.dataRiconsegna)return;
+  const noleggio=r.tipo===CNS_TIPI[0];
+  const righe=cnsRigheAddebito(r),tot=righe.reduce((a,x)=>a+r2(x.quantita*x.prezzo),0);
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:660px;max-height:92vh;overflow:auto"><h3>Chiusura della riconsegna – ${esc(r.codice)}</h3>
+    <div class="muted">${plate(r.targa)} · ${esc(noleggio?(r.cliente||''):(REF.dip.label(r.dipendente)||''))}${r.contratto?' · contratto '+esc(r.contratto):''}</div>
+    ${r.chiusura&&r.chiusura!=='Da definire'?`<div class="alert" style="margin:8px 0">Già chiusa: ${esc(r.chiusura)}${r.proforma?' ('+esc(r.proforma)+')':''}.</div>`:''}
+    <table class="grid mini" style="margin:10px 0"><tbody>${righe.length?righe.map(x=>`<tr><td>${esc(x.tipo)}</td><td>${esc(x.descrizione)}</td><td class="num">${eur(r2(x.quantita*x.prezzo))}</td></tr>`).join(''):'<tr><td colspan="3" class="muted">Nessun addebito: né km eccedenti né danni stimati.</td></tr>'}</tbody></table>
+    ${noleggio?`<div class="fgrid"><div class="field s4"><label for="chX">Altro importo da aggiungere (€, facoltativo)</label><input class="input" type="number" step="0.01" min="0" id="chX"></div>
+      <div class="field s6"><label for="chXd">Descrizione</label><input class="input" id="chXd" placeholder="Es. pulizia straordinaria, carburante"></div></div>`:''}
+    <div class="calcbox" style="margin:8px 0"><div><small>Addebiti calcolati</small><b>${eur(tot)}</b></div></div>
+    ${noleggio?`<p class="muted" style="font-size:12.5px">La proforma nasce in bozza, intestata al cliente del contratto; IVA come da parametri (danni senza IVA, natura N2.2). La trovi in Fatturazione e proforma.</p>`:`<p class="muted" style="font-size:12.5px">Mezzo affidato a un dipendente: se ci sono danni, puoi aprire la pratica di addebito in Amazon DLO3.</p>`}
+    <div class="acts" style="flex-wrap:wrap"><button class="btn" data-a="0">Decido dopo</button>
+      ${!noleggio&&righe.length?'<button class="btn" data-a="adn">Addebito al dipendente</button>':''}
+      <button class="btn" data-a="zero">Archivia con addebito zero</button>
+      ${noleggio?'<button class="btn primary" data-a="pf">Genera la proforma</button>':''}</div></div>`;
+  const fine=()=>{m.remove();try{render();}catch(e){}if(document.getElementById('cnsScheda'))cnsScheda(r.id,()=>render());if(onDone)onDone();};
+  m.addEventListener('click',e=>{
+    const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+    const k=a&&a.dataset.a;
+    if(!k||k==='0'){m.remove();return;}
+    if(k==='zero'){
+      if(tot>0&&!window.confirm(`Ci sono ${eur(tot)} di addebiti calcolati: archiviare comunque a zero?`))return;
+      r.chiusura='Archiviata a zero';r.importoChiusura=0;r.proforma='';markDirty();toast(`Verbale ${r.codice} archiviato con addebito zero.`);fine();return;}
+    if(k==='adn'){m.remove();document.querySelector('#cnsScheda [data-adn]')?.click();return;}
+    if(k==='pf'){
+      const extra=r2(parseFloat(m.querySelector('#chX').value)||0);
+      const l=righe.slice();
+      if(extra>0)l.push({tipo:'Altro',descrizione:(m.querySelector('#chXd').value.trim()||'Altri addebiti alla riconsegna')+` – verbale ${r.codice}`,quantita:1,prezzo:extra,aliquota:r2((+S.par.iva||0)*100),natura:''});
+      if(!l.length){toast('Non ci sono importi da fatturare: usa «Archivia con addebito zero».',true);return;}
+      const cn=cnsContratto(r)||{},d=todayISO();
+      const titN=[...new Set(S.soc.filter(s=>s.titolare==='Sì').map(s=>s.ragione).filter(Boolean))];
+      const f={id:uid(),codice:nextPF(d),cliente:r.cliente||cn.locataria||'',centroCosto:cn.centroCosto||'',emittente:cn.noleggiante||titN[0]||'',data:d,periodoDa:r.dataConsegna,periodoA:r.dataRiconsegna,
+        imponibile:0,iva:0,totale:0,stato:'Bozza',dataInvio:'',numeroFattura:'',dataFattura:'',scadenzaPagamento:addDays(d,+S.par.termine||30),dataPagamento:'',note:`Riconsegna ${r.codice}`};
+      if(!f.cliente){toast('Manca il cliente: compilalo nel verbale (Dati) e riprova.',true);return;}
+      S.fat.push(f);
+      for(const x of l)S.righe.push({id:uid(),codice:nextCode(MODS.righe),proforma:f.codice,tipo:x.tipo,descrizione:x.descrizione,targa:r.targa,origine:r.codice,centroCosto:f.centroCosto,
+        quantita:x.quantita,prezzo:x.prezzo,aliquota:x.aliquota,natura:x.natura,imponibile:r2(x.quantita*x.prezzo),dal:r.dataConsegna,al:r.dataRiconsegna,giorni:'',canoneMensile:'',
+        modello:mezzoBy(r.targa)?mezzoName(mezzoBy(r.targa)):''});
+      recalcFat(f);r.chiusura='Proforma';r.proforma=f.codice;r.importoChiusura=f.imponibile;
+      markDirty();renderSide();toast(`Proforma ${f.codice} creata in bozza: ${eur(f.totale)} IVA inclusa.`);fine();}
+  });
+  document.body.appendChild(m);
+}
 
 const MENU_LAYOUT=[
  {g:'Panoramica',c:'#2563eb',k:['cruscotto','calendario','grafici']},

@@ -204,3 +204,19 @@ che spettano solo a lei.
   amministratore sia stato concesso.
 - **Il gestionale non chiede l'accesso**: `config.json` non è raggiungibile,
   oppure mancano `tenantId` o `clientId`.
+
+## Rientro silenzioso con Microsoft (2026.10.34)
+
+Dopo il primo accesso l'app ricorda sul dispositivo l'e-mail dell'utente
+(`ms-ultimo-utente`). Alle aperture successive, quando la sessione è scaduta
+(Microsoft limita il token a 24 ore), l'app tenta da sola il rientro con
+`prompt=none` e `login_hint`: se Microsoft ha ancora la sessione del browser
+attiva, l'utente entra senza passkey né password. Se Microsoft chiede
+interazione, l'app mostra il pulsante di accesso normale (un solo tentativo
+per sessione del browser, nessun ciclo). «Esci» cancella il ricordo.
+
+Non esiste una password propria della piattaforma che "aggancia" Microsoft:
+sarebbe una seconda credenziale da custodire e indebolirebbe la sicurezza.
+Per ridurre le richieste di passkey, lato tenant Entra: durata della sessione
+(Accesso condizionale → Sign-in frequency), «Resta connesso» e SSO del
+dispositivo (Windows Hello / Edge / app Microsoft sul telefono).

@@ -60,3 +60,38 @@ PDF identico basta «Salva come PDF» da Word.
 
 La libreria PDF (`pdf-lib`) è dentro il file offline; nel file online si scarica
 da jsDelivr alla prima generazione.
+
+## Rinnova… (dalla 2026.10.35)
+
+Il pulsante **Rinnova…** della barra di selezione crea, per ogni contratto
+selezionato, un contratto nuovo con **le stesse condizioni** (società, cliente,
+mezzo, canone, km, franchigie, deposito, località, centro di costo, note).
+Cambia solo il periodo:
+
+- **Ogni contratto dal giorno dopo la sua fine**: stessa durata di prima; un
+  mese intero (dal 1° all'ultimo giorno) resta un mese intero.
+- **Stesso periodo per tutti**: si inseriscono la nuova data di inizio e di fine
+  (proposte: il mese successivo all'ultima scadenza).
+
+L'anteprima mostra per ogni riga il nuovo periodo e l'esito. Vengono **saltati**
+i contratti senza targa o date, e quelli per cui il mezzo è già a noleggio nel
+nuovo periodo (anche per un doppione nella stessa operazione). Il numero è
+assegnato in automatico; i contratti di uno stesso quadro restano insieme sotto
+un nuovo numero di quadro. Il contratto di partenza non viene modificato e gli
+allegati non sono copiati. Dopo il rinnovo i nuovi contratti restano
+selezionati, pronti per «Genera contratti…». Serve poi salvare il file.
+
+## Filtro per periodo (dalla 2026.10.36)
+
+In **Contratti di noleggio** e in **Stampa contratti** c'è il filtro
+«Periodo dei contratti»: si sceglie un **mese** (oppure le date *Dal* e *Al*) e
+cosa cercare:
+
+- **Attivi nel periodo**: contratti che coprono, anche solo in parte, il periodo;
+- **Che iniziano nel periodo**;
+- **Che scadono nel periodo** (utile per i rinnovi).
+
+Il filtro si combina con società, centro di costo, stato e ricerca, ed è lo
+stesso nelle due pagine. «Azzera periodo» lo toglie. Poi «Seleziona i N
+visibili» prende solo quei contratti, pronti per Genera contratti, Esporta o
+Rinnova.

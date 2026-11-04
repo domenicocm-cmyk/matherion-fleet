@@ -60,3 +60,12 @@ Ogni modifica a un mezzo (centro di costo, stato operativo e ogni altro dato), a
 Si vede nella **scheda economica del mezzo** › «Storico del mezzo», con i filtri Tutto · Centro di costo · Disponibilità e stato · Noleggi e assegnazioni.
 
 Limite: lo storico parte dal giorno in cui si usa questa versione; le modifiche precedenti non sono ricostruibili.
+
+## Archiviazione di un mezzo (dalla 2026.10.38)
+
+Dopo l'archiviazione, per ogni centro di costo ancora abbinato ai mezzi archiviati
+compare la scelta: **Elimina il centro di costo**, **Scollega solo i mezzi
+archiviati**, **Lascia tutto com'è**. L'eliminazione è possibile solo se nessun
+altro mezzo in flotta, contratto non concluso, dipendente o utente lo usa ancora;
+altrimenti resta disponibile lo scollegamento. Lo storico (manutenzioni,
+sinistri, fatture…) conserva il nome del centro di costo.

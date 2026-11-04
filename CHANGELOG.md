@@ -178,3 +178,52 @@
   Scadenzario degli scarichi (carte 28 giorni, unità di bordo 90), archivio dei
   file .ddd con conservazione di 12 mesi, controlli e formazione, fascicolo
   Excel. Nuovo campo «Tachigrafo installato» in Mezzi. Vedi TACHIGRAFO.md.
+- **2026.10.32** — pubblicata il 24/10/2026 — **Amazon DLO3** (Amministrazione).
+  Sincronizzazione ripetibile con il portale (fatturato, fatture e scorecard
+  con PDF, pre-fatture, forecast, costi) e incrocio con la flotta: costi
+  mancanti completati dal centro di costo Amazon, fabbisogno mezzi, margine
+  per mese. Vedi AMAZON.md.
+- **2026.10.32** — pubblicata il 24/10/2026 — **Amazon DLO3** (Amministrazione).
+  Sincronizzazione ripetibile con il portale (cartella o ZIP): fatturato
+  settimanale, fatture Amazon, pre-fatture, scorecard, forecast, costi. Costi
+  mancanti e fabbisogno di mezzi completati con i dati della flotta. Vedi AMAZON.md.
+- **2026.10.33** — pubblicata il 25/10/2026 — **Menu di sinistra** riordinato in
+  nove sezioni, ognuna col suo colore (Panoramica, Noleggio ai clienti, Flotta,
+  Officina e sinistri, Carte e conformità, Anagrafiche, Contabilità, Fisco,
+  Sistema). Per chi non è Master la barra in alto sparisce: nome, Salva,
+  salvataggio automatico ed Esci stanno in fondo al menu. Il Master la mantiene.
+- **2026.10.33** — pubblicata il 25/10/2026
+- **2026.10.34** — pubblicata il 25/10/2026 — **Accesso**: rientro automatico e
+  silenzioso con l'account Microsoft già riconosciuto sul dispositivo (senza
+  passkey se la sessione Microsoft è attiva). Vedi ACCESSI.md.
+- **2026.10.35** — pubblicata il 26/10/2026 — **Rinnovo massivo dei contratti**:
+  «Rinnova…» nella lista Contratti di noleggio copia i contratti selezionati con
+  le stesse condizioni e cambia solo il periodo. Vedi CONTRATTI_MASSIVI.md.
+- **2026.10.36** — pubblicata il 26/10/2026 — **Filtro per periodo** in Contratti
+  di noleggio e in Stampa contratti: per mese o intervallo di date, sui contratti
+  attivi, che iniziano o che scadono nel periodo. Vedi CONTRATTI_MASSIVI.md.
+- **2026.10.37** — pubblicata il 26/10/2026 — **Menu di sinistra**: ripristinati i
+  colori originali; le sezioni restano raggruppate. Effetto luminoso al passaggio
+  del mouse e sulla voce selezionata.
+- **2026.10.38** — pubblicata il 02/11/2026 — **Archiviazione mezzi**: se il mezzo è
+  ancora abbinato a un centro di costo, l'app lo segnala e chiede se eliminare il
+  centro di costo o solo scollegare il mezzo.
+- **2026.10.39** — pubblicata il 02/11/2026 — **Mezzi fermi**: il riepilogo è
+  cliccabile. Il centro di costo apre la scheda; luogo, numero di mezzi, giorni,
+  costo, «senza data» e «senza ubicazione» aprono l'elenco dei mezzi da modificare.
+- **2026.10.40** — pubblicata il 04/11/2026 — **Ticket** per manutenzioni e sinistri:
+  4 ore dalla richiesta; se non chiuso si integra e si rinnova per metà del tempo
+  precedente. Apertura automatica con la pratica, chiusura automatica quando la
+  pratica si chiude, storico, tempi medi. Vedi TICKET.md.
+- **2026.10.41** — pubblicata il 04/11/2026 — **Avanzamento di fase** di manutenzioni e
+  sinistri con note e mail al proprietario del mezzo (già scritta, modificabile, da
+  aprire nel programma di posta del computer, in Outlook sul web o in Gmail).
+  Storico fasi per pratica. Vedi AVANZAMENTO.md.
+- **2026.10.42** — pubblicata il 04/11/2026 — **Consegne e riconsegne**: verbale di consegna
+  e restituzione per noleggi ai clienti e mezzi affidati agli utilizzatori; foto per lato
+  con confronto consegna/riconsegna (anche sovrapposto), registrazione dei danni
+  (presenti al ritiro e nuovi), calcolo delle eccedenze chilometriche dal ritiro alla
+  restituzione, stampa del verbale. Vedi CONSEGNE.md.
+- **2026.10.43** — pubblicata il 04/11/2026 — **Danni e addebiti ai dipendenti** (Amazon DLO3): dossier con foto, dichiarazione e mail del referente, calcolo art. 32 CCNL, lettera di contestazione e comunicazione di addebito, invio da posta con tutti gli allegati. Vedi ADDEBITI.md.
+- **2026.10.44** — pubblicata il 04/11/2026 — **Verbale di consegna automatico**: alla creazione di un contratto di noleggio, anche multiplo, si apre mezzo per mezzo lo stato del veicolo alla consegna (foto, km, carburante, danni). Vedi CONSEGNE.md.
+- **2026.10.45** — pubblicata il 04/11/2026 — **Riconsegna**: km di uscita e rientro e condizioni km riprese dal contratto (correzione del calcolo dell'eccedenza); chiusura con generazione della proforma o archiviazione a zero. Vedi CONSEGNE.md.
