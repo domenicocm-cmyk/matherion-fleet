@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.39';
+const APP_VERSION='2026.10.42';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -4173,6 +4173,7 @@ function bindKanban(body,m,o){
     col.addEventListener('drop',e=>{e.preventDefault();col.classList.remove('over');
       const r=S[m.store].find(x=>x.id===(drag||e.dataTransfer.getData('text/plain')));if(!r)return;
       const st=col.dataset.stage;if(r.stato===st)return;
+      if(m.avanza){m.avanza(r,st).then(ok=>{if(ok){genericList(m.id,o);renderSide();}});return;}
       const prev=r.stato;r.stato=st;if(m.onStage)m.onStage(r,st,prev);
       markDirty();toast(`${r.codice}: ${prev} → ${st}`);genericList(m.id,o);renderSide();});
   });
@@ -5955,7 +5956,7 @@ function renderMan(){
       {l:'Fermo',cls:'num',v:r=>{const f=fermoCalc(r);return f?`${f.giorni} gg<span class="sub ${f.contestabili?'late':''}">${f.contestabili?eur(f.totale):''}</span>`:'–';}},
       {l:'Fase',v:r=>pillS(r.stato,['Chiusa'].includes(r.stato)?'end':r.stato==='Annullata'?'end':'rent')},
     ],
-    rowActions:[{l:'Avanza',show:r=>!['Chiusa','Annullata'].includes(r.stato),fn:r=>{const s=MODS.man.stages;const i=s.indexOf(r.stato);const nx=s[Math.min(i+1,s.length-2)];const prev=r.stato;r.stato=nx;MODS.man.onStage(r,nx,prev);markDirty();renderMan();renderSide();toast(`${r.codice}: ${prev} → ${nx}`);}}],
+    rowActions:[{l:'Ticket',fn:r=>tktDa('Manutenzione',r)},{l:'Mail al proprietario',fn:r=>avSoloMail('man',r)},{l:'Storico fasi',fn:r=>avStoricoDlg('man',r)},{l:'Avanza',show:r=>!['Chiusa','Annullata'].includes(r.stato),fn:r=>{const s=MODS.man.stages;if(MODS.man.avanza){MODS.man.avanza(r,avProssimo('man',r)).then(ok=>{if(ok){renderMan();renderSide();}});return;}const i=s.indexOf(r.stato);const nx=s[Math.min(i+1,s.length-2)];const prev=r.stato;r.stato=nx;MODS.man.onStage(r,nx,prev);markDirty();renderMan();renderSide();toast(`${r.codice}: ${prev} → ${nx}`);}}],
   });
   else renderFermi(tabs);
   $('#main').querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>{u.tab=b.dataset.st;renderMan();});
@@ -6074,7 +6075,7 @@ function renderSin(){
       {l:'Coinvolti',v:r=>`${esc(r.cliente||REF.dip.label(r.conducente)||r.conducenteEsterno||'')}<span class="sub">${esc(r.cpNome||'')}</span>`},
       {l:'Responsabilità',v:r=>esc(r.responsabilita)},{l:'Importi',cls:'num',v:r=>`${eur(r.riparazione||r.stima)}<span class="sub">${r.importoRiaddebito!==''?'riaddebito '+eur(r.importoRiaddebito):''}</span>`},
       {l:'Fase',v:r=>pillS(r.stato,['Chiuso','Liquidato'].includes(r.stato)?'end':'rent')}],
-    rowActions:[{l:'Scheda Word',fn:schedaSinistro},
+    rowActions:[{l:'Ticket',fn:r=>tktDa('Sinistro',r)},{l:'Avanza',show:r=>!['Chiuso','Contenzioso'].includes(r.stato),fn:r=>MODS.sin.avanza(r,avProssimo('sin',r)).then(ok=>{if(ok){S.tab='sin';render();renderSide();}})},{l:'Mail al proprietario',fn:r=>avSoloMail('sin',r)},{l:'Storico fasi',fn:r=>avStoricoDlg('sin',r)},{l:'Scheda Word',fn:schedaSinistro},
       {l:'Apri riparazione',show:r=>!r.manutenzione,fn:r=>openRecord('man',null,{preset:{targa:r.targa,tipo:'Carrozzeria',sinistro:r.codice,dataSegnalazione:r.data,descrizione:`Riparazione danni sinistro ${r.codice}: ${r.dinamica||''}`.slice(0,300)},
         onSaved:m=>{r.manutenzione=m.codice;markDirty();S.tab='sin';render();}})}],
   });
@@ -19751,11 +19752,802 @@ VIEWS.amazon=()=>renderAmazon();
    stanno in fondo al menu.
    Le voci non cambiano: si ridistribuiscono per chiave in gruppi più corti.
    ===================================================================== */
+/* =====================================================================
+   TICKET PER MANUTENZIONI E SINISTRI (2026.10.40)
+   ---------------------------------------------------------------------
+   Ogni richiesta ha un ticket con un tempo massimo di gestione: 4 ore dalla
+   richiesta. Se non è chiuso alla scadenza si rinnova con un'integrazione e
+   il nuovo tempo è la metà del precedente (4 h → 2 h → 1 h → 30 min → 15 min,
+   mai sotto il minimo). Tutto resta nello storico del ticket.
+   Parametri: durata iniziale, percentuale di rinnovo, minimo, se la riduzione
+   è progressiva e se aprire il ticket in automatico con la pratica.
+   ===================================================================== */
+[['tktOre',49,'Ticket: tempo massimo di gestione (ore)',4],
+ ['tktRinnovo',50,'Ticket: tempo del rinnovo, in % del tempo precedente',50],
+ ['tktMinimo',51,'Ticket: tempo minimo di un rinnovo (minuti)',15],
+ ['tktProgressivo',52,'Ticket: il rinnovo si calcola sul tempo precedente (Sì) o su quello iniziale (No)','Sì'],
+ ['tktAuto',53,'Ticket: aprirlo in automatico con ogni nuova manutenzione o sinistro','Sì']]
+  .forEach(p=>{if(!PARAMS_EXTRA.some(x=>x[0]===p[0]))PARAMS_EXTRA.push(p);});
+const tktNum=(k,d)=>{const n=parseFloat(String(S.par&&S.par[k]).replace(',','.'));return n>0?n:d;};
+const tktMinIniz=()=>Math.round(tktNum('tktOre',4)*60);
+const tktPct=()=>Math.min(100,tktNum('tktRinnovo',50))/100;
+const tktMinimo=()=>Math.round(tktNum('tktMinimo',15));
+const tktProg=()=>String(S.par&&S.par.tktProgressivo||'Sì').trim().toLowerCase()!=='no';
+const tktAutoOn=()=>String(S.par&&S.par.tktAuto||'Sì').trim().toLowerCase()!=='no';
+const TKT_TIPI=['Manutenzione','Sinistro'];
+const TKT_STATI=['Aperto','In lavorazione','In attesa','Chiuso'];
+const tktP2=n=>String(n).padStart(2,'0');
+const tktIso=d=>`${d.getFullYear()}-${tktP2(d.getMonth()+1)}-${tktP2(d.getDate())}T${tktP2(d.getHours())}:${tktP2(d.getMinutes())}`;
+const tktAdesso=()=>tktIso(new Date());
+const tktAdd=(iso,min)=>{const d=new Date(iso);d.setMinutes(d.getMinutes()+min);return tktIso(d);};
+const tktFmt=iso=>{if(!iso)return '–';const d=new Date(iso);return `${tktP2(d.getDate())}/${tktP2(d.getMonth()+1)} ${tktP2(d.getHours())}:${tktP2(d.getMinutes())}`;};
+const tktDurata=min=>min>=60?`${Math.floor(min/60)} h${min%60?` ${min%60} min`:''}`:`${min} min`;
+const tktUtente=()=>{try{const u=SESSIONE||{};return u.nome||u.email||'';}catch(e){return '';}};
+const tktLogDi=r=>{try{const l=JSON.parse(r.log||'[]');return Array.isArray(l)?l:[];}catch(e){return [];}};
+function tktLogAgg(r,k,txt,extra){
+  const l=tktLogDi(r);l.push({t:tktAdesso(),k,u:tktUtente(),txt:txt||'',...(extra||{})});r.log=JSON.stringify(l);
+}
+/* finestra del prossimo rinnovo, in minuti */
+function tktProssima(r){
+  const base=tktMinIniz(),prec=+r.durata||base;
+  return Math.max(tktMinimo(),Math.round((tktProg()?prec:base)*tktPct()));
+}
+/* stato vero in questo momento */
+function tktSt(r){
+  if(r.stato==='Chiuso')return r.rispettato==='No'?{k:'chiuso-ft',l:'Chiuso fuori tempo',c:'end'}:{k:'chiuso',l:'Chiuso nei tempi',c:'ok'};
+  const resta=(Date.parse(r.scadenza)-Date.now())/60000;
+  if(resta<0)return {k:'scaduto',l:'Scaduto',c:'bad',resta};
+  if(resta<=60)return {k:'scadenza',l:r.stato||'Aperto',c:'late',resta};
+  return {k:'ok',l:r.stato||'Aperto',c:'rent',resta};
+}
+function tktResta(r){
+  if(r.stato==='Chiuso')return '';
+  const m=Math.round((Date.parse(r.scadenza)-Date.now())/60000),a=Math.abs(m);
+  const t=a>=60?`${Math.floor(a/60)} h ${a%60} min`:`${a} min`;
+  return m<0?`scaduto da ${t}`:`restano ${t}`;
+}
+
+MODS.tkt={sheet:'Ticket',store:'tkt',title:'Ticket',code:'TK',attach:true,wide:true,
+ canDelete:r=>r.stato==='Chiuso'?'':'Un ticket aperto non si elimina: chiudilo prima, così il tempo di gestione resta documentato.',
+ groups:[
+  {t:'Richiesta',f:[
+   fd('tipo','Tipo','sel',{req:true,opts:TKT_TIPI,def:TKT_TIPI[0],span:'s2'}),
+   fd('targa','Targa','ref',{ref:'mezzo',plate:true,span:'s2'}),
+   fd('rifCodice','Pratica collegata','text',{span:'s2',hint:'Codice della manutenzione o del sinistro'}),
+   fd('oggetto','Oggetto','text',{req:true,span:'s6',ph:'Cosa serve e perché'}),
+   fd('descrizione','Dettagli della richiesta','area',{span:'s6'}),
+   fd('richiedente','Richiesto da','text',{span:'s3'}),
+   fd('assegnatario','Gestito da','text',{span:'s3',listOf:()=>(S.utenti||[]).map(u=>u.nome||u.email).filter(Boolean)})]},
+  {t:'Gestione',f:[
+   fd('stato','Stato','sel',{opts:TKT_STATI,def:'Aperto',span:'s3',hint:'Per chiudere o integrare usa i pulsanti Chiudi e Integra dell’elenco: tengono traccia dei tempi'}),
+   fd('esito','Esito e soluzione','area',{span:'s6'}),
+   fd('aperto','Aperto il','text',{hidden:true}),fd('scadenza','Scade il','text',{hidden:true}),
+   fd('durata','Tempo concesso (min)','int',{hidden:true}),fd('rinnovi','Rinnovi','int',{hidden:true}),
+   fd('chiusoIl','Chiuso il','text',{hidden:true}),fd('rispettato','Chiuso nei tempi','text',{hidden:true}),
+   fd('log','Storico','text',{hidden:true})]}]};
+ammRegistraModuli(['tkt']);
+if(typeof DOC_TIPI!=='undefined'&&!DOC_TIPI.includes('Documento ticket'))DOC_TIPI.push('Documento ticket');
+if(typeof ATT_DEF!=='undefined')ATT_DEF.tkt='Documento ticket';
+MODS.tkt.beforeSave=(x,rec)=>{
+  if(rec)return;
+  const m=tktMinIniz(),n=tktAdesso();
+  x.aperto=n;x.durata=m;x.scadenza=tktAdd(n,m);x.rinnovi=0;x.stato=x.stato&&x.stato!=='Chiuso'?x.stato:'Aperto';
+  if(!x.richiedente)x.richiedente=tktUtente();
+  tktLogAgg(x,'apertura',x.descrizione||x.oggetto,{scad:x.scadenza,min:m});
+};
+/* creazione da una pratica */
+function tktAperti(tipo,cod){return S.tkt.filter(t=>t.tipo===tipo&&t.rifCodice===cod&&t.stato!=='Chiuso');}
+function tktCrea(tipo,r,auto){
+  const man=tipo==='Manutenzione';
+  const m=tktMinIniz(),n=tktAdesso();
+  const t={id:uid(),codice:nextCode(MODS.tkt),tipo,targa:r.targa||'',rifCodice:r.codice||'',
+    oggetto:man?`${r.tipo||'Manutenzione'}${r.descrizione?': '+String(r.descrizione).slice(0,80):''}`:`Sinistro ${r.tipo||''}${r.luogo?' – '+r.luogo:''}`.trim(),
+    descrizione:man?(r.descrizione||''):(r.dinamica||''),richiedente:tktUtente(),assegnatario:'',stato:'Aperto',esito:'',
+    aperto:n,durata:m,scadenza:tktAdd(n,m),rinnovi:0,chiusoIl:'',rispettato:'',log:'[]'};
+  tktLogAgg(t,'apertura',auto?`Aperto in automatico con la pratica ${t.rifCodice}.`:t.descrizione||t.oggetto,{scad:t.scadenza,min:m});
+  S.tkt.push(t);markDirty();
+  return t;
+}
+function tktDa(tipo,r){
+  const es=tktAperti(tipo,r.codice)[0];
+  if(es){S.tab='ticket';ui('tktTab').tab='a';render();toast(`Il ticket ${es.codice} di questa pratica è già aperto: ${tktResta(es)}.`);return;}
+  const t=tktCrea(tipo,r,false);
+  toast(`Ticket ${t.codice} aperto: da chiudere entro ${tktFmt(t.scadenza)}.`);
+  S.tab='ticket';ui('tktTab').tab='a';render();
+}
+/* chiusura della pratica → chiusura del ticket */
+function tktChiudi(t,esito,auto){
+  const nei=Date.now()<=Date.parse(t.scadenza);
+  t.stato='Chiuso';t.chiusoIl=tktAdesso();t.rispettato=nei?'Sì':'No';
+  if(esito)t.esito=esito;
+  tktLogAgg(t,auto?'auto':'chiusura',esito||'',{ok:nei});
+}
+function tktSync(tipo,r,nuovo){
+  if(!r||!r.codice)return;
+  const chiusi=tipo==='Manutenzione'?['Chiusa','Annullata']:['Chiuso','Liquidato'];
+  const ap=tktAperti(tipo,r.codice);
+  if(chiusi.includes(r.stato)){
+    if(ap.length){for(const t of ap)tktChiudi(t,`Pratica ${r.codice} ${String(r.stato).toLowerCase()}.`,true);markDirty();}
+  }else if(nuovo&&!ap.length&&tktAutoOn()&&!S.tkt.some(t=>t.tipo===tipo&&t.rifCodice===r.codice)){
+    const t=tktCrea(tipo,r,true);toast(`Ticket ${t.codice} aperto in automatico: da chiudere entro ${tktFmt(t.scadenza)}.`);
+  }
+}
+for(const [k,tipo] of [['man','Manutenzione'],['sin','Sinistro']]){
+  const prev=MODS[k].afterSave;
+  MODS[k].afterSave=(r,nuovo)=>{if(prev)prev(r,nuovo);try{tktSync(tipo,r,nuovo);}catch(e){console.warn('ticket',e);}};
+}
+
+/* integrazione e chiusura */
+function tktDlg(t,modo){
+  return new Promise(res=>{
+    const integra=modo==='integra';
+    const prox=tktProssima(t);
+    const m=document.createElement('div');m.className='modal';
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:560px">
+      <h3>${integra?'Integra e rinnova':'Chiudi'} ${esc(t.codice)}</h3>
+      <div class="muted">${esc(t.oggetto||'')} ${t.targa?'· '+esc(t.targa):''}</div>
+      <div class="alert" style="margin:10px 0;${integra?'':'display:none'}">${tktSt(t).k==='scaduto'?'Il ticket è scaduto: ':''}con questa integrazione il tempo si rinnova per <b>${tktDurata(prox)}</b> (${tktProg()?'metà del tempo precedente':'metà del tempo iniziale'}), fino alle <b>${tktFmt(tktAdd(tktAdesso(),prox))}</b>.</div>
+      ${!integra&&Date.now()>Date.parse(t.scadenza)?`<div class="alert" style="margin:10px 0">Il tempo è scaduto: il ticket verrà chiuso <b>fuori tempo</b>.</div>`:''}
+      <div class="field"><label for="tkN">${integra?'Cosa è stato fatto e cosa manca (obbligatorio)':'Esito e soluzione (obbligatorio)'}</label><textarea class="input" id="tkN" rows="4"></textarea></div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">${integra?'Integra e rinnova':'Chiudi il ticket'}</button></div></div>`;
+    m.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      if(a&&a.dataset.a==='1'){const v=m.querySelector('#tkN').value.trim();if(!v){m.querySelector('#tkN').focus();toast('Scrivi una nota: è obbligatoria.',true);return;}m.remove();res(v);}
+      else{m.remove();res(null);}});
+    document.body.appendChild(m);m.querySelector('#tkN').focus();});
+}
+async function tktAzione(t,modo){
+  if(t.stato==='Chiuso')return;
+  const v=await tktDlg(t,modo);if(v===null)return;
+  if(modo==='integra'){
+    const min=tktProssima(t);t.durata=min;t.rinnovi=(+t.rinnovi||0)+1;
+    t.scadenza=tktAdd(tktAdesso(),min);if(t.stato==='Aperto')t.stato='In lavorazione';
+    tktLogAgg(t,'integrazione',v,{scad:t.scadenza,min,n:t.rinnovi});
+    toast(`${t.codice} rinnovato per ${tktDurata(min)}: scade ${tktFmt(t.scadenza)}.`);
+  }else{
+    tktChiudi(t,v,false);
+    toast(`${t.codice} chiuso ${t.rispettato==='Sì'?'nei tempi':'fuori tempo'}.`);
+  }
+  markDirty();renderSide();render();
+}
+
+/* ---------- vista ---------- */
+function tktTabs(){
+  const t=ui('tktTab').tab||'a';
+  const n=S.tkt.filter(x=>x.stato!=='Chiuso').length,s=S.tkt.filter(x=>tktSt(x).k==='scaduto').length;
+  const b=(k,l)=>`<button class="${t===k?'on':''}" data-sub="tktTab:${k}">${l}</button>`;
+  return `<div class="subtabs">${b('a',`Da gestire${n?` (${n})`:''}${s?` · <span class="late">${s} scaduti</span>`:''}`)}${b('t','Tutti')}${b('s','Storico e tempi')}${b('r','Regole')}</div>`;
+}
+function renderTicket(){
+  const t=ui('tktTab').tab||'a';
+  if(t==='r')return renderTktRegole();
+  if(t==='s')return renderTktStorico();
+  const tutti=t==='t';
+  genericList('tkt',{uiKey:'tkt'+t,title:'Ticket',tabsHtml:tktTabs(),
+    sub:`Manutenzioni e sinistri da gestire entro ${tktDurata(tktMinIniz())} dalla richiesta. Alla scadenza si integra e si rinnova per metà del tempo.`,
+    newLabel:'Nuovo ticket',searchPh:'Codice, targa, oggetto, pratica',search:['codice','targa','oggetto','rifCodice','assegnatario','richiedente'],
+    rowFilter:r=>tutti||r.stato!=='Chiuso',
+    filters:[{k:'tipo',label:'Tipo',opts:()=>TKT_TIPI,all:'Tutti'},
+      {k:'__sit',label:'Situazione',all:'Tutte',opts:()=>['Scaduti','In scadenza (entro 1 ora)','Chiusi nei tempi','Chiusi fuori tempo'],
+       test:(r,v)=>{const s=tktSt(r);return v==='Scaduti'?s.k==='scaduto':v.startsWith('In scadenza')?s.k==='scadenza':v==='Chiusi nei tempi'?s.k==='chiuso':s.k==='chiuso-ft';}}],
+    ledger:l=>{const ap=l.filter(r=>r.stato!=='Chiuso'),sc=ap.filter(r=>tktSt(r).k==='scaduto').length,ss=ap.filter(r=>tktSt(r).k==='scadenza').length;
+      const ch=S.tkt.filter(r=>r.stato==='Chiuso'),ok=ch.filter(r=>r.rispettato!=='No').length;
+      return `<div><b>${ap.length}</b><small>da gestire</small></div><div><b class="${sc?'late':''}">${sc}</b><small>scaduti</small></div><div><b class="${ss?'late':''}">${ss}</b><small>in scadenza entro 1 ora</small></div><div><b>${ch.length?Math.round(ok/ch.length*100)+'%':'–'}</b><small>chiusi nei tempi</small></div>`;},
+    sort:(a,b)=>{const ra=a.stato==='Chiuso'?1:0,rb=b.stato==='Chiuso'?1:0;return ra!==rb?ra-rb:(a.scadenza<b.scadenza?(ra?1:-1):(ra?-1:1));},
+    cols:[{l:'Ticket',v:r=>`<b>${esc(r.codice)}</b><span class="sub">${esc((r.oggetto||'').slice(0,70))}</span>`},
+      {l:'Tipo',v:r=>`${esc(r.tipo||'')}<span class="sub">${esc(r.rifCodice||'')}</span>`},
+      {l:'Targa',v:r=>plate(r.targa)},
+      {l:'Aperto',v:r=>`${tktFmt(r.aperto)}<span class="sub">${esc(r.richiedente||'')}</span>`},
+      {l:'Scadenza',v:r=>{const s=tktSt(r);return r.stato==='Chiuso'?`${tktFmt(r.chiusoIl)}<span class="sub">chiuso</span>`:`<b>${tktFmt(r.scadenza)}</b><span class="sub tkt-resta ${s.k==='scaduto'?'late':''}" data-sc="${esc(r.scadenza)}">${tktResta(r)}</span>`;}},
+      {l:'Rinnovi',cls:'num',v:r=>`${+r.rinnovi||0}<span class="sub">${r.stato==='Chiuso'?'':'prossimo '+tktDurata(tktProssima(r))}</span>`},
+      {l:'Gestito da',v:r=>esc(r.assegnatario||'')},
+      {l:'Stato',v:r=>{const s=tktSt(r);return pillS(s.l,s.c);}}],
+    rowActions:[{l:'Integra',show:r=>r.stato!=='Chiuso',fn:r=>tktAzione(r,'integra')},
+      {l:'Chiudi',show:r=>r.stato!=='Chiuso',fn:r=>tktAzione(r,'chiudi')},
+      {l:'Storico',fn:r=>tktStoricoDlg(r)},
+      {l:'Apri pratica',show:r=>!!r.rifCodice,fn:r=>{const k=r.tipo==='Sinistro'?'sin':'man';const p=S[k].find(x=>x.codice===r.rifCodice);if(p)openRecord(k,p);else toast('Pratica non trovata.',true);}}]});
+}
+function tktStoricoDlg(t){
+  const l=tktLogDi(t);const NOME={apertura:'Apertura',integrazione:'Integrazione e rinnovo',chiusura:'Chiusura',auto:'Chiusura automatica'};
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:720px;max-height:90vh;overflow:auto">
+    <h3>${esc(t.codice)} – storico</h3><div class="muted">${esc(t.oggetto||'')} · aperto ${tktFmt(t.aperto)}${t.stato==='Chiuso'?` · chiuso ${tktFmt(t.chiusoIl)} (${t.rispettato==='No'?'fuori tempo':'nei tempi'})`:''}</div>
+    <div class="tablewrap" style="margin-top:10px"><table class="grid mini"><thead><tr><th>Quando</th><th>Evento</th><th>Chi</th><th>Nota</th><th>Nuova scadenza</th></tr></thead><tbody>
+    ${l.map(e=>`<tr><td>${tktFmt(e.t)}</td><td>${esc(NOME[e.k]||e.k)}${e.n?` n. ${e.n}`:''}</td><td>${esc(e.u||'')}</td><td>${esc(e.txt||'')}</td><td>${e.scad?tktFmt(e.scad)+(e.min?` <span class="sub">${tktDurata(e.min)}</span>`:''):''}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">Nessun evento.</td></tr>'}
+    </tbody></table></div><div class="acts"><button class="btn" data-x>Chiudi</button></div></div>`;
+  m.addEventListener('click',e=>{if(e.target===m||e.target.closest('[data-x]'))m.remove();});
+  document.body.appendChild(m);
+}
+function renderTktStorico(){
+  const ch=S.tkt.filter(r=>r.stato==='Chiuso');
+  const rip=(arr,f)=>{const o={};for(const r of arr){const k=f(r)||'–';(o[k]=o[k]||[]).push(r);}return o;};
+  const riga=(nome,l)=>{const ok=l.filter(r=>r.rispettato!=='No').length;
+    const ore=l.map(r=>(Date.parse(r.chiusoIl)-Date.parse(r.aperto))/3600000).filter(x=>x>=0);
+    const med=ore.length?ore.reduce((a,b)=>a+b,0)/ore.length:0;
+    return `<tr><td>${esc(nome)}</td><td class="num">${l.length}</td><td class="num">${ok}</td><td class="num ${l.length-ok?'late':''}">${l.length-ok}</td><td class="num">${l.length?Math.round(ok/l.length*100)+'%':'–'}</td><td class="num">${l.length?numF.format(Math.round(med*10)/10)+' h':'–'}</td><td class="num">${numF.format(Math.round(l.reduce((a,r)=>a+(+r.rinnovi||0),0)/Math.max(1,l.length)*10)/10)}</td></tr>`;};
+  const tab=(tit,o)=>`<h3>${tit}</h3><div class="tablewrap"><table class="grid mini"><thead><tr><th></th><th class="num">Chiusi</th><th class="num">Nei tempi</th><th class="num">Fuori tempo</th><th class="num">% nei tempi</th><th class="num">Tempo medio</th><th class="num">Rinnovi medi</th></tr></thead><tbody>${Object.entries(o).sort((a,b)=>b[1].length-a[1].length).map(([k,l])=>riga(k,l)).join('')||'<tr><td colspan="7" class="empty">Ancora nessun ticket chiuso.</td></tr>'}</tbody></table></div>`;
+  $('#main').innerHTML=`${pageHead('Ticket','Quanto tempo serve davvero per chiudere manutenzioni e sinistri.')}${tktTabs()}
+    <div class="panel">${tab('Per tipo',rip(ch,r=>r.tipo))}<div style="height:16px"></div>${tab('Per gestore',rip(ch,r=>r.assegnatario||'Non assegnato'))}</div>`;
+}
+function renderTktRegole(){
+  $('#main').innerHTML=`${pageHead('Ticket','Come funziona il tempo di gestione.')}${tktTabs()}
+  <div class="panel" style="font-size:14px;line-height:1.6">
+   <h3>Il tempo</h3>
+   <ul><li>Ogni ticket ha <b>${tktDurata(tktMinIniz())}</b> dalla richiesta per essere chiuso.</li>
+   <li>Se non è chiuso, va <b>integrato</b> (pulsante Integra, con una nota su cosa è stato fatto e cosa manca): il tempo si <b>rinnova per ${Math.round(tktPct()*100)}% ${tktProg()?'del tempo precedente':'del tempo iniziale'}</b>, minimo ${tktMinimo()} minuti.</li>
+   <li>Esempio con le regole di oggi: ${(()=>{let m=tktMinIniz();const v=[tktDurata(m)];for(let i=0;i<4;i++){m=Math.max(tktMinimo(),Math.round((tktProg()?m:tktMinIniz())*tktPct()));v.push(tktDurata(m));}return v.join(' → ');})()}.</li>
+   <li>Un ticket scaduto resta evidenziato finché non viene integrato o chiuso; se si chiude dopo la scadenza risulta «chiuso fuori tempo».</li></ul>
+   <h3>Come nasce e come si chiude</h3>
+   <ul><li>${tktAutoOn()?'Si apre <b>in automatico</b> con ogni nuova manutenzione o sinistro.':'Si apre dal pulsante <b>Ticket</b> sulla riga della manutenzione o del sinistro.'} Si può anche creare a mano.</li>
+   <li>Quando la pratica collegata si chiude (manutenzione Chiusa o Annullata; sinistro Chiuso o Liquidato) il ticket si chiude da solo.</li>
+   <li>Ogni integrazione e chiusura resta nello storico con data, ora, chi e nota.</li></ul>
+   <h3>Modificare le regole</h3>
+   <p>Le cinque regole sono nei <b>Parametri</b>: tempo massimo, percentuale del rinnovo, minimo, progressivo sì/no, apertura automatica.</p></div>`;
+}
+/* tempo residuo vivo */
+setInterval(()=>{
+  document.querySelectorAll('.tkt-resta').forEach(el=>{
+    const m=Math.round((Date.parse(el.dataset.sc)-Date.now())/60000),a=Math.abs(m);
+    el.textContent=(m<0?'scaduto da ':'restano ')+(a>=60?`${Math.floor(a/60)} h ${a%60} min`:`${a} min`);
+    el.classList.toggle('late',m<0);});
+},20000);
+
+/* ---------- aggancio ---------- */
+VIEWS.ticket=()=>renderTicket();
+(()=>{
+  if(!AREE.some(a=>a.k==='tkt')){AREE.push({k:'tkt',l:'Ticket manutenzioni e sinistri',tabs:['ticket'],store:['tkt']});
+    AREA_DI_TAB.ticket='tkt';(AREE_DI_STORE.tkt=AREE_DI_STORE.tkt||[]).includes('tkt')||AREE_DI_STORE.tkt.push('tkt');}
+  const g=MENU.find(x=>x.g==='Amministrazione')||MENU[MENU.length-1];
+  if(!MENU.some(x=>x.items.some(([k])=>k==='ticket')))g.items.push(['ticket','Ticket']);
+  for(const r of ['officina']){const R=RUOLI[r];if(R&&R.tabs&&!R.tabs.includes('ticket'))R.tabs.push('ticket');}
+  if(RUOLI.officina.scrivi&&!RUOLI.officina.scrivi.includes('tkt'))RUOLI.officina.scrivi.push('tkt');
+})();
+
+/* =====================================================================
+   AVANZAMENTO DI FASE CON NOTE E MAIL AL PROPRIETARIO (2026.10.41)
+   ---------------------------------------------------------------------
+   Quando una manutenzione o un sinistro passa da una fase all'altra (tasto
+   Avanza, trascinamento nel kanban o modifica della scheda) si apre una
+   finestra: nota facoltativa, e se serve la mail al proprietario del mezzo,
+   già scritta e modificabile. La mail si apre nel programma di posta del
+   computer oppure in Outlook sul web o Gmail, a scelta. Le note restano
+   nello storico della pratica (e nel ticket, se è aperto).
+   ===================================================================== */
+for(const k of ['man','sin']){
+  const g=MODS[k].groups[MODS[k].groups.length-1].f;
+  if(!g.some(f=>f.k==='storicoFasi')){g.push(fd('storicoFasi','Storico avanzamenti','text',{hidden:true}));ammCampi(MODS[k]);}
+}
+const AV_FLUSSO={man:['Da aprire','Richiesta inviata','Autorizzata','In officina','In lavorazione','Pronta al ritiro','Chiusa'],
+  sin:['Aperto','Denunciato','In perizia','In riparazione','In liquidazione','Liquidato','Chiuso']};
+const avChiusi={man:['Chiusa','Annullata'],sin:['Chiuso','Liquidato']};
+const avStorico=r=>{try{const l=JSON.parse(r.storicoFasi||'[]');return Array.isArray(l)?l:[];}catch(e){return [];}};
+const avProssimo=(k,r)=>{const f=AV_FLUSSO[k],i=f.indexOf(r.stato);return i<0?f[0]:f[Math.min(i+1,f.length-1)];};
+/* a chi scrivere: il proprietario del mezzo (anagrafica Clienti e fornitori) */
+function avDestinatario(r){
+  const m=mezzoBy(r.targa)||{};
+  const nome=m.proprietaria||m.contraente||'';
+  const s=socBy(nome)||{};
+  return {nome,email:s.email||s.pec||''};
+}
+const AV_CLIENTI={def:'Programma di posta del computer',outlook:'Outlook sul web (Microsoft 365)',gmail:'Gmail'};
+const avClienteScelto=()=>{try{return localStorage.getItem('mail-client')||'def';}catch(e){return 'def';}};
+function avApriMail(cli,to,subj,body){
+  try{localStorage.setItem('mail-client',cli);}catch(e){}
+  const q=encodeURIComponent;
+  if(cli==='outlook')window.open(`https://outlook.office.com/mail/deeplink/compose?to=${q(to)}&subject=${q(subj)}&body=${q(body)}`,'_blank','noopener');
+  else if(cli==='gmail')window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${q(to)}&su=${q(subj)}&body=${q(body)}`,'_blank','noopener');
+  else mailto(to,subj,body);
+}
+function avMail(k,r,prev,nuovo,nota){
+  const man=k==='man',m=mezzoBy(r.targa)||{};
+  const v=`${r.targa||''}${m.marca||m.modello?' ('+[m.marca,m.modello].filter(Boolean).join(' ')+')':''}`;
+  const dett=man
+    ?[r.tipo&&`Tipo di intervento: ${r.tipo}`,r.officina&&`Officina: ${r.officina}`,r.descrizione&&`Descrizione: ${r.descrizione}`,r.dataIngresso&&`In officina dal ${fmtD(r.dataIngresso)}`,r.dataUscita&&`Uscita il ${fmtD(r.dataUscita)}`]
+    :[r.numeroSinistro&&`Numero sinistro: ${r.numeroSinistro}`,r.data&&`Data dell'evento: ${fmtD(r.data)}${r.luogo?' – '+r.luogo:''}`,r.tipo&&`Tipo: ${r.tipo}`,r.responsabilita&&`Responsabilità: ${r.responsabilita}`];
+  const cambio=prev&&prev!==nuovo;
+  return {subject:`${man?'Manutenzione':'Sinistro'} ${r.codice} – ${r.targa||''}${cambio?': '+nuovo:''}`,
+    body:`Buongiorno,\n\n${cambio?`la ${man?'manutenzione':'pratica di sinistro'} ${r.codice} relativa al veicolo ${v} è passata dalla fase «${prev}» alla fase «${nuovo}».`:`Le scriviamo in merito alla ${man?'manutenzione':'pratica di sinistro'} ${r.codice} relativa al veicolo ${v}, attualmente in fase «${r.stato}».`}\n`
+      +(dett.filter(Boolean).length?`\n${dett.filter(Boolean).join('\n')}\n`:'')
+      +(nota?`\nNote:\n${nota}\n`:'')+`\nResto a disposizione per ogni chiarimento.\n\nCordiali saluti\n${tktUtente()||'Fast Rent S.r.l.'}\nFast Rent S.r.l.`};
+}
+/* la finestra: ritorna {fase,nota,mail:{cli,to,subject,body}|null} oppure null */
+function avDlg(k,r,prev,target,soloMail){
+  return new Promise(res=>{
+    const dest=avDestinatario(r);
+    const fasi=MODS[k].stages;
+    const m=document.createElement('div');m.className='modal';
+    const rendi=()=>avMail(k,r,soloMail?'':prev,m.querySelector('#avF')?m.querySelector('#avF').value:target,m.querySelector('#avN')?m.querySelector('#avN').value.trim():'');
+    m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:720px;max-height:92vh;overflow:auto">
+      <h3>${soloMail?'Scrivi al proprietario':'Avanzamento'} – ${esc(r.codice)}</h3>
+      <div class="muted">${plate(r.targa)} ${soloMail?`Fase attuale: <b>${esc(r.stato||'')}</b>`:`Da <b>${esc(prev||'')}</b> a:`}</div>
+      ${soloMail?'':`<div class="field" style="max-width:260px;margin:6px 0"><label for="avF">Nuova fase</label><select class="input" id="avF">${fasi.map(f=>`<option ${f===target?'selected':''}>${esc(f)}</option>`).join('')}</select></div>`}
+      <div class="field"><label for="avN">Note${soloMail?' per il proprietario':' sull’avanzamento'} (facoltative)</label><textarea class="input" id="avN" rows="3" placeholder="Cosa è successo, cosa si aspetta, prossimi passi"></textarea></div>
+      <label class="radio" style="margin:8px 0"><input type="checkbox" id="avM" ${soloMail?'checked disabled':''}><span><b>Invia una mail al proprietario del mezzo</b><small>${dest.nome?`Proprietario: ${esc(dest.nome)}${dest.email?'':' – nell’anagrafica manca l’email: scrivila qui sotto'}`:'Il mezzo non ha un proprietario indicato: scrivi tu l’indirizzo'}.</small></span></label>
+      <div id="avBox" style="display:${soloMail?'block':'none'}">
+        <div class="fgrid">
+          <div class="field s3"><label for="avTo">A</label><input class="input" id="avTo" value="${esc(dest.email)}" placeholder="indirizzo email"></div>
+          <div class="field s3"><label for="avCli">Aprila con</label><select class="input" id="avCli">${Object.entries(AV_CLIENTI).map(([v,l])=>`<option value="${v}" ${v===avClienteScelto()?'selected':''}>${l}</option>`).join('')}</select></div>
+          <div class="field s6"><label for="avS">Oggetto</label><input class="input" id="avS"></div>
+          <div class="field s6"><label for="avB">Testo</label><textarea class="input" id="avB" rows="10"></textarea></div>
+        </div>
+        <div class="muted" style="font-size:12.5px">La mail non parte da sola: si apre già scritta nel programma scelto, da controllare e inviare tu.</div>
+      </div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">${soloMail?'Apri la mail':'Conferma avanzamento'}</button></div></div>`;
+    let tocca=false;
+    const agg=()=>{const o=rendi();if(!tocca){m.querySelector('#avS').value=o.subject;m.querySelector('#avB').value=o.body;}};
+    m.addEventListener('input',e=>{if(e.target.id==='avS'||e.target.id==='avB')tocca=true;else agg();});
+    m.addEventListener('change',e=>{
+      if(e.target.id==='avM'){m.querySelector('#avBox').style.display=e.target.checked?'block':'none';agg();}
+      else if(e.target.id==='avF')agg();});
+    m.addEventListener('click',e=>{
+      const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      if(a&&a.dataset.a==='1'){
+        const mail=m.querySelector('#avM').checked;
+        const to=m.querySelector('#avTo').value.trim();
+        if(mail&&!to){m.querySelector('#avTo').focus();toast('Scrivi l’indirizzo email del destinatario.',true);return;}
+        const out={fase:soloMail?r.stato:m.querySelector('#avF').value,nota:m.querySelector('#avN').value.trim(),
+          mail:mail?{cli:m.querySelector('#avCli').value,to,subject:m.querySelector('#avS').value,body:m.querySelector('#avB').value}:null};
+        m.remove();res(out);
+      }else{m.remove();res(null);}
+    });
+    document.body.appendChild(m);agg();m.querySelector('#avN').focus();});
+}
+function avRegistra(k,r,prev,nuovo,nota,mail){
+  const l=avStorico(r);
+  l.push({t:tktAdesso(),da:prev||'',a:nuovo,u:tktUtente(),txt:nota||'',mail:mail?mail.to:''});
+  r.storicoFasi=JSON.stringify(l);
+  const tipo=k==='man'?'Manutenzione':'Sinistro';
+  if(nota||prev!==nuovo){
+    for(const t of tktAperti(tipo,r.codice))tktLogAgg(t,'nota',`${prev&&prev!==nuovo?`Fase ${prev} → ${nuovo}. `:''}${nota||''}`.trim());
+  }
+}
+/* avanza (con la finestra); ritorna true se la pratica è cambiata */
+async function avAvanza(k,r,target){
+  const prev=r.stato;
+  const o=await avDlg(k,r,prev,target,false);if(!o)return false;
+  const st=o.fase;
+  if(st&&st!==prev){r.stato=st;if(MODS[k].onStage)MODS[k].onStage(r,st,prev);}
+  avRegistra(k,r,prev,st,o.nota,o.mail);
+  markDirty();
+  toast(`${r.codice}: ${prev} → ${st}${o.nota?' (nota salvata)':''}.`);
+  if(o.mail)avApriMail(o.mail.cli,o.mail.to,o.mail.subject,o.mail.body);
+  try{tktSync(k==='man'?'Manutenzione':'Sinistro',r,false);}catch(e){}
+  return true;
+}
+async function avSoloMail(k,r){
+  const o=await avDlg(k,r,r.stato,r.stato,true);if(!o||!o.mail)return;
+  avRegistra(k,r,r.stato,r.stato,o.nota?`Mail al proprietario: ${o.nota}`:'Mail al proprietario.',o.mail);markDirty();
+  avApriMail(o.mail.cli,o.mail.to,o.mail.subject,o.mail.body);
+}
+function avStoricoDlg(k,r){
+  const l=avStorico(r);
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:760px;max-height:90vh;overflow:auto"><h3>${esc(r.codice)} – storico avanzamenti</h3>
+    <div class="tablewrap"><table class="grid mini"><thead><tr><th>Quando</th><th>Fase</th><th>Chi</th><th>Nota</th><th>Mail a</th></tr></thead><tbody>
+    ${l.slice().reverse().map(e=>`<tr><td>${tktFmt(e.t)}</td><td>${e.da&&e.da!==e.a?esc(e.da)+' → ':''}${esc(e.a||'')}</td><td>${esc(e.u||'')}</td><td>${esc(e.txt||'')}</td><td>${esc(e.mail||'')}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">Nessun avanzamento registrato.</td></tr>'}
+    </tbody></table></div><div class="acts"><button class="btn" data-x>Chiudi</button></div></div>`;
+  m.addEventListener('click',e=>{if(e.target===m||e.target.closest('[data-x]'))m.remove();});
+  document.body.appendChild(m);
+}
+MODS.man.avanza=(r,st)=>avAvanza('man',r,st);
+MODS.sin.avanza=(r,st)=>avAvanza('sin',r,st);
+/* modifica dalla scheda: se la fase è cambiata, si chiede la nota e la mail dopo il salvataggio */
+for(const k of ['man','sin']){
+  const bs=MODS[k].beforeSave,as=MODS[k].afterSave;
+  MODS[k].beforeSave=(x,rec)=>{if(bs)bs(x,rec);MODS[k]._prev=rec?rec.stato:null;};
+  MODS[k].afterSave=(r,nuovo)=>{
+    if(as)as(r,nuovo);
+    const prev=MODS[k]._prev;MODS[k]._prev=null;
+    if(!nuovo&&prev&&r.stato&&prev!==r.stato&&!MODS[k]._muto){
+      setTimeout(async()=>{
+        const o=await avDlg(k,r,prev,r.stato,false);
+        if(o){avRegistra(k,r,prev,r.stato,o.nota,o.mail);markDirty();if(o.mail)avApriMail(o.mail.cli,o.mail.to,o.mail.subject,o.mail.body);render();}
+        else{avRegistra(k,r,prev,r.stato,'',null);markDirty();}
+      },250);
+    }
+  };
+}
+
+/* =====================================================================
+   CONSEGNA E RICONSEGNA DEL MEZZO (2026.10.42)
+   ---------------------------------------------------------------------
+   Per ogni mezzo affidato a un utilizzatore o dato a noleggio a un cliente:
+   verbale di consegna e di riconsegna, foto per lato con confronto tra
+   consegna e riconsegna, registrazione dei danni (già presenti e nuovi) e
+   calcolo dei chilometri in eccesso dal ritiro alla restituzione.
+   Km inclusi del periodo = km al mese del contratto ÷ (365/12) × giorni
+   effettivi (data e ora di ritiro → data e ora di restituzione).
+   ===================================================================== */
+[['cnsTolleranza',54,'Consegne: km di tolleranza prima di addebitare le eccedenze',0]]
+  .forEach(p=>{if(!PARAMS_EXTRA.some(x=>x[0]===p[0]))PARAMS_EXTRA.push(p);});
+const CNS_TIPI=['Noleggio a cliente','Affidamento a utilizzatore'];
+const CNS_CARB=['Riserva','1/4','1/2','3/4','Pieno'];
+const CNS_LATI=['Anteriore','Posteriore','Laterale sinistro','Laterale destro','Tetto','Interno e cruscotto','Vano di carico','Contachilometri e carburante'];
+const CNS_DANNI=['Graffio','Ammaccatura','Rottura','Mancante','Sporco','Altro'];
+const CNS_GRAV=['Lieve','Media','Grave'];
+MODS.cns={sheet:'Consegne',store:'cns',title:'Consegne e riconsegne',code:'CN',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'Mezzo e destinatario',f:[
+   fd('tipo','Tipo','sel',{req:true,opts:CNS_TIPI,def:CNS_TIPI[0],span:'s3'}),
+   fd('targa','Targa','ref',{ref:'mezzo',req:true,plate:true,span:'s3'}),
+   fd('contratto','Contratto di noleggio','text',{span:'s3',hint:'Numero del contratto, per i noleggi'}),
+   fd('cliente','Cliente (noleggio)','text',{span:'s3'}),
+   fd('dipendente','Utilizzatore (affidamento)','ref',{ref:'dip',span:'s3'}),
+   fd('ricevente','Ritirato da','text',{span:'s3',hint:'Chi firma il ritiro'})]},
+  {t:'Consegna',f:[
+   fd('dataConsegna','Data di ritiro','date',{req:true,span:'s2'}),fd('oraConsegna','Ora','time',{span:'s2'}),
+   fd('kmConsegna','Km al ritiro','int',{req:true,span:'s2'}),
+   fd('carbConsegna','Carburante','sel',{opts:CNS_CARB,span:'s2'}),
+   fd('noteConsegna','Note alla consegna','area',{span:'s6'})]},
+  {t:'Riconsegna',f:[
+   fd('dataRiconsegna','Data di restituzione','date',{span:'s2'}),fd('oraRiconsegna','Ora','time',{span:'s2'}),
+   fd('kmRiconsegna','Km alla restituzione','int',{span:'s2'}),
+   fd('carbRiconsegna','Carburante','sel',{opts:CNS_CARB,span:'s2'}),
+   fd('noteRiconsegna','Note alla riconsegna','area',{span:'s6'})]},
+  {t:'Chilometri',f:[
+   fd('kmMese','Km inclusi al mese','int',{span:'s2',hint:'Dal contratto; vuoto = nessun limite'}),
+   fd('costoKm','Costo km eccedente (€/km)','eur',{span:'s2'}),
+   fd('kmPercorsi','Km percorsi','int',{hidden:true}),fd('kmInclusiPeriodo','Km inclusi nel periodo','int',{hidden:true}),
+   fd('kmEccedenti','Km eccedenti','int',{hidden:true}),fd('importoEccedenza','Importo eccedenza','eur',{hidden:true}),
+   fd('stato','Stato','sel',{opts:['In corso','Restituito'],def:'In corso',span:'s2'}),
+   fd('danni','Danni','text',{hidden:true})]}]};
+ammRegistraModuli(['cns']);
+if(typeof DOC_TIPI!=='undefined')for(const t of ['Foto consegna','Foto riconsegna','Verbale di consegna'])if(!DOC_TIPI.includes(t))DOC_TIPI.push(t);
+if(typeof ATT_DEF!=='undefined')ATT_DEF.cns='Foto consegna';
+
+const cnsDanni=r=>{try{const l=JSON.parse(r.danni||'[]');return Array.isArray(l)?l:[];}catch(e){return [];}};
+const cnsTs=(d,h)=>d?Date.parse(`${d}T${h&&/^\d{1,2}:\d{2}/.test(h)?h.slice(0,5).padStart(5,'0'):'00:00'}`):NaN;
+const cnsNum=v=>v===''||v==null||isNaN(+v)?null:+v;
+/* km: dal ritiro alla restituzione (o a ora, se ancora in corso, solo come indicazione) */
+function cnsCalc(r){
+  const t0=cnsTs(r.dataConsegna,r.oraConsegna);
+  const chiuso=!!r.dataRiconsegna;
+  const t1=chiuso?cnsTs(r.dataRiconsegna,r.oraRiconsegna):Date.now();
+  const giorni=isNaN(t0)||isNaN(t1)?0:Math.max(0,(t1-t0)/86400000);
+  const k0=cnsNum(r.kmConsegna),k1=cnsNum(r.kmRiconsegna);
+  const perc=k0!=null&&k1!=null?Math.max(0,k1-k0):null;
+  const mese=cnsNum(r.kmMese),cst=cnsNum(r.costoKm),tol=Math.max(0,tktNum('cnsTolleranza',0)||0);
+  const incl=mese?Math.round(mese*12/365*giorni):null;
+  const ecc=perc!=null&&incl!=null?Math.max(0,perc-incl-tol):null;
+  return {chiuso,giorni,perc,incl,ecc,importo:ecc!=null&&cst?Math.round(ecc*cst*100)/100:(ecc!=null?0:null),tol};
+}
+MODS.cns.beforeSave=(x,rec)=>{
+  const c=cnsCalc(x);
+  x.kmPercorsi=c.perc==null?'':c.perc;x.kmInclusiPeriodo=c.incl==null?'':c.incl;
+  x.kmEccedenti=c.ecc==null?'':c.ecc;x.importoEccedenza=c.importo==null?'':c.importo;
+  x.stato=x.dataRiconsegna?'Restituito':'In corso';
+  if(x.dataRiconsegna&&x.dataConsegna&&x.dataRiconsegna<x.dataConsegna)return 'La restituzione non può precedere il ritiro.';
+  const k0=cnsNum(x.kmConsegna),k1=cnsNum(x.kmRiconsegna);
+  if(k0!=null&&k1!=null&&k1<k0)return 'I km alla restituzione sono inferiori a quelli del ritiro.';
+};
+MODS.cns.validate=(x)=>{
+  const k0=cnsNum(x.kmConsegna),k1=cnsNum(x.kmRiconsegna);
+  if(x.dataRiconsegna&&x.dataConsegna&&x.dataRiconsegna<x.dataConsegna)return 'La restituzione non può precedere il ritiro.';
+  if(k0!=null&&k1!=null&&k1<k0)return 'I km alla restituzione sono inferiori a quelli del ritiro.';
+};
+MODS.cns.afterSave=(r)=>cnsSincronizza(r);
+MODS.cns.canDelete=r=>attachFor('cns',r.codice).length?'Ci sono foto collegate: rimuovile prima (sono la prova dello stato del mezzo).':'';
+/* km del mezzo e assegnazione all'utilizzatore */
+function cnsSincronizza(r){
+  const m=mezzoBy(r.targa);
+  const km=Math.max(cnsNum(r.kmRiconsegna)||0,cnsNum(r.kmConsegna)||0);
+  const dt=r.dataRiconsegna||r.dataConsegna;
+  if(m&&km&&(!m.kmData||dt>=m.kmData)&&km>=(cnsNum(m.km)||0)){m.km=km;m.kmData=dt;}
+  if(r.tipo===CNS_TIPI[1]&&r.dipendente&&r.dataConsegna){
+    let a=S.ass.find(x=>x.targa===r.targa&&x.dipendente===r.dipendente&&x.dal===r.dataConsegna);
+    if(!a){a={id:uid(),codice:nextCode(MODS.ass),targa:r.targa,dipendente:r.dipendente,dal:r.dataConsegna,oraDal:r.oraConsegna||'',kmConsegna:r.kmConsegna,al:'',oraAl:'',kmRiconsegna:'',carburante:r.carbConsegna||'',dispositivi:'',note:`Da verbale ${r.codice}`};S.ass.push(a);}
+    else{a.oraDal=r.oraConsegna||a.oraDal;a.kmConsegna=r.kmConsegna;if(r.carbConsegna)a.carburante=r.carbConsegna;}
+    if(r.dataRiconsegna){a.al=r.dataRiconsegna;a.oraAl=r.oraRiconsegna||'';a.kmRiconsegna=r.kmRiconsegna;}
+  }
+}
+
+/* ---------- foto ---------- */
+const cnsFoto=(r,fase,lato)=>attachFor('cns',r.codice).filter(a=>a.descrizione===`${fase}|${lato}`).sort((a,b)=>a.id<b.id?-1:1);
+const cnsUrl=new Map();
+async function cnsImgUrl(a){
+  if(cnsUrl.has(a.id))return cnsUrl.get(a.id);
+  try{const u=URL.createObjectURL(await getBlob(a));cnsUrl.set(a.id,u);return u;}catch(e){return '';}
+}
+async function cnsRidimensiona(file){
+  try{
+    if(!/^image\//.test(file.type)||file.size<400000)return file;
+    const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
+    const k=Math.min(1,1800/Math.max(bmp.width,bmp.height));
+    const c=document.createElement('canvas');c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);
+    c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+    const b=await new Promise(res=>c.toBlob(res,'image/jpeg',0.84));
+    return b?new File([b],file.name.replace(/\.\w+$/,'')+'.jpg',{type:'image/jpeg'}):file;
+  }catch(e){return file;}
+}
+async function cnsAggiungiFoto(r,fase,lato,files){
+  let n=0;
+  for(const f of files){
+    const g=await cnsRidimensiona(f);
+    const a=await addAttachment(g,'cns',r.codice,fase==='consegna'?'Foto consegna':'Foto riconsegna','');
+    if(a){a.descrizione=`${fase}|${lato}`;a.dataDocumento=todayISO();a.note=tktAdesso();n++;}
+  }
+  if(n)markDirty();return n;
+}
+
+/* ---------- scheda: foto, confronto, danni ---------- */
+function cnsScheda(id,onClose){
+  let r=S.cns.find(x=>x.id===id);if(!r)return;
+  const old=document.getElementById('cnsScheda');if(old)old.remove();
+  const m=document.createElement('div');m.className='modal';m.id='cnsScheda';
+  document.body.appendChild(m);
+  const sel={};
+  const paint=async()=>{
+    r=S.cns.find(x=>x.id===id);if(!r){m.remove();return;}
+    const c=cnsCalc(r),dn=cnsDanni(r),m0=mezzoBy(r.targa)||{};
+    const chi=r.tipo===CNS_TIPI[1]?(REF.dip.label(r.dipendente)||'—'):(r.cliente||'—');
+    const sc=m.querySelector('.cnsbody');const top=sc?sc.scrollTop:0;
+    const lati=await Promise.all(CNS_LATI.map(async lato=>{
+      const fc=cnsFoto(r,'consegna',lato),fr=cnsFoto(r,'riconsegna',lato);
+      const cc=sel['c|'+lato]&&fc.find(x=>x.id===sel['c|'+lato])||fc[fc.length-1];
+      const rr=sel['r|'+lato]&&fr.find(x=>x.id===sel['r|'+lato])||fr[fr.length-1];
+      const th=async(l,fase,cur)=>(await Promise.all(l.map(async a=>`<button class="cns-th ${cur&&cur.id===a.id?'on':''}" data-pick="${fase[0]}|${esc(lato)}|${a.id}"><img src="${await cnsImgUrl(a)}" alt="${esc(fase+' '+lato)}"></button>`))).join('');
+      const dl=dn.filter(d=>d.lato===lato);
+      return `<section class="cns-lato"><h4>${esc(lato)}</h4>
+        <div class="cns-cols">
+          <div><div class="cns-fase">Consegna</div>${cc?`<img class="cns-big" data-zoom="${cc.id}" src="${await cnsImgUrl(cc)}" alt="Consegna ${esc(lato)}">`:'<div class="cns-vuoto">Nessuna foto</div>'}
+            <div class="cns-ths">${await th(fc,'consegna',cc)}</div>
+            <button class="btn ghost" data-add="consegna|${esc(lato)}">＋ Foto consegna</button></div>
+          <div><div class="cns-fase">Riconsegna</div>${rr?`<img class="cns-big" data-zoom="${rr.id}" src="${await cnsImgUrl(rr)}" alt="Riconsegna ${esc(lato)}">`:'<div class="cns-vuoto">Nessuna foto</div>'}
+            <div class="cns-ths">${await th(fr,'riconsegna',rr)}</div>
+            <button class="btn ghost" data-add="riconsegna|${esc(lato)}">＋ Foto riconsegna</button></div>
+        </div>
+        <div class="cns-az">${cc&&rr?`<button class="btn" data-cmp="${esc(lato)}">Confronta lo stesso lato</button>`:'<span class="muted">Servono una foto di consegna e una di riconsegna per il confronto.</span>'}
+          <button class="btn" data-danno="${esc(lato)}">＋ Registra danno</button></div>
+        ${dl.length?`<ul class="cns-dl">${dl.map(d=>`<li><span class="pill ${d.fase==='riconsegna'?'bad':'end'}">${d.fase==='riconsegna'?'Nuovo':'Presente al ritiro'}</span> <b>${esc(d.tipo)}</b> (${esc(d.gravita)})${d.desc?' – '+esc(d.desc):''}${d.stima?` · stima ${eur(d.stima)}`:''} <button class="slink" data-rmd="${d.id}">elimina</button></li>`).join('')}</ul>`:''}
+      </section>`;}));
+    const nuovi=dn.filter(d=>d.fase==='riconsegna');
+    m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:1100px;width:96vw;max-height:94vh;display:flex;flex-direction:column">
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;justify-content:space-between">
+        <div><h3 style="margin:0">${esc(r.codice)} – ${esc(r.tipo)}</h3><div class="muted">${plate(r.targa)} ${esc(mezzoName(m0))} · ${esc(chi)}${r.contratto?' · contratto '+esc(r.contratto):''}</div></div>
+        <div class="acts" style="margin:0">${r.dataRiconsegna?'':'<button class="btn primary" data-riconsegna>Registra riconsegna</button>'}<button class="btn" data-modifica>Dati</button><button class="btn" data-verbale>Stampa verbale</button><button class="btn" data-x>Chiudi</button></div></div>
+      <div class="cnsbody" style="overflow:auto;margin-top:10px">
+        <div class="calcbox">
+          <div><small>Ritiro</small><b>${fmtD(r.dataConsegna)} ${esc(r.oraConsegna||'')}</b><small>${r.kmConsegna!==''&&r.kmConsegna!=null?numF.format(r.kmConsegna)+' km':'km non indicati'}</small></div>
+          <div><small>Restituzione</small><b>${r.dataRiconsegna?fmtD(r.dataRiconsegna)+' '+esc(r.oraRiconsegna||''):'in corso'}</b><small>${r.kmRiconsegna!==''&&r.kmRiconsegna!=null?numF.format(r.kmRiconsegna)+' km':''}</small></div>
+          <div><small>Giorni${c.chiuso?'':' (finora)'}</small><b>${numF.format(Math.round(c.giorni*10)/10)}</b></div>
+          <div><small>Km percorsi</small><b>${c.perc==null?'–':numF.format(c.perc)}</b></div>
+          <div><small>Km inclusi nel periodo</small><b>${c.incl==null?'nessun limite':numF.format(c.incl)}</b>${r.kmMese?`<small>${numF.format(r.kmMese)} al mese</small>`:''}</div>
+          <div><small>Km eccedenti</small><b class="${c.ecc?'late':''}">${c.ecc==null?'–':numF.format(c.ecc)}</b></div>
+          <div><small>Eccedenza da addebitare</small><b class="${c.importo?'late':''}">${c.importo==null?'–':eur(c.importo)}</b>${r.costoKm?`<small>${eur(r.costoKm)} al km</small>`:''}</div>
+          <div><small>Danni nuovi</small><b class="${nuovi.length?'late':''}">${nuovi.length}</b><small>${nuovi.length?eur(nuovi.reduce((a,d)=>a+(+d.stima||0),0))+' stimati':''}</small></div>
+        </div>
+        ${c.chiuso?'':'<p class="muted" style="font-size:12.5px;margin:6px 0">I km eccedenti si calcolano alla riconsegna: «Registra riconsegna» chiede data, ora e km di restituzione.</p>'}
+        ${lati.join('')}
+      </div></div>`;
+    const nb=m.querySelector('.cnsbody');if(nb)nb.scrollTop=top;
+  };
+  const scegliFile=(fase,lato)=>{
+    const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.multiple=true;inp.setAttribute('capture','environment');
+    inp.onchange=async()=>{const n=await cnsAggiungiFoto(r,fase,lato,[...inp.files]);if(n)toast(`${n} ${n===1?'foto salvata':'foto salvate'}: ${lato}, ${fase}.`);paint();};
+    inp.click();
+  };
+  m.addEventListener('click',async e=>{
+    const t=e.target;
+    if(t===m||t.closest('[data-x]')){m.remove();if(onClose)onClose();return;}
+    let b;
+    if((b=t.closest('[data-add]'))){const [f,l]=b.dataset.add.split('|');scegliFile(f,l);}
+    else if((b=t.closest('[data-pick]'))){const [f,l,i]=b.dataset.pick.split('|');sel[f+'|'+l]=i;paint();}
+    else if((b=t.closest('[data-zoom]'))){cnsZoom(S.all.find(a=>a.id===b.dataset.zoom));}
+    else if((b=t.closest('[data-cmp]'))){const l=b.dataset.cmp;
+      const fc=cnsFoto(r,'consegna',l),fr=cnsFoto(r,'riconsegna',l);
+      const c1=fc.find(x=>x.id===sel['c|'+l])||fc[fc.length-1],r1=fr.find(x=>x.id===sel['r|'+l])||fr[fr.length-1];
+      cnsConfronta(l,c1,r1);}
+    else if((b=t.closest('[data-danno]'))){await cnsDannoDlg(r,b.dataset.danno);paint();}
+    else if((b=t.closest('[data-rmd]'))){const l=cnsDanni(r).filter(d=>d.id!==b.dataset.rmd);r.danni=JSON.stringify(l);markDirty();paint();}
+    else if(t.closest('[data-riconsegna]')){await cnsRiconsegnaDlg(r);paint();renderSide();}
+    else if(t.closest('[data-modifica]')){m.remove();openRecord('cns',r,{onSaved:()=>{cnsScheda(id,onClose);}});}
+    else if(t.closest('[data-verbale]'))cnsVerbale(r);
+  });
+  paint();
+}
+(()=>{const st=document.createElement('style');st.id='cnsStile';st.textContent=`
+ .cns-lato{border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;background:var(--surface)}
+ .cns-lato h4{margin:0 0 8px}
+ .cns-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+ @media (max-width:700px){.cns-cols{grid-template-columns:1fr}}
+ .cns-fase{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+ .cns-big{width:100%;aspect-ratio:4/3;max-height:300px;object-fit:cover;border-radius:10px;cursor:zoom-in;background:var(--surface-2);display:block}
+ .cns-vuoto{aspect-ratio:4/3;border:1px dashed var(--line);border-radius:10px;display:grid;place-items:center;color:var(--muted);font-size:13px}
+ .cns-ths{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+ .cns-th{width:46px;height:46px;border-radius:8px;border:2px solid transparent;padding:0;overflow:hidden;cursor:pointer;background:none}
+ .cns-th.on{border-color:var(--gold)}.cns-th img{width:100%;height:100%;object-fit:cover;display:block}
+ .cns-az{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+ .cns-dl{margin:8px 0 0;padding-left:18px;font-size:13.5px}
+ .cns-cmp{position:relative;width:100%;aspect-ratio:4/3;overflow:hidden;border-radius:10px;background:#000;user-select:none}
+ .cns-cmp img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+ .cns-cmp .sopra{clip-path:inset(0 50% 0 0)}
+ .cns-cmp .linea{position:absolute;top:0;bottom:0;width:2px;background:var(--gold);box-shadow:0 0 10px var(--gold);left:50%}
+ `;document.head.appendChild(st);})();
+function cnsZoom(a){
+  if(!a)return;
+  cnsImgUrl(a).then(u=>{const z=document.createElement('div');z.className='modal';
+    z.innerHTML=`<div class="box" style="max-width:96vw;max-height:94vh;padding:8px;text-align:center"><img src="${u}" style="max-width:100%;max-height:84vh;border-radius:8px" alt=""><div class="acts"><button class="btn" data-x>Chiudi</button></div></div>`;
+    z.addEventListener('click',e=>{if(e.target===z||e.target.closest('[data-x]'))z.remove();});document.body.appendChild(z);});
+}
+async function cnsConfronta(lato,c1,r1){
+  const u1=await cnsImgUrl(c1),u2=await cnsImgUrl(r1);
+  const z=document.createElement('div');z.className='modal';
+  z.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:1100px;width:96vw;max-height:94vh;overflow:auto"><h3>Confronto – ${esc(lato)}</h3>
+    <div class="cns-cols"><div><div class="cns-fase">Consegna</div><img class="cns-big" src="${u1}" alt="Consegna"></div><div><div class="cns-fase">Riconsegna</div><img class="cns-big" src="${u2}" alt="Riconsegna"></div></div>
+    <h4 style="margin:14px 0 6px">Sovrapposizione: trascina per scoprire la differenza</h4>
+    <div class="cns-cmp" id="cmpBox"><img src="${u2}" alt="Riconsegna"><img class="sopra" id="cmpTop" src="${u1}" alt="Consegna"><div class="linea" id="cmpLinea"></div></div>
+    <input type="range" min="0" max="100" value="50" id="cmpR" style="width:100%;margin-top:8px" aria-label="Confronto consegna e riconsegna">
+    <div class="muted" style="font-size:12.5px">A sinistra la consegna, a destra la riconsegna.</div>
+    <div class="acts"><button class="btn" data-x>Chiudi</button></div></div>`;
+  z.addEventListener('input',e=>{if(e.target.id==='cmpR'){const v=e.target.value;z.querySelector('#cmpTop').style.clipPath=`inset(0 ${100-v}% 0 0)`;z.querySelector('#cmpLinea').style.left=v+'%';}});
+  z.addEventListener('click',e=>{if(e.target===z||e.target.closest('[data-x]'))z.remove();});
+  document.body.appendChild(z);
+}
+function cnsDannoDlg(r,lato){
+  return new Promise(res=>{
+    const riconsegnato=!!r.dataRiconsegna;
+    const m=document.createElement('div');m.className='modal';
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:560px"><h3>Registra danno – ${esc(lato)}</h3>
+      <div class="fgrid">
+        <div class="field s3"><label for="dnF">Quando è stato rilevato</label><select class="input" id="dnF"><option value="consegna" ${riconsegnato?'':'selected'}>Già presente al ritiro</option><option value="riconsegna" ${riconsegnato?'selected':''}>Nuovo, alla riconsegna</option></select></div>
+        <div class="field s3"><label for="dnT">Tipo</label><select class="input" id="dnT">${CNS_DANNI.map(x=>`<option>${x}</option>`).join('')}</select></div>
+        <div class="field s3"><label for="dnG">Gravità</label><select class="input" id="dnG">${CNS_GRAV.map(x=>`<option>${x}</option>`).join('')}</select></div>
+        <div class="field s3"><label for="dnS">Stima riparazione (€)</label><input class="input" id="dnS" type="number" step="0.01" min="0"></div>
+        <div class="field s6"><label for="dnD">Descrizione</label><textarea class="input" id="dnD" rows="3" placeholder="Dove e com’è il danno"></textarea></div></div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">Salva danno</button></div></div>`;
+    m.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      if(a&&a.dataset.a==='1'){const l=cnsDanni(r);
+        l.push({id:uid(),fase:m.querySelector('#dnF').value,lato,tipo:m.querySelector('#dnT').value,gravita:m.querySelector('#dnG').value,
+          desc:m.querySelector('#dnD').value.trim(),stima:+m.querySelector('#dnS').value||0,ts:tktAdesso(),u:tktUtente()});
+        r.danni=JSON.stringify(l);markDirty();m.remove();res(true);}
+      else{m.remove();res(false);}});
+    document.body.appendChild(m);m.querySelector('#dnD').focus();});
+}
+function cnsRiconsegnaDlg(r){
+  return new Promise(res=>{
+    const m=document.createElement('div');m.className='modal';
+    const ora=new Date();
+    m.innerHTML=`<div class="box" role="dialog" aria-modal="true" style="max-width:560px"><h3>Riconsegna – ${esc(r.codice)}</h3>
+      <div class="muted">${plate(r.targa)} ritirato il ${fmtD(r.dataConsegna)} ${esc(r.oraConsegna||'')} a ${r.kmConsegna!==''?numF.format(r.kmConsegna):'?'} km</div>
+      <div class="fgrid" style="margin-top:8px">
+        <div class="field s2"><label for="rcD">Data</label><input class="input" type="date" id="rcD" value="${todayISO()}"></div>
+        <div class="field s2"><label for="rcO">Ora</label><input class="input" type="time" id="rcO" value="${tktP2(ora.getHours())}:${tktP2(ora.getMinutes())}"></div>
+        <div class="field s2"><label for="rcK">Km alla restituzione</label><input class="input" type="number" id="rcK" min="0"></div>
+        <div class="field s3"><label for="rcC">Carburante</label><select class="input" id="rcC"><option value="">–</option>${CNS_CARB.map(x=>`<option>${x}</option>`).join('')}</select></div>
+        <div class="field s6"><label for="rcN">Note alla riconsegna</label><textarea class="input" id="rcN" rows="3"></textarea></div></div>
+      <div class="calcbox" id="rcSum" style="margin-top:8px"></div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">Registra riconsegna</button></div></div>`;
+    const agg=()=>{const t={...r,dataRiconsegna:m.querySelector('#rcD').value,oraRiconsegna:m.querySelector('#rcO').value,kmRiconsegna:m.querySelector('#rcK').value};
+      const c=cnsCalc(t);
+      m.querySelector('#rcSum').innerHTML=`<div><small>Giorni</small><b>${numF.format(Math.round(c.giorni*10)/10)}</b></div><div><small>Km percorsi</small><b>${c.perc==null?'–':numF.format(c.perc)}</b></div><div><small>Km inclusi</small><b>${c.incl==null?'nessun limite':numF.format(c.incl)}</b></div><div><small>Eccedenti</small><b class="${c.ecc?'late':''}">${c.ecc==null?'–':numF.format(c.ecc)}</b></div><div><small>Da addebitare</small><b class="${c.importo?'late':''}">${c.importo==null?'–':eur(c.importo)}</b></div>`;};
+    m.addEventListener('input',agg);
+    m.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      if(a&&a.dataset.a==='1'){
+        const d=m.querySelector('#rcD').value,k=m.querySelector('#rcK').value;
+        if(!d||k===''){toast('Servono la data e i km alla restituzione.',true);return;}
+        const t={...r,dataRiconsegna:d,oraRiconsegna:m.querySelector('#rcO').value,kmRiconsegna:+k};
+        const msg=MODS.cns.validate(t);if(msg){toast(msg,true);return;}
+        Object.assign(r,{dataRiconsegna:t.dataRiconsegna,oraRiconsegna:t.oraRiconsegna,kmRiconsegna:t.kmRiconsegna,carbRiconsegna:m.querySelector('#rcC').value,noteRiconsegna:m.querySelector('#rcN').value.trim()});
+        MODS.cns.beforeSave(r,r);cnsSincronizza(r);markDirty();
+        const c=cnsCalc(r);
+        toast(`Riconsegna registrata: ${numF.format(c.perc||0)} km percorsi${c.ecc?`, ${numF.format(c.ecc)} eccedenti = ${eur(c.importo)}`:''}.`);
+        m.remove();res(true);}
+      else{m.remove();res(false);}});
+    document.body.appendChild(m);agg();m.querySelector('#rcK').focus();});
+}
+async function cnsNuova(preset){
+  const p=preset||{};
+  const o=await new Promise(res=>{
+    const m=document.createElement('div');m.className='modal';
+    const ora=new Date();
+    const mezzi=mezziAttivi().slice().sort((a,b)=>a.targa<b.targa?-1:1);
+    m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:720px;max-height:92vh;overflow:auto"><h3>Nuova consegna</h3>
+      <div class="fgrid">
+        <div class="field s3"><label for="nTi">Tipo</label><select class="input" id="nTi">${CNS_TIPI.map(x=>`<option>${x}</option>`).join('')}</select></div>
+        <div class="field s3"><label for="nTa">Targa</label><select class="input" id="nTa"><option value="">–</option>${mezzi.map(x=>`<option value="${esc(x.targa)}" ${x.targa===p.targa?'selected':''}>${esc(x.targa)} ${esc(mezzoName(x))}</option>`).join('')}</select></div>
+        <div class="field s6" id="nCw"><label for="nCo">Contratto di noleggio</label><select class="input" id="nCo"></select></div>
+        <div class="field s6" id="nDw" style="display:none"><label for="nDi">Utilizzatore</label><select class="input" id="nDi"><option value="">–</option>${REF.dip.opts().map(x=>`<option value="${esc(x.v)}">${esc(x.l)}</option>`).join('')}</select></div>
+        <div class="field s2"><label for="nD">Data di ritiro</label><input class="input" type="date" id="nD" value="${todayISO()}"></div>
+        <div class="field s2"><label for="nO">Ora</label><input class="input" type="time" id="nO" value="${tktP2(ora.getHours())}:${tktP2(ora.getMinutes())}"></div>
+        <div class="field s2"><label for="nK">Km al ritiro</label><input class="input" type="number" id="nK" min="0"></div>
+        <div class="field s3"><label for="nC">Carburante</label><select class="input" id="nC"><option value="">–</option>${CNS_CARB.map(x=>`<option>${x}</option>`).join('')}</select></div>
+        <div class="field s3"><label for="nR">Ritirato da</label><input class="input" id="nR" placeholder="Chi firma il ritiro"></div>
+        <div class="field s2"><label for="nKm">Km inclusi al mese</label><input class="input" type="number" id="nKm" min="0"></div>
+        <div class="field s2"><label for="nCk">Costo km extra (€)</label><input class="input" type="number" step="0.01" id="nCk" min="0"></div>
+        <div class="field s6"><label for="nN">Note alla consegna</label><textarea class="input" id="nN" rows="2"></textarea></div></div>
+      <div class="muted" style="font-size:12.5px">Dopo il salvataggio si aprono le foto per lato e i danni già presenti.</div>
+      <div class="acts"><button class="btn" data-a="0">Annulla</button><button class="btn primary" data-a="1">Crea e passa alle foto</button></div></div>`;
+    const q=s=>m.querySelector(s);
+    const contratti=()=>S.rows.filter(r=>r.targa===q('#nTa').value).sort((a,b)=>a.inizio<b.inizio?1:-1);
+    const agg=()=>{
+      const nol=q('#nTi').value===CNS_TIPI[0];q('#nCw').style.display=nol?'':'none';q('#nDw').style.display=nol?'none':'';
+      const l=contratti();const t=todayISO();
+      q('#nCo').innerHTML=`<option value="">– nessuno –</option>`+l.map(r=>`<option value="${esc(r.numero)}" ${(r.inizio<=t&&r.fine>=t)?'selected':''}>${esc(r.numero)} – ${esc(r.locataria||'')} (${fmtD(r.inizio)} → ${fmtD(r.fine)})</option>`).join('');
+      const mz=mezzoBy(q('#nTa').value);if(mz&&mz.km&&!q('#nK').dataset.t)q('#nK').value=mz.km;
+      cont();};
+    const cont=()=>{const r=S.rows.find(x=>x.numero===q('#nCo').value);if(r&&q('#nTi').value===CNS_TIPI[0]){q('#nKm').value=r.kmInclusi===''?'':r.kmInclusi;q('#nCk').value=r.costoKm===''?'':r.costoKm;}};
+    m.addEventListener('change',e=>{if(e.target.id==='nCo')cont();else if(e.target.id==='nTi'||e.target.id==='nTa')agg();});
+    m.addEventListener('input',e=>{if(e.target.id==='nK')e.target.dataset.t='1';});
+    m.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      if(a&&a.dataset.a==='1'){
+        const nol=q('#nTi').value===CNS_TIPI[0],ta=q('#nTa').value;
+        if(!ta||!q('#nD').value||q('#nK').value===''){toast('Servono targa, data e km al ritiro.',true);return;}
+        if(!nol&&!q('#nDi').value){toast('Scegli l’utilizzatore.',true);return;}
+        const co=S.rows.find(x=>x.numero===q('#nCo').value);
+        res({tipo:q('#nTi').value,targa:ta,contratto:nol?q('#nCo').value:'',cliente:nol&&co?co.locataria:'',dipendente:nol?'':q('#nDi').value,
+          dataConsegna:q('#nD').value,oraConsegna:q('#nO').value,kmConsegna:+q('#nK').value,carbConsegna:q('#nC').value,ricevente:q('#nR').value.trim(),
+          noteConsegna:q('#nN').value.trim(),kmMese:nol&&q('#nKm').value!==''?+q('#nKm').value:'',costoKm:nol&&q('#nCk').value!==''?+q('#nCk').value:''});m.remove();}
+      else{m.remove();res(null);}});
+    document.body.appendChild(m);agg();
+  });
+  if(!o)return;
+  const r={id:uid(),codice:nextCode(MODS.cns,o.dataConsegna),dataRiconsegna:'',oraRiconsegna:'',kmRiconsegna:'',carbRiconsegna:'',noteRiconsegna:'',
+    kmPercorsi:'',kmInclusiPeriodo:'',kmEccedenti:'',importoEccedenza:'',stato:'In corso',danni:'[]',...o};
+  S.cns.push(r);cnsSincronizza(r);markDirty();renderSide();
+  toast(`Consegna ${r.codice} creata: ora le foto per ogni lato.`);
+  cnsScheda(r.id,()=>render());
+}
+function cnsVerbale(r){
+  const c=cnsCalc(r),dn=cnsDanni(r),mz=mezzoBy(r.targa)||{};
+  const chi=r.tipo===CNS_TIPI[1]?(REF.dip.label(r.dipendente)||''):(r.cliente||'');
+  const imgs=async fase=>{let h='';for(const lato of CNS_LATI){const l=cnsFoto(r,fase,lato);if(!l.length)continue;h+=`<div class="f"><div>${esc(lato)}</div>${(await Promise.all(l.slice(-2).map(async a=>`<img src="${await cnsImgUrl(a)}">`))).join('')}</div>`;}return h||'<p>Nessuna foto.</p>';};
+  Promise.all([imgs('consegna'),imgs('riconsegna')]).then(([fc,fr])=>{
+    const w=window.open('','_blank');if(!w){toast('Il browser ha bloccato la finestra: consentila per stampare il verbale.',true);return;}
+    w.document.write(`<!doctype html><meta charset="utf-8"><title>Verbale ${esc(r.codice)}</title><style>
+      body{font:13px/1.45 system-ui,sans-serif;margin:24px;color:#111}h1{font-size:20px;margin:0}h2{font-size:15px;margin:18px 0 6px;border-bottom:1px solid #999}
+      table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:4px 8px;text-align:left;font-size:12.5px}
+      .g{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.f img{width:100%;aspect-ratio:4/3;object-fit:cover;margin-top:3px}.f div{font-size:11px;font-weight:700}
+      .firme{display:flex;gap:40px;margin-top:40px}.firme div{flex:1;border-top:1px solid #000;padding-top:4px;font-size:12px}@media print{.no{display:none}}</style>
+      <button class="no" onclick="print()">Stampa / salva PDF</button>
+      <h1>Verbale di consegna e riconsegna ${esc(r.codice)}</h1>
+      <p>${esc(r.tipo)} · targa <b>${esc(r.targa)}</b> ${esc(mezzoName(mz))} · ${esc(chi)}${r.contratto?' · contratto '+esc(r.contratto):''}</p>
+      <h2>Consegna</h2><p>${fmtD(r.dataConsegna)} ${esc(r.oraConsegna||'')} · km <b>${r.kmConsegna!==''?numF.format(r.kmConsegna):'–'}</b> · carburante ${esc(r.carbConsegna||'–')} · ritirato da ${esc(r.ricevente||'–')}<br>${esc(r.noteConsegna||'')}</p>
+      <h2>Riconsegna</h2><p>${r.dataRiconsegna?`${fmtD(r.dataRiconsegna)} ${esc(r.oraRiconsegna||'')} · km <b>${numF.format(r.kmRiconsegna)}</b> · carburante ${esc(r.carbRiconsegna||'–')}<br>${esc(r.noteRiconsegna||'')}`:'Non ancora riconsegnato.'}</p>
+      <h2>Chilometri</h2><table><tr><th>Giorni</th><th>Km percorsi</th><th>Km inclusi nel periodo</th><th>Km eccedenti</th><th>€/km</th><th>Eccedenza</th></tr>
+      <tr><td>${numF.format(Math.round(c.giorni*10)/10)}</td><td>${c.perc==null?'–':numF.format(c.perc)}</td><td>${c.incl==null?'nessun limite':numF.format(c.incl)}</td><td>${c.ecc==null?'–':numF.format(c.ecc)}</td><td>${r.costoKm?eur(r.costoKm):'–'}</td><td><b>${c.importo==null?'–':eur(c.importo)}</b></td></tr></table>
+      <h2>Danni</h2>${dn.length?`<table><tr><th>Lato</th><th>Quando</th><th>Tipo</th><th>Gravità</th><th>Descrizione</th><th>Stima</th></tr>${dn.map(d=>`<tr><td>${esc(d.lato)}</td><td>${d.fase==='riconsegna'?'NUOVO alla riconsegna':'Presente al ritiro'}</td><td>${esc(d.tipo)}</td><td>${esc(d.gravita)}</td><td>${esc(d.desc||'')}</td><td>${d.stima?eur(d.stima):''}</td></tr>`).join('')}</table>`:'<p>Nessun danno registrato.</p>'}
+      <h2>Foto alla consegna</h2><div class="g">${fc}</div><h2>Foto alla riconsegna</h2><div class="g">${fr}</div>
+      <div class="firme"><div>Firma di chi consegna</div><div>Firma di chi ritira</div></div>`);
+    w.document.close();});
+}
+
+/* ---------- elenco ---------- */
+function renderConsegne(){
+  genericList('cns',{title:'Consegne e riconsegne',sub:'Verbale di consegna e riconsegna con foto per lato, confronto, danni e calcolo dei km in eccesso, per noleggi ai clienti e mezzi affidati agli utilizzatori.',
+    searchPh:'Codice, targa, cliente, contratto',search:['codice','targa','cliente','contratto','ricevente'],
+    buttons:[{l:'Nuova consegna',primary:true,fn:()=>cnsNuova()}],noImport:true,
+    filters:[{k:'tipo',label:'Tipo',opts:()=>CNS_TIPI,all:'Tutti'},{k:'stato',label:'Stato',opts:()=>['In corso','Restituito'],all:'Tutti'}],
+    ledger:l=>{const ap=l.filter(r=>!r.dataRiconsegna);const ec=l.map(r=>cnsCalc(r)).filter(c=>c.chiuso&&c.ecc);
+      const nn=l.reduce((a,r)=>a+cnsDanni(r).filter(d=>d.fase==='riconsegna').length,0);
+      return `<div><b>${ap.length}</b><small>mezzi fuori</small></div><div><b>${l.length-ap.length}</b><small>riconsegnati</small></div><div><b>${nn}</b><small>danni nuovi registrati</small></div><div><b>${eur(ec.reduce((a,c)=>a+(c.importo||0),0))}</b><small>eccedenze km da addebitare</small></div>`;},
+    sort:(a,b)=>a.dataConsegna<b.dataConsegna?1:-1,
+    cols:[{l:'Verbale',v:r=>`<b>${esc(r.codice)}</b><span class="sub">${esc(r.tipo)}</span>`},{l:'Targa',v:r=>plate(r.targa)},
+      {l:'A chi',v:r=>esc(r.tipo===CNS_TIPI[1]?(REF.dip.label(r.dipendente)||''):(r.cliente||''))+(r.contratto?`<span class="sub">${esc(r.contratto)}</span>`:'')},
+      {l:'Ritiro',v:r=>`${fmtD(r.dataConsegna)}<span class="sub">${r.kmConsegna!==''?numF.format(r.kmConsegna)+' km':''}</span>`},
+      {l:'Restituzione',v:r=>r.dataRiconsegna?`${fmtD(r.dataRiconsegna)}<span class="sub">${r.kmRiconsegna!==''?numF.format(r.kmRiconsegna)+' km':''}</span>`:'<span class="muted">in corso</span>'},
+      {l:'Km percorsi',cls:'num',v:r=>{const c=cnsCalc(r);return c.perc==null?'–':numF.format(c.perc);}},
+      {l:'Eccedenza',cls:'num',v:r=>{const c=cnsCalc(r);return c.chiuso&&c.ecc?`<span class="late">${numF.format(c.ecc)} km</span><span class="sub">${eur(c.importo)}</span>`:'–';}},
+      {l:'Foto e danni',v:r=>{const n=attachFor('cns',r.codice).length,d=cnsDanni(r).filter(x=>x.fase==='riconsegna').length;return `${n} foto${d?`<span class="sub late">${d} danni nuovi</span>`:''}`;}},
+      {l:'Stato',v:r=>pillS(r.dataRiconsegna?'Restituito':'In corso',r.dataRiconsegna?'end':'rent')}],
+    rowActions:[{l:'Foto e danni',fn:r=>cnsScheda(r.id,()=>render())},
+      {l:'Riconsegna',show:r=>!r.dataRiconsegna,fn:async r=>{if(await cnsRiconsegnaDlg(r)){renderSide();cnsScheda(r.id,()=>render());}}},
+      {l:'Verbale',fn:r=>cnsVerbale(r)}]});
+}
+VIEWS.consegne=()=>renderConsegne();
+/* dalla riga del contratto e del mezzo */
+(()=>{
+  if(!AREE.some(a=>a.k==='cns')){AREE.push({k:'cns',l:'Consegne e riconsegne dei mezzi',tabs:['consegne'],store:['cns']});
+    AREA_DI_TAB.consegne='cns';(AREE_DI_STORE.cns=AREE_DI_STORE.cns||[]).includes('cns')||AREE_DI_STORE.cns.push('cns');}
+  const g=MENU.find(x=>x.g==='Amministrazione')||MENU[MENU.length-1];
+  if(!MENU.some(x=>x.items.some(([k])=>k==='consegne')))g.items.push(['consegne','Consegne e riconsegne']);
+  const R=RUOLI.officina;if(R&&R.tabs&&!R.tabs.includes('consegne'))R.tabs.push('consegne');
+  if(R&&R.scrivi&&!R.scrivi.includes('cns'))R.scrivi.push('cns');
+})();
+
 const MENU_LAYOUT=[
  {g:'Panoramica',c:'#2563eb',k:['cruscotto','calendario','grafici']},
  {g:'Noleggio ai clienti',c:'#0f9d8f',k:['contratti','stampa','fatturazione','amazon']},
- {g:'Flotta',c:'#4f46e5',k:['mezzi','gio','cp','archivio','dot']},
- {g:'Officina e sinistri',c:'#ea580c',k:['man','sin','vrb','rinotifiche','mp']},
+ {g:'Flotta',c:'#4f46e5',k:['mezzi','consegne','gio','cp','archivio','dot']},
+ {g:'Officina e sinistri',c:'#ea580c',k:['man','sin','ticket','vrb','rinotifiche','mp']},
  {g:'Carte e conformità',c:'#16a34a',k:['disp','tachigrafo']},
  {g:'Anagrafiche',c:'#7c3aed',k:['soc','cdc','dip','capfin','anag']},
  {g:'Contabilità',c:'#d97706',k:['fp','fa','pn','bk','ns','margini']},
