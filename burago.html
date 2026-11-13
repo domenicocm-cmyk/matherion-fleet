@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.46';
+const APP_VERSION='2026.10.49';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -4085,7 +4085,7 @@ function openBulkEdit(modKey,list,onDone){
   document.body.append(sc,d);sc.onclick=close;paint();
 }
 async function deleteRecord(key,r){
-  const m=MODS[key];const name=r.codice||r[m.key]||'record';
+  const m=MODS[key];const name=m.etichetta?m.etichetta(r):(r.codice||r[m.key]||'record');
   if(m.canDelete){const no=m.canDelete(r);if(no){toast(no,true);return false;}}
   const att=m.attach?attachFor(key,recRef(key,r)):[];
   if(!await confirmBox('Eliminare il record?',`${esc(name)} verrà eliminato${att.length?` insieme a ${att.length} allegati`:''}.`,'Elimina',true))return false;
@@ -4386,7 +4386,7 @@ function resolveRef(f,val){
   }
 }
 const NATKEY={mezzi:r=>r.targa,soc:r=>r.piva||r.ragione.toLowerCase(),dip:r=>r.cf||r.matricola||dipName(r).toLowerCase(),cp:r=>r.numero,disp:r=>normTarga(r.numero),
-  vrb:r=>r.numeroVerbale,mov:r=>[r.dispositivo,r.data,r.ora,r.importo].join('|'),ass:r=>[r.targa,r.dipendente,r.dal].join('|')};
+  vrb:r=>vrbNorm(r.numeroVerbale),mov:r=>[r.dispositivo,r.data,r.ora,r.importo].join('|'),ass:r=>[r.targa,r.dipendente,r.dal].join('|')};
 async function importTemplate(m){
   const wb=new ExcelJS.Workbook();writeMod(wb,m,[]);
   const buf=await wb.xlsx.writeBuffer();
@@ -6126,7 +6126,7 @@ function renderVrb(){
     ledger:l=>`<div><b>${l.length}</b><small>verbali</small></div><div><b>${l.filter(r=>r.stato==='Da rinotificare').length}</b><small>da rinotificare</small></div>
       <div><b>${l.filter(r=>r.stato==='Da contestare al dipendente').length}</b><small>da contestare ai dipendenti</small></div><div><b>${eur(l.filter(r=>['Ricevuto','Da pagare'].includes(r.stato)).reduce((a,r)=>a+(+r.importo||0),0))}</b><small>importi da pagare</small></div>`,
     sort:(a,b)=>(a.dataNotifica<b.dataNotifica?1:-1),
-    cols:[{l:'Verbale',v:r=>`<b>${esc(r.numeroVerbale)}</b><span class="sub">${esc(r.ente)}</span>`},{l:'Protocollo',v:r=>r.protocollo?`${esc(r.protocolloUscita&&vrbNRin(r)>1?r.protocolloUscita:r.protocollo)}${vrbNRin(r)?`<span class="sub">rinotificato ${vrbNRin(r)} ${vrbNRin(r)===1?'volta':'volte'}</span>`:''}`:'<span class="muted">da assegnare</span>'},{l:'Targa',v:r=>plate(r.targa)},
+    cols:[{l:'Verbale',v:r=>`<b>${esc(r.numeroVerbale)}</b><span class="sub">${esc(r.ente)}</span>`},{l:'Protocollo',v:r=>r.protocollo?`${esc(r.protocollo)}${vrbNRin(r)&&r.protocolloUscita?`<span class="sub">rinotifica: ${esc(r.protocolloUscita)}</span>`:''}`:'<span class="muted">da assegnare</span>'},{l:'Targa',v:r=>plate(r.targa)},
       {l:'Violazione',v:r=>`${fmtD(r.dataInfrazione)} ${esc(r.ora||'')}<span class="sub">${esc([r.articolo,r.luogo].filter(Boolean).join(' – '))}</span>`},
       {l:'Termine 60 gg',v:r=>['Pagato','Annullato','Chiuso'].includes(r.stato)?'<span class="muted">–</span>':dueCell(r.dataNotifica?addDays(r.dataNotifica,60):'',15)},
       {l:'Importo',cls:'num',v:r=>`${eur(r.importo)}<span class="sub">${r.importoRidotto!==''?'ridotto '+eur(r.importoRidotto):''}</span>`},
@@ -6160,8 +6160,14 @@ function renderRinot(){
       <div><b>${l.filter(r=>r.stato==='Rinotificato').length}</b><small>già rinotificati</small></div>
       <div><b class="${l.filter(r=>!rinotCheck(r).ok).length?'late':''}">${l.filter(r=>!rinotCheck(r).ok).length}</b><small>con documenti da integrare</small></div>
       <div><b>${S.vrb.filter(r=>r.tipoResponsabile==='Da verificare').length}</b><small>verbali senza responsabile</small></div>`,
-    sort:(a,b)=>(a.stato==='Da rinotificare'?0:1)-(b.stato==='Da rinotificare'?0:1)||(a.dataNotifica<b.dataNotifica?-1:1),
-    cols:[{l:'Verbale',v:r=>`<b>${esc(r.numeroVerbale)}</b><span class="sub">${esc(r.ente)}</span>`},{l:'Targa',v:r=>plate(r.targa)},
+    sort:(a,b)=>{const k=r=>r.stato==='Da rinotificare'?0:(r.rinotificaTs||r.rinotificaData)?1:2;
+      if(k(a)!==k(b))return k(a)-k(b);
+      if(k(a)===0)return String(a.protocollo||'~')<String(b.protocollo||'~')?-1:String(a.protocollo||'~')>String(b.protocollo||'~')?1:((a.dataNotifica||'')<(b.dataNotifica||'')?-1:1);
+      return String(b.rinotificaTs||b.rinotificaData||'')<String(a.rinotificaTs||a.rinotificaData||'')?-1:1;},
+    cols:[{l:'Protocollo rinotifica',v:r=>{const ts=r.rinotificaTs||r.rinotificaData;const gen=ts?`<span class="sub">generata ${fmtD(ts.slice(0,10))}${r.rinotificaTs?' '+new Date(r.rinotificaTs).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):''}</span>`:'';
+      if(!r.protocollo)return '<span class="muted">da assegnare</span>';
+      return vrbNRin(r)&&r.protocolloUscita?`<b>${esc(r.protocolloUscita)}</b><span class="sub">verbale ${esc(r.protocollo)}</span>${gen}`:`<b>${esc(r.protocollo)}</b><span class="sub">non ancora rinotificato</span>`;}},
+      {l:'Verbale',v:r=>`<b>${esc(r.numeroVerbale)}</b><span class="sub">${esc(r.ente)}</span>`},{l:'Targa',v:r=>plate(r.targa)},
       {l:'Cliente',v:r=>r.cliente?`${esc(r.cliente)}<span class="sub">${esc(r.noleggio||'')}</span>`:'<span class="muted">da collegare</span>'},
       {l:'Termine comunicazione',v:r=>r.enteComunicazioneData?`inviata ${fmtD(r.enteComunicazioneData)}`:dueCell(r.dataNotifica?addDays(r.dataNotifica,60):'',15)},
       {l:'Documenti cliente',v:r=>{const c=rinotCheck(r);return c.ok?'<span class="pill run">Completi</span>':`<span class="pill bad">Da integrare</span><span class="sub">${esc(c.issues.join('; '))}</span>`;}},
@@ -6213,9 +6219,9 @@ async function openRinotifica(list){
   };
   d.innerHTML=`<header><h2>${single?'Rinotifica verbale '+esc(v0.numeroVerbale):`Rinotifica di ${list.length} verbali`}</h2><button class="btn ghost" data-x>Chiudi</button></header>
   <div class="body">
-    ${list.map(v=>{const c=rinotCheck(v);const row=S.rows.find(r=>r.numero===v.noleggio);return `<fieldset><legend>${esc(v.numeroVerbale)} – ${esc(v.targa)} – ${esc(v.cliente)}</legend>
+    ${list.map((v,ix)=>{const c=rinotCheck(v);const row=S.rows.find(r=>r.numero===v.noleggio);return `<fieldset><legend>${esc(v.numeroVerbale)} – ${esc(v.targa)} – ${esc(v.cliente)}</legend>
       <div class="calcbox"><div><small>Violazione</small><b>${fmtD(v.dataInfrazione)} ${esc(v.ora||'')}</b></div><div><small>Contratto di noleggio</small><b>${row?esc(row.numero+' ('+fmtD(row.inizio)+' – '+fmtD(row.fine)+')'):'non trovato'}</b></div>
-      <div><small>Ente</small><b>${esc(v.ente)}</b></div><div><small>Protocollo</small><b>${esc(vrbProtRinotifica(v))}</b><small>${vrbNRin(v)?'rinotifica n. '+(vrbNRin(v)+1):'prima notifica'}</small></div><div><small>Controlli</small><b class="${c.ok?'':'late'}">${c.ok?'documentazione completa':esc(c.issues.join('; '))}</b></div></div>
+      <div><small>Ente</small><b>${esc(v.ente)}</b></div><div><small>Protocollo di rinotifica</small><b>${esc(vrbProtRinotifica(v,ix))}</b><small>${vrbNRin(v)?'rinotifica n. '+(vrbNRin(v)+1):'prima notifica'}</small></div><div><small>Controlli</small><b class="${c.ok?'':'late'}">${c.ok?'documentazione completa':esc(c.issues.join('; '))}</b></div></div>
       <div class="flabel" style="margin:10px 0 4px">Allegati da includere</div><div class="checks" style="max-height:none">${attRows(v)}</div>
       ${row?`<label class="check"><input type="checkbox" data-gencontr="${v.id}" checked><span>Includi copia del contratto di noleggio generata dal gestionale</span></label>`:''}
       <div style="margin-top:6px"><button class="btn ghost" type="button" data-upv="${v.id}">Allega la scansione del verbale</button><button class="btn ghost" type="button" data-ups="${v.id}">Carica documenti del cliente</button></div>
@@ -6238,8 +6244,8 @@ async function openRinotifica(list){
   d.querySelectorAll('[data-ups]').forEach(b=>b.onclick=async()=>{const v=S.vrb.find(x=>x.id===b.dataset.ups);const s=socBy(v.cliente);if(!s)return toast('Cliente non in anagrafica.',true);
     const tipo=await chooseBox('Tipo di documento','Che documento stai caricando?',['Visura camerale','Documento identità amministratore','Codice fiscale amministratore','Altro'].map(x=>({label:x,value:x})));if(tipo)upload('soc',s.codice,tipo);});
   const mailBody=v=>`Oggetto: verbale n. ${v.numeroVerbale} – veicolo ${v.targa}\n\nIn allegato la documentazione relativa al verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale)} (violazione del ${fmtD(v.dataInfrazione)}).\n\nCordiali saluti\n${firmatario()}\n${titolareDefault()?.ragione||''}`;
-  const mc=d.querySelector('[data-mc]');if(mc)mc.onclick=()=>mailto(socBy(v0.cliente)?.pec,`Prot. ${vrbProtRinotifica(v0)} – Verbale n. ${v0.numeroVerbale} – veicolo ${v0.targa} – comunicazione al locatario`,mailBody(v0));
-  const me=d.querySelector('[data-me]');if(me)me.onclick=()=>mailto(v0.entePec,`Prot. ${vrbProtRinotifica(v0)} – Verbale n. ${v0.numeroVerbale} – targa ${v0.targa} – comunicazione dati del locatario (art. 196 CdS)`,mailBody(v0));
+  const mc=d.querySelector('[data-mc]');if(mc)mc.onclick=()=>vrbMailAllegati(d,v0,'cli',mailBody(v0));
+  const me=d.querySelector('[data-me]');if(me)me.onclick=()=>vrbMailAllegati(d,v0,'ente',mailBody(v0));
   d.querySelector('[data-go]').onclick=async()=>{
     busy(true,'Preparazione dei pacchetti di rinotifica');
     try{
@@ -6265,7 +6271,7 @@ async function openRinotifica(list){
         const sub=`Rinotifiche/${safe(v.codice)}_${safe(v.numeroVerbale)}`;
         if(zipAll){for(const f of files)zipAll.file(`${safe(v.codice)}/${f.name}`,f.data instanceof Blob?new Uint8Array(await f.data.arrayBuffer()):f.data);}
         else await saveInFolder(sub,files);
-        Object.assign(v,{stato:'Rinotificato',rinotificaData:dt,rinotificaMezzo:mezzo,protocollo:protBase,protocolloUscita:prot,nRinotifiche:vrbNRin(v)+1,storicoProtocolli:(v.storicoProtocolli?v.storicoProtocolli+'\n':'')+`${fmtD(dt)} – ${prot} (${mezzo})`,speseGestione:spese===''?v.speseGestione:+spese});
+        Object.assign(v,{stato:'Rinotificato',rinotificaData:dt,rinotificaMezzo:mezzo,protocollo:protBase,protocolloUscita:prot,nRinotifiche:vrbNRin(v)+1,rinotificaTs:new Date().toISOString(),storicoProtocolli:(v.storicoProtocolli?v.storicoProtocolli+'\n':'')+`${fmtD(dt)} – ${prot} (${mezzo})`,speseGestione:spese===''?v.speseGestione:+spese});
         if(l2)v.enteComunicazioneData=dt;
       }
       if(zipAll)await saveFile(`Rinotifiche_${stampNow()}.zip`,zipAll.generate({type:'blob',compression:'DEFLATE'}));
@@ -21025,7 +21031,8 @@ function cnsChiusuraDlg(r,onDone){
    R2-PROT-2026-0001 e così via. Lo storico resta sul verbale.
    ===================================================================== */
 [['prefissoProt',65,'Protocollo verbali: prefisso','PROT-'],
- ['prefissoRinot',66,'Protocollo verbali: prefisso di rinotifica (seguito dal numero d’ordine)','R']]
+ ['prefissoRN',66,'Protocollo rinotifiche: prefisso (RN001-PROT-…)','RN'],
+ ['rinotNumerazione',67,'Protocollo rinotifiche: numerazione (Progressivo generale / Per verbale)','Progressivo generale']]
   .forEach(p=>{if(!PARAMS_EXTRA.some(x=>x[0]===p[0]))PARAMS_EXTRA.push(p);});
 {
   const g=MODS.vrb.groups[MODS.vrb.groups.length-1].f;
@@ -21033,7 +21040,7 @@ function cnsChiusuraDlg(r,onDone){
   if(!g.some(x=>x.k==='nRinotifiche')){
     const i=g.findIndex(x=>x.k==='protocollo');
     g.splice(i+1,0,fd('protocolloUscita','Ultimo protocollo di rinotifica','text',{span:'s3',hint:'Quello riportato sui documenti inviati'}),
-      fd('nRinotifiche','Rinotifiche inviate','int',{span:'s2'}),fd('storicoProtocolli','Storico protocolli','area',{span:'s6'}));
+      fd('nRinotifiche','Rinotifiche inviate','int',{span:'s2'}),fd('rinotificaTs','Rinotifica generata il','text',{span:'s3',hint:'Data e ora di generazione dell’ultimo pacchetto'}),fd('storicoProtocolli','Storico protocolli','area',{span:'s6'}));
     ammCampi(MODS.vrb);
   }
 }
@@ -21047,13 +21054,104 @@ function vrbAssegnaProt(v){
   return v.protocollo;
 }
 const vrbNRin=v=>Math.max(+v.nRinotifiche||0,(v.rinotificaData||v.stato==='Rinotificato')?1:0);
-/* protocollo con cui esce la prossima notifica: base la prima volta, prefisso con ordine le volte successive */
-function vrbProtRinotifica(v){
-  const base=v.protocollo&&!/^RIN-/.test(v.protocollo)?v.protocollo:vrbNextProt(v.dataNotifica||todayISO());
-  const n=vrbNRin(v);
-  return n===0?base:`${S.par.prefissoRinot||'R'}${n}-${base}`;
+/* protocollo di rinotifica: RN001-PROT-2026-1108. Il numero RN è il progressivo dei pacchetti generati
+   (o, in alternativa nei Parametri, l'ordine di rinotifica del singolo verbale). Il prefisso c'è solo sui verbali rinotificati. */
+const vrbRnPre=()=>S.par.prefissoRN||'RN';
+function vrbRnMax(){
+  const re=new RegExp('(?:^|\\s|\\()'+vrbRnPre().replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\d+)-','g');let max=0;
+  for(const r of S.vrb){const t=[r.protocolloUscita,r.storicoProtocolli].filter(Boolean).join(' ');let m;while((m=re.exec(t)))max=Math.max(max,+m[1]);}
+  return max;
 }
+function vrbProtRinotifica(v,offset=0){
+  const base=v.protocollo&&!/^RIN-/.test(v.protocollo)?v.protocollo:vrbNextProt(v.dataNotifica||todayISO());
+  const perVerbale=String(S.par.rinotNumerazione||'').toLowerCase().startsWith('per');
+  const n=perVerbale?vrbNRin(v)+1:vrbRnMax()+1+offset;
+  return `${vrbRnPre()}${String(n).padStart(3,'0')}-${base}`;
+}
+/* chiave anti-doppione: numero del verbale normalizzato */
+const vrbNorm=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9\/]/g,'');
+function vrbDoppione(x,rec){
+  const n=vrbNorm(x.numeroVerbale);if(!n)return null;
+  const en=vrbNorm(x.ente),tg=normTarga(x.targa||'');
+  return S.vrb.find(r=>r!==rec&&(!rec||r.id!==rec.id)&&vrbNorm(r.numeroVerbale)===n&&(!en||!vrbNorm(r.ente)||vrbNorm(r.ente)===en||normTarga(r.targa||'')===tg))||null;
+}
+MODS.vrb.validate=(x,errs,rec)=>{
+  const d=vrbDoppione(x,rec);
+  if(d)errs.numeroVerbale=`Verbale già presente (${d.codice}${d.protocollo?', protocollo '+d.protocollo:''}${d.targa?', '+d.targa:''}): non si può inserire due volte.`;
+};
+MODS.vrb.etichetta=r=>`Verbale n. ${r.numeroVerbale||'?'}${r.protocollo?' – protocollo '+r.protocollo:''}${r.targa?' – '+r.targa:''}${r.codice?' ('+r.codice+')':''}`;
 MODS.vrb.beforeSave=(x,rec)=>{if(!x.protocollo&&!(rec&&rec.protocollo))x.protocollo=vrbNextProt(x.dataNotifica||x.dataVerbale||todayISO());};
+
+/* =====================================================================
+   EMAIL CON ALLEGATI DALLA RINOTIFICA (2026.10.47)
+   Dai pulsanti «Email PEC al cliente» e «Email PEC all'ente» il messaggio
+   parte con la lettera e tutti gli allegati spuntati.
+   ===================================================================== */
+function mailAllegatiDlg(o){
+  const all=o.files.map(f=>({...f,sel:true}));
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:760px;max-height:94vh;overflow:auto"><h3>${esc(o.titolo||'Invia email con allegati')}</h3>
+    <div class="fgrid">
+      <div class="field s3"><label for="maT">A</label><input class="input" id="maT" value="${esc(o.to||'')}" placeholder="indirizzo email o PEC"></div>
+      <div class="field s3"><label for="maC">Cc</label><input class="input" id="maC" value=""></div>
+      <div class="field s6"><label for="maS">Oggetto</label><input class="input" id="maS" value="${esc(o.subject||'')}"></div>
+      <div class="field s6"><label for="maB">Testo</label><textarea class="input" id="maB" rows="7">${esc(o.body||'')}</textarea></div></div>
+    <h4 style="margin:8px 0 4px">Allegati <span class="muted" id="maTot"></span></h4>
+    <div>${all.map((a,i)=>`<label class="radio" style="margin:2px 0"><input type="checkbox" data-i="${i}" checked><span>${esc(a.name)}<small>${esc(a.tipo||'')} · ${numF.format(Math.max(1,Math.round(a.blob.size/1024)))} KB</small></span></label>`).join('')}</div>
+    <div class="alert" style="margin:10px 0;font-size:13px"><b>Come si allega.</b> «Crea bozza con allegati» scarica un messaggio già pronto (.eml): con un doppio clic si apre in Outlook o Mail con tutti gli allegati, e lo invii dalla tua PEC. I siti di posta (Outlook sul web, Gmail) non accettano allegati da un link: con quei pulsanti si apre il messaggio scritto e si scarica uno ZIP da trascinare dentro.</div>
+    <div class="acts" style="flex-wrap:wrap"><button class="btn" data-a="0">Annulla</button>
+      <button class="btn" data-a="web:outlook">Outlook sul web + allegati</button><button class="btn" data-a="web:gmail">Gmail + allegati</button>
+      ${navigator.canShare?'<button class="btn" data-a="share">Condividi…</button>':''}
+      <button class="btn primary" data-a="eml">Crea bozza con allegati (.eml)</button></div></div>`;
+  const agg=()=>{const t=all.filter(a=>a.sel).reduce((s,a)=>s+a.blob.size,0);m.querySelector('#maTot').textContent=`– ${numF.format(Math.round(t/1024/102.4)/10)} MB${t>20*1024*1024?' (oltre 20 MB: alcune PEC lo rifiutano)':''}`;};
+  m.addEventListener('change',e=>{if(e.target.dataset&&e.target.dataset.i!=null){all[+e.target.dataset.i].sel=e.target.checked;agg();}});
+  m.addEventListener('click',async e=>{
+    const b=e.target.closest('[data-a]');if(!b&&e.target!==m)return;
+    if(!b||b.dataset.a==='0'){m.remove();return;}
+    const to=m.querySelector('#maT').value.trim(),cc=m.querySelector('#maC').value.trim(),su=m.querySelector('#maS').value,bo=m.querySelector('#maB').value,a=b.dataset.a,files=all.filter(x=>x.sel);
+    if(a==='eml'){
+      if(!to){m.querySelector('#maT').focus();toast('Scrivi l’indirizzo del destinatario.',true);return;}
+      await saveFile(`Bozza_${safe(o.nomeFile||'email')}.eml`,await adnEml(to,cc,su,bo,files));
+      toast('Bozza scaricata: aprila (doppio clic) per vederla nel programma di posta con gli allegati.');m.remove();
+    }else if(a.startsWith('web:')){
+      const z=new PizZip();for(const f of files)z.file(adnAscii(f.name),new Uint8Array(await f.blob.arrayBuffer()));
+      await saveFile(`Allegati_${safe(o.nomeFile||'email')}.zip`,z.generate({type:'blob',compression:'DEFLATE'}));
+      avApriMail(a.slice(4),to,su,bo);toast('Messaggio aperto e allegati scaricati: trascina i file dalla cartella scaricata nel messaggio.');m.remove();
+    }else if(a==='share'){
+      try{const fl=files.map(f=>new File([f.blob],adnAscii(f.name),{type:adnMime(f.name)}));
+        if(navigator.canShare&&navigator.canShare({files:fl})){await navigator.share({files:fl,title:su,text:bo});m.remove();}
+        else toast('Questo browser non può condividere i file: usa la bozza .eml.',true);}catch(err){if(err&&err.name!=='AbortError')toast('Condivisione non riuscita: usa la bozza .eml.',true);}
+    }
+  });
+  document.body.appendChild(m);agg();
+}
+/* prepara lettera + allegati spuntati nel pannello di rinotifica e apre la finestra di invio */
+async function vrbMailAllegati(d,v,dest,body){
+  busy(true,'Preparazione degli allegati');
+  try{
+    const row=S.rows.find(r=>r.numero===v.noleggio)||rentalOn(v.targa,v.dataInfrazione);
+    const cli=socBy(v.cliente)||{};const m=mezzoBy(v.targa)||{};const t=titData(row?.noleggiante);
+    const ids=[...d.querySelectorAll(`[data-att][data-v="${v.id}"]:checked`)].map(x=>x.dataset.att);
+    const atts=S.all.filter(a=>ids.includes(a.id));
+    const genC=d.querySelector(`[data-gencontr="${v.id}"]`)?.checked&&row;
+    const prot=vrbProtRinotifica(v);
+    const spese=d.querySelector('[data-spese]')?.value;
+    const base=docBlank({...t,...verbaleData(v,m),luogo_data:luogoData(t),cli_ragione:cli.ragione||v.cliente,cli_sede:addr(cli),cli_pec:cli.pec,cli_piva:cli.piva,cli_cf:cli.cf||cli.piva,
+      cli_rappresentante:cli.rappresentante,contratto_numero:row?.numero,contratto_dal:fmtD(row?.inizio),contratto_al:fmtD(row?.fine),spese_gestione:eur(+spese||0),protocollo:prot,firmatario:firmatario()});
+    base.allegati=[...atts.map(a=>({nome:`${a.tipo} (${a.file})`})),...(genC?[{nome:`Contratto di locazione n. ${row.numero}`}]:[])];
+    const files=[];
+    if(dest==='cli'){const f=await renderDocs('Rinotifica_Lettera_Cliente',[base],{file:`1_Lettera_cliente_${safe(v.numeroVerbale)}.docx`});files.push({name:f.name,blob:f.blob,tipo:'Lettera al cliente'});}
+    else{const f=await renderDocs('Comunicazione_Ente_Locatario',[base],{file:`2_Comunicazione_ente_${safe(v.numeroVerbale)}.docx`});files.push({name:f.name,blob:f.blob,tipo:'Comunicazione all’ente'});}
+    if(genC){const z=renderDocx(await tplDa('singolo'),{contratti:[{...contractData(row,true)}],...contractData(row,true)});files.push({name:`3_Contratto_${safe(row.numero)}.docx`,blob:z.generate({type:'blob',mimeType:DOCX_MIME}),tipo:'Contratto di noleggio'});}
+    let k=4;for(const a of atts){try{files.push({name:`${k++}_${safe(a.tipo)}_${safe(a.file)}`,blob:await getBlob(a),tipo:a.tipo});}catch(e){toast(`${a.file}: ${e.message}`,true);}}
+    busy(false);
+    mailAllegatiDlg({titolo:dest==='cli'?`Email al cliente – verbale ${v.numeroVerbale}`:`Email all’ente – verbale ${v.numeroVerbale}`,
+      to:dest==='cli'?(cli.pec||cli.email||''):(v.entePec||''),
+      subject:dest==='cli'?`Prot. ${prot} – Verbale n. ${v.numeroVerbale} – veicolo ${v.targa} – comunicazione al locatario`:`Prot. ${prot} – Verbale n. ${v.numeroVerbale} – targa ${v.targa} – comunicazione dati del locatario (art. 196 CdS)`,
+      body:body.replace(/^Oggetto:[^\n]*\n\n/,`Protocollo ${prot}\n\n`),files,nomeFile:`${v.codice}_${dest}`});
+  }catch(e){busy(false);toast('Email non preparata: '+e.message,true);}
+  finally{busy(false);}
+}
 
 const MENU_LAYOUT=[
  {g:'Panoramica',c:'#2563eb',k:['cruscotto','calendario','grafici']},
