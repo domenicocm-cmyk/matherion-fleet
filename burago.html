@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.52';
+const APP_VERSION='2026.10.53';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -6344,7 +6344,7 @@ function renderDisp(){
     selActions:[{l:'Assegna centro di costo…',fn:l=>cdcMassAssegna(l,'disp')}],
     rowActions:[{l:'Blocca',show:r=>r.stato==='Attivo',fn:async r=>{if(await confirmBox('Segnare come bloccato?',`${esc(r.tipo)} ${esc(r.numero)}: ricordati di richiedere il blocco anche al fornitore.`,'Segna bloccato',true)){r.stato='Bloccato';markDirty();renderDisp();}}}],
   });
-  else if(tab==='m')genericList('mov',{title,tabsHtml:tabs,newLabel:'Nuovo movimento',searchPh:'Numero carta o Telepass, targa, casello, cliente',buttons:[{l:'Assegna i centri di costo mancanti',fn:movCdcCompleta}],
+  else if(tab==='m')genericList('mov',{title,tabsHtml:tabs,newLabel:'Nuovo movimento',searchPh:'Numero carta o Telepass, targa, casello, cliente',buttons:[{l:'Nuova fattura carburante',fn:movNuovaFattura},{l:'Assegna i centri di costo mancanti',fn:movCdcCompleta}],
     sub:'Importa gli estratti conto (CSV o Excel) dei fornitori: targa, dipendente e cliente vengono attribuiti in automatico e le anomalie evidenziate.',
     search:['targa','luogo','uscita','cliente','prodotto','codice',movCarta,r=>movCdc(r)],sort:(a,b)=>(a.data+(a.ora||''))<(b.data+(b.ora||''))?1:-1,
     filters:[{k:'tipo',label:'Tipo',opts:()=>MODS.mov.fmap.tipo.opts},
@@ -21344,6 +21344,56 @@ openArchivia=async function(list,onDone){
   toast(`${list.length===1?'Mezzo archiviato':list.length+' mezzi archiviati'} con chiusura al ${fmtD(D)}${ch?`; ${ch} noleggi o assegnazioni chiusi`:''}${el?`; ${el} centri di costo eliminati`:''}${sco?`; ${sco} mezzi scollegati dai centri di costo`:''}.${mancanti.length?` Restano da completare ${mancanti.length} voci della checklist.`:''}`);
   if(onDone)onDone();else render();
 };
+
+/* =====================================================================
+   FATTURE CARBURANTE GENERICHE NEI MOVIMENTI (2026.10.53)
+   Nel menu «Dispositivo» dei movimenti compare la voce «Fatture
+   carburante»: si carica a mano l'importo totale della fattura, la data
+   e il centro di costo, senza carta né targa. Il costo entra nei centri
+   di costo nel mese della data indicata.
+   ===================================================================== */
+const DISP_FATT_NUM='FATTURE';
+{
+  const f=MODS.disp.fmap.tipo;
+  if(!f.opts.includes('Fatture carburante (generica)'))f.opts.push('Fatture carburante (generica)');
+  if(!MODS.mov.fmap.fatturaNumero){
+    MODS.mov.groups[0].f.push(fd('fatturaNumero','Numero fattura','text',{span:'s3',hint:'Solo per le fatture caricate a mano'}));
+    ammCampi(MODS.mov);
+  }
+}
+const dispFattura=d=>!!d&&d.tipo==='Fatture carburante (generica)';
+function dispFatturaEnsure(){
+  let d=S.disp.find(dispFattura);
+  if(!d){
+    d={id:uid(),codice:nextCode(MODS.disp),tipo:'Fatture carburante (generica)',numero:DISP_FATT_NUM,stato:'Attivo',note:'Voce generica per caricare a mano le fatture di carburante: importo totale, data e centro di costo.'};
+    for(const f of MODS.disp.fields)if(d[f.k]===undefined)d[f.k]=f.def??'';
+    S.disp.push(d);markDirty();
+  }
+  return d;
+}
+{
+  const o=openRecord;
+  openRecord=function(key,rec,opt){if(key==='mov')try{dispFatturaEnsure();}catch(e){}return o.call(this,key,rec,opt);};
+  const v0=MODS.mov.validate;
+  MODS.mov.validate=(x,errs,rec)=>{
+    const r0=v0?v0(x,errs,rec):'';
+    if(dispFattura(dispBy(x.dispositivo))&&!x.centroCosto&&!x.targa)errs.centroCosto='Per una fattura generica indica il centro di costo (oppure la targa)';
+    return r0;
+  };
+  const b0=MODS.mov.beforeSave;
+  MODS.mov.beforeSave=(x,rec)=>{
+    if(b0)b0(x,rec);
+    if(dispFattura(dispBy(x.dispositivo))){
+      if(!x.tipo||x.tipo==='Pedaggio')x.tipo='Rifornimento';
+      if((x.iva===''||x.iva==null)&&+x.importo>0){const a=+S.par.iva||0;x.iva=r2(x.importo-x.importo/(1+a));}
+    }
+  };
+}
+function movNuovaFattura(){
+  if(soloLettura()||!puoScrivere('mov'))return toast('Il tuo ruolo non può inserire movimenti.',true);
+  const d=dispFatturaEnsure();
+  openRecord('mov',null,{preset:{dispositivo:d.codice,data:todayISO(),tipo:'Rifornimento'},onSaved:()=>{renderDisp();}});
+}
 
 const MENU_LAYOUT=[
  {g:'Panoramica',c:'#2563eb',k:['cruscotto','calendario','grafici']},
