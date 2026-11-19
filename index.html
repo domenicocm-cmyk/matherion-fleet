@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.51';
+const APP_VERSION='2026.10.52';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -16886,6 +16886,7 @@ const cdcFontiCosto=()=>ECO_FONTI.filter(f=>f.lato==='costo');
 
 /* Tutti i costi con una targa, per targa, mese e voce: una passata per fonte.
    Le regole sono quelle della scheda economica. */
+let cdcCanoniInfo={fatture:0,contratti:0,modo:''};
 function cdcRaccogli(on,mesi){
   const m1=mesi[0],m2=mesi[mesi.length-1];
   const perT=new Map(),diretti=[];
@@ -16902,6 +16903,10 @@ function cdcRaccogli(on,mesi){
     if(!lab||!imp)return;
     diretti.push({lab,mese,voce,imp,fonte,t:t||''});
   };
+  /* canoni di leasing e noleggio: dalle fatture passive, dai contratti dei fornitori, o dai contratti solo dove manca la fattura */
+  const CAN='Canoni di noleggio e leasing',modo=on.canoniModo||'',fpCan=new Set();
+  const cpOn=modo?modo!=='fatture':!!on.cp;
+  cdcCanoniInfo={fatture:0,contratti:0,modo};
   if(on.fp){
     const fp=new Map(S.fp.map(f=>[f.codice,f])),conRighe=new Set();
     for(const l of S.fpl){
@@ -16910,6 +16915,7 @@ function cdcRaccogli(on,mesi){
       const f=fp.get(l.fattura),s=f?fpSegno(f):1;
       const voce=l.categoria||(f&&f.categoria)||'Altri costi';
       const imp=s*(+l.imponibile||0),t=normTarga(l.targa);
+      if(voce===CAN){if(modo==='contratti')continue;if(t&&imp)fpCan.add(t+'|'+mm(d));}
       if(t)add(t,mm(d),voce,imp,'Fatture passive');
       else if(l.centroCosto)addD(l.centroCosto,mm(d),voce,imp,'Fatture passive');
     }
@@ -16917,6 +16923,7 @@ function cdcRaccogli(on,mesi){
       if(conRighe.has(f.codice))continue;
       const t=normTarga(f.targa),d=f.dataRegistrazione||f.data;
       if(!t||!dentro(d))continue;
+      if((f.categoria||'')===CAN){if(modo==='contratti')continue;fpCan.add(t+'|'+mm(d));}
       add(t,mm(d),f.categoria||'Altri costi',fpSegno(f)*fpImponibile(f),'Fatture passive');
     }
   }
@@ -16954,14 +16961,15 @@ function cdcRaccogli(on,mesi){
       if(t)add(t,mm(d),'Verbali a nostro carico',imp,'Verbali');else if(v.centroCosto)addD(v.centroCosto,mm(d),'Verbali a nostro carico',imp,'Verbali');
     }
   }
-  if(on.cp){
+  if(cpOn){
     for(const c of S.cp){
       if(c.stato==='Chiuso')continue;
       for(const t of cpTarghe(c)){
         const q=cpCanoneTarga(c,t);if(!q)continue;
         for(const mese of mesi){
+          if(modo==='auto'&&fpCan.has(normTarga(t)+'|'+mese)){cdcCanoniInfo.fatture++;continue;}
           const x=ecoCanoneRapportato(q,c.inizio,c.fine,mese+'-01',cdcUltimo(mese));
-          if(x.giorni&&x.importo)add(t,mese,'Canoni di contratto',x.importo,'Contratti fornitori');
+          if(x.giorni&&x.importo){add(t,mese,'Canoni di contratto',x.importo,'Contratti fornitori');cdcCanoniInfo.contratti++;}
         }
       }
     }
@@ -17083,7 +17091,8 @@ function renderCdcCosti(){
   if(!u.soc||!socs.includes(u.soc))u.soc=socs.find(s=>/fast rent/i.test(s))||socs[0]||'';
   const anno0=todayISO().slice(0,4);
   u.anno=u.anno||anno0;u.fonti=u.fonti||ECO_DEF();u.voce=u.voce||'';
-  const c=cdcCostiCalcola(u.soc,u.anno,u.fonti);
+  if(!u.fonti.canoniModo)u.fonti.canoniModo='auto';
+  const c=cdcCostiCalcola(u.soc,u.anno,u.fonti);const ci={...cdcCanoniInfo};
   if(u.voce&&!c.voci.has(u.voce))u.voce='';
   const anni=[...new Set([anno0,String(+anno0-1),String(+anno0-2),String(+anno0-3),u.anno])].sort().reverse();
   const tot=cdcValTot({tot:c.tot,voci:c.voci},u.voce);
@@ -17097,6 +17106,7 @@ function renderCdcCosti(){
   $('#main').innerHTML=`${pageHead('Centri di costo',`Costi dell’appalto mese per mese per ${esc(u.soc)}: canoni di leasing e noleggio, carburante, pedaggi, manutenzioni e le altre voci, per centro di costo.`,'<button class="btn" data-cdcxl>Esporta Excel</button>')}${cdcTabs()}${chips}
     <div class="toolbar">
       <div class="field"><label for="cdcAnno">Anno</label><select class="input" id="cdcAnno">${anni.map(a=>`<option ${a===u.anno?'selected':''}>${a}</option>`).join('')}</select></div>
+      <div class="field"><label for="cdcCan">Canoni di leasing e noleggio da</label><select class="input" id="cdcCan"><option value="auto" ${u.fonti.canoniModo==='auto'?'selected':''}>Fatture passive, se mancano i contratti</option><option value="fatture" ${u.fonti.canoniModo==='fatture'?'selected':''}>Solo fatture passive</option><option value="contratti" ${u.fonti.canoniModo==='contratti'?'selected':''}>Solo contratti leasing e noleggio</option></select></div>
       <div class="field"><label for="cdcVoce">Voce di costo</label><select class="input" id="cdcVoce"><option value="">Tutte le voci</option>${[...c.voci.keys()].sort((a,b)=>c.voci.get(b).tot-c.voci.get(a).tot).map(v=>`<option ${v===u.voce?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
     </div>
     <div class="ledger">
@@ -17111,6 +17121,7 @@ function renderCdcCosti(){
       ${c.mesi.map(m=>{const v=cdcValMese(r,u.voce,m);return `<td class="num ${v?'':'zero'}" title="${v?esc(eur(r2(v))):''}">${v?cdcEu0(v):'·'}</td>`;}).join('')}
       <td class="num"><b>${eur(r2(cdcValTot(r,u.voce)))}</b></td></tr>`).join('')||`<tr><td colspan="14" class="empty">Nessun costo di ${esc(u.soc)} nel ${esc(u.anno)}${u.voce?' per questa voce':''}. Controlla le fonti qui sotto, e che i mezzi abbiano un centro di costo o un noleggio.</td></tr>`}
     </tbody>${righe.length?`<tfoot><tr><th>Totale</th>${c.mesi.map(m=>`<th class="num">${cdcEu0(totM(m))||'·'}</th>`).join('')}<th class="num">${eur(r2(tot))}</th></tr></tfoot>`:''}</table></div>
+    <p class="muted" style="font-size:12.5px;margin:6px 2px 6px">${u.fonti.canoniModo==='auto'?`Canoni: ${ci.fatture} mesi-mezzo coperti da fatture passive, ${ci.contratti} mesi-mezzo ricavati dai contratti dei fornitori perché la fattura non è caricata.`:u.fonti.canoniModo==='contratti'?`Canoni dai contratti di leasing e noleggio (${ci.contratti} mesi-mezzo); le righe di fattura per canoni sono escluse per non contarli due volte.`:'Canoni dalle sole fatture passive caricate: i mesi senza fattura non hanno il canone.'}</p>
     <p class="muted" style="font-size:12.5px;margin:6px 2px 14px">Nelle caselle gli importi sono arrotondati all’euro (il valore esatto compare passando il mouse); i totali sono esatti. Costi senza IVA. Clicca un centro di costo per il dettaglio.</p>
     <div class="panel"><h3>Per voce di costo</h3>
       <div class="tablewrap"><table class="grid cdcm mini" style="min-width:1180px"><thead><tr><th>Voce</th>${c.mesi.map(m=>`<th class="num">${esc(cdcMese3(m))}</th>`).join('')}<th class="num">Totale</th><th>Fonte</th></tr></thead><tbody>
@@ -17118,11 +17129,12 @@ function renderCdcCosti(){
       </tbody></table></div></div>
     <details class="ammdet" style="margin-top:14px"><summary><b>Da dove vengono i numeri</b></summary>
       <p class="muted">Sono le fonti della scheda economica del mezzo. Le fonti del registro operativo (canoni dei contratti di leasing e noleggio, manutenzioni a consuntivo, franchigie) sono spente perché, se le fatture del fornitore sono registrate, conterebbero lo stesso costo due volte: accendile se le fatture non ci sono.</p>
-      <div class="fgrid">${fonti.map(f=>`<div class="field s3"><label class="check"><input type="checkbox" data-cdcfonte="${f.k}" ${u.fonti[f.k]?'checked':''}><b>${esc(f.l)}</b></label><small class="muted" style="margin-left:24px">${esc(f.d)}</small></div>`).join('')}</div>
+      <div class="fgrid">${fonti.filter(f=>f.k!=='cp').map(f=>`<div class="field s3"><label class="check"><input type="checkbox" data-cdcfonte="${f.k}" ${u.fonti[f.k]?'checked':''}><b>${esc(f.l)}</b></label><small class="muted" style="margin-left:24px">${esc(f.d)}</small></div>`).join('')}</div>
     </details>`;
   const m=$('#main');
   m.querySelectorAll('[data-cdcvs]').forEach(b=>b.onclick=()=>{u.soc=b.dataset.cdcvs;u.voce='';renderCdcCosti();});
   m.querySelector('#cdcAnno').onchange=e=>{u.anno=e.target.value;renderCdcCosti();};
+  m.querySelector('#cdcCan').onchange=e=>{u.fonti.canoniModo=e.target.value;renderCdcCosti();};
   m.querySelector('#cdcVoce').onchange=e=>{u.voce=e.target.value;renderCdcCosti();};
   m.querySelectorAll('[data-cdcfonte]').forEach(x=>x.onchange=()=>{u.fonti[x.dataset.cdcfonte]=x.checked;renderCdcCosti();
     const d=$('#main').querySelector('details.ammdet');if(d)d.open=true;});
