@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.50';
+const APP_VERSION='2026.10.51';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -5582,6 +5582,7 @@ function renderArchivio(){
       {l:'Stato all’uscita',v:r=>`<span class="pill end">${esc(r.stato||'–')}</span><span class="sub">${r.dataUscitaFlotta?'uscita dalla flotta il '+fmtD(r.dataUscitaFlotta):''}</span>`,s:r=>r.stato||''},
       {l:'Archiviato il',v:r=>r.dataArchivio?fmtD(r.dataArchivio):'<span class="muted">–</span>',s:r=>r.dataArchivio||''},
       {l:'Motivo',v:r=>r.motivoArchivio?esc(r.motivoArchivio):'<span class="muted">–</span>'},
+      {l:'Dismissione',v:r=>r.dismEsito||r.dismValore!==undefined&&r.dismValore!==''||r.dismKm?`${r.dismValore!==undefined&&r.dismValore!==''?eur(r.dismValore):''}<span class="sub">${esc([r.dismKm?numF.format(r.dismKm)+' km':'',r.dismDocumento].filter(Boolean).join(' · '))}</span>${r.dismChecklist&&/☐/.test(r.dismChecklist)?'<span class="sub late">checklist da completare</span>':''}`:'<span class="muted">–</span>'},
       {l:'Proprietario e utilizzatore',v:r=>`${esc(r.proprietaria||'–')}<span class="sub">${esc(r.utilizzatore||'–')}</span>`},
       {l:'Storico collegato',v:r=>{const n=[['noleggi',S.rows.filter(x=>x.targa===r.targa).length],['manutenzioni',S.man.filter(x=>x.targa===r.targa).length],['sinistri',S.sin.filter(x=>x.targa===r.targa).length],['verbali',S.vrb.filter(x=>x.targa===r.targa).length]].filter(x=>x[1]);
         return n.length?esc(n.map(x=>x[1]+' '+x[0]).join(', ')):'<span class="muted">nessuno</span>';}},
@@ -6417,6 +6418,18 @@ MODS.fat.onDelete=f=>{
   for(const st of ['vrb','sin','mov','mpt'])for(const r of S[st])if(r.proforma===f.codice)r.proforma='';
   for(const st of ['vrb','sin'])for(const r of S[st])for(const k of ['proformaImporto','proformaGestione'])if(r[k]===f.codice)r[k]='';
 };
+/* Descrizione stampata: aggiunge, se mancano, contratto di riferimento, periodo e giorni, canone mensile */
+function fatDescrizioneStampa(r,f){
+  let d=String(r.descrizione||'').trim();
+  try{
+    const pp=rigaPeriodo(r,f),agg=[];
+    if(r.origine&&r.tipo==='Canone'&&!d.includes(r.origine))agg.push(`contratto ${r.origine}`);
+    if(pp.dal&&pp.al&&!d.includes(fmtD(pp.dal)))agg.push(`dal ${fmtD(pp.dal)} al ${fmtD(pp.al)}${pp.giorni!==''&&pp.giorni!=null?` (${pp.giorni} gg)`:''}`);
+    if(r.tipo==='Canone'&&pp.canone!==''&&pp.canone!=null&&+pp.canone>0&&!d.includes('canone'))agg.push(`canone mensile ${eur(+pp.canone)}`);
+    if(agg.length)d+=(d?' – ':'')+agg.join(', ');
+  }catch(e){}
+  return d;
+}
 function fatDocData(f){
   const cli=socBy(f.cliente)||{};const t=titData(f.emittente);const tit=socBy(f.emittente)||titolareDefault()||{};
   const righe=S.righe.filter(r=>r.proforma===f.codice);
@@ -6424,7 +6437,7 @@ function fatDocData(f){
   for(const r of righe){const k=r.natura?`${r.natura} (0%)`:`${numF.format(+r.aliquota||0)}%`;const o=byIva[k]=byIva[k]||{imp:0,iva:0};o.imp+=+r.imponibile||0;o.iva+=r2((+r.imponibile||0)*(+r.aliquota||0)/100);}
   return docBlank({...t,numero:f.codice,data:fmtD(f.data),periodo:`${fmtD(f.periodoDa)} – ${fmtD(f.periodoA)}`,
     cli_ragione:cli.ragione||f.cliente,cli_sede:addr(cli),cli_piva:cli.piva,cli_cf:cli.cf||cli.piva,cli_sdi:cli.sdi,cli_pec:cli.pec,
-    righe:righe.map(r=>docBlank({descrizione:r.descrizione,targa:r.targa||'',quantita:numF.format(+r.quantita||0),prezzo:eur(+r.prezzo||0),aliquota:r.natura||`${numF.format(+r.aliquota||0)}%`,imponibile:eur(+r.imponibile||0)})),
+    righe:righe.map(r=>docBlank({descrizione:fatDescrizioneStampa(r,f),targa:r.targa||'',quantita:numF.format(+r.quantita||0),prezzo:eur(+r.prezzo||0),aliquota:r.natura||`${numF.format(+r.aliquota||0)}%`,imponibile:eur(+r.imponibile||0)})),
     iva:Object.entries(byIva).map(([k,o])=>({aliquota:k,imponibile:eur(o.imp),imposta:eur(o.iva)})),
     centro_costo:f.centroCosto?cdcNome(f.centroCosto):'non previsto',tot_imponibile:eur(f.imponibile),tot_iva:eur(f.iva),totale:eur(f.totale),
     pagamento:cli.pagamento||(+S.par.termine===0?'Rimessa Diretta':`Bonifico a ${S.par.termine} giorni data fattura`),iban:tit.iban,note:f.note||'nessuna'});
@@ -21140,6 +21153,170 @@ async function vrbMailAllegati(d,v,dest,body){
   }catch(e){busy(false);toast('Email non preparata: '+e.message,true);}
   finally{busy(false);}
 }
+
+/* =====================================================================
+   DISMISSIONE DEL MEZZO: PROCEDURA GUIDATA PRIMA DELL'ARCHIVIAZIONE (2026.10.51)
+   Prima di archiviare un mezzo il programma pone le domande che servono a
+   chiudere bene la sua storia: data di chiusura, esito (venduto, rottamato,
+   restituito…), controparte e valore, km finali, pendenze aperte (noleggi,
+   assegnazioni, manutenzioni, sinistri, verbali, leasing, proforma),
+   centri di costo e checklist di dismissione. Solo alla conferma finale il
+   mezzo viene archiviato e i dati restano nello storico del mezzo.
+   ===================================================================== */
+{
+  const g=MODS.mezzi.groups.find(x=>x.f.some(f=>f.k==='motivoArchivio')).f;
+  if(!g.some(f=>f.k==='dismEsito')){
+    g.push(fd('dismEsito','Esito della dismissione','text',{hidden:true}),
+      fd('dismControparte','Acquirente o controparte','text',{hidden:true}),
+      fd('dismValore','Valore di cessione (€)','eur',{hidden:true}),
+      fd('dismDocumento','Documento di cessione','text',{hidden:true}),
+      fd('dismKm','Km alla chiusura','int',{hidden:true}),
+      fd('dismChecklist','Checklist di dismissione','area',{hidden:true}),
+      fd('dismNote','Note di dismissione','area',{hidden:true}));
+    ammCampi(MODS.mezzi);
+  }
+}
+const DISM_ESITI=['Venduto','Rottamato o demolito','Restituito al locatore o alla società di leasing','Furto o perdita totale','Altro'];
+const DISM_CHECK=[
+  ['chiavi','Chiavi e telecomando restituiti o consegnati'],
+  ['doc','Libretto, certificato di proprietà e documenti consegnati o ritirati'],
+  ['pra','Passaggio di proprietà o radiazione al PRA registrati'],
+  ['ass','Polizza assicurativa disdetta o trasferita'],
+  ['bollo','Tassa di possesso (bollo) verificata'],
+  ['disp','Telepass, carta carburante e altri dispositivi restituiti o disattivati'],
+  ['foto','Foto e verbale dello stato del mezzo alla chiusura archiviati'],
+  ['fatt','Fattura di vendita o nota di chiusura registrata']];
+const dismAperto=(s,re)=>!re.test(String(s||''));
+function dismPendenze(m,D){
+  const t=m.targa,out=[];
+  const noleggi=S.rows.filter(r=>r.targa===t&&(!r.fine||r.fine>=D));
+  if(noleggi.length)out.push({k:'nol',az:true,etichetta:`${noleggi.length} ${noleggi.length===1?'noleggio non concluso':'noleggi non conclusi'} (${noleggi.map(r=>r.numero+(r.fine?' fino al '+fmtD(r.fine):'')).join(', ')})`,
+    az_l:`Chiudi ${noleggi.length===1?'il noleggio':'i noleggi'} il ${fmtD(D)}`,rec:noleggi});
+  const ass=(S.ass||[]).filter(a=>a.targa===t&&(!a.al||a.al>=D));
+  if(ass.length)out.push({k:'ass',az:true,etichetta:`${ass.length===1?'Assegnazione':'Assegnazioni'} a dipendente ancora aperta${ass.length===1?'':'e'}: ${ass.map(a=>REF.dip.label(a.dipendente)||a.dipendente).join(', ')}`,az_l:`Chiudi ${ass.length===1?'l’assegnazione':'le assegnazioni'} il ${fmtD(D)}`,rec:ass});
+  const cns=S.cns.filter(c=>c.targa===t&&!c.dataRiconsegna);
+  if(cns.length)out.push({k:'cns',etichetta:`${cns.length} ${cns.length===1?'verbale di consegna senza riconsegna':'verbali di consegna senza riconsegna'}: registra la riconsegna in Consegne e riconsegne`});
+  const man=S.man.filter(x=>x.targa===t&&dismAperto(x.stato,/chius|annull|complet|conclus/i));
+  if(man.length)out.push({k:'man',etichetta:`${man.length} ${man.length===1?'manutenzione aperta':'manutenzioni aperte'}`});
+  const sin=S.sin.filter(x=>x.targa===t&&dismAperto(x.stato,/chius|annull|liquid|conclus/i));
+  if(sin.length)out.push({k:'sin',etichetta:`${sin.length} ${sin.length===1?'sinistro aperto':'sinistri aperti'}`});
+  const vrb=S.vrb.filter(x=>x.targa===t&&dismAperto(x.stato,/pagat|chius|annull|archiv|ricors|conclus/i));
+  if(vrb.length)out.push({k:'vrb',etichetta:`${vrb.length} ${vrb.length===1?'verbale da definire':'verbali da definire'}`});
+  const cp=S.cp.filter(c=>c.stato!=='Chiuso'&&(()=>{try{return cpTarghe(c).includes(t);}catch(e){return false;}})());
+  if(cp.length)out.push({k:'cp',etichetta:`Contratto di leasing o noleggio fornitore ancora aperto: ${cp.map(c=>c.numero||c.codice).join(', ')}`});
+  const bozze=S.righe.filter(r=>r.targa===t&&S.fat.some(f=>f.codice===r.proforma&&f.stato==='Bozza'));
+  if(bozze.length)out.push({k:'pf',etichetta:`${bozze.length} ${bozze.length===1?'riga di proforma in bozza':'righe di proforma in bozza'}: controlla che il periodo termini alla chiusura`});
+  const dsp=S.disp.filter(d=>d.targa===t&&d.stato==='Attivo');
+  if(dsp.length)out.push({k:'disp',etichetta:`Dispositivi attivi sul mezzo: ${dsp.map(d=>(d.tipo||'')+' '+(d.num||d.numero||'')).join(', ')}`});
+  return out;
+}
+function dismBox(list){
+  return new Promise(res=>{
+    const oggi=todayISO();
+    const st={passo:0,D:oggi,esito:DISM_ESITI[0],ctrp:'',valore:'',doc:'',note:'',km:{},sc:{},az:{},chk:{}};
+    for(const m of list)st.km[m.targa]=m.km||'';
+    DISM_CHECK.forEach(([k])=>st.chk[k]=false);
+    const m=document.createElement('div');m.className='modal';
+    const PASSI=['Chiusura','Pendenze','Centri di costo','Checklist'];
+    const salvaPasso=()=>{
+      const q=s=>m.querySelector(s);
+      if(st.passo===0){st.D=q('#dmD').value;st.esito=q('#dmE').value;st.ctrp=q('#dmC').value.trim();st.valore=q('#dmV').value;st.doc=q('#dmN').value.trim();st.note=q('#dmT').value.trim();
+        list.forEach((x,i)=>{const e=q(`[data-km="${i}"]`);if(e)st.km[x.targa]=e.value;});}
+      if(st.passo===1)m.querySelectorAll('[data-az]').forEach(e=>st.az[e.dataset.az]=e.checked);
+      if(st.passo===2)m.querySelectorAll('[data-cd]').forEach(e=>{if(e.checked)st.sc[e.name]=e.value;});
+      if(st.passo===3)m.querySelectorAll('[data-ck]').forEach(e=>st.chk[e.dataset.ck]=e.checked);
+    };
+    const cdcVoci=()=>{const per=new Map();for(const x of list){const l=x.centroCosto;if(!l)continue;if(!per.has(l))per.set(l,[]);per.get(l).push(x);}
+      return [...per].map(([lab,mezzi])=>({lab,mezzi,cdc:cdcBy(lab),uso:cdcUsoDopoArchivio(lab,list)}));};
+    const paint=()=>{
+      const p=st.passo;let corpo='';
+      if(p===0){
+        corpo=`<div class="fgrid">
+          <div class="field s2"><label for="dmD">Data di chiusura</label><input class="input" type="date" id="dmD" value="${esc(st.D)}"></div>
+          <div class="field s4"><label for="dmE">Esito</label><select class="input" id="dmE">${DISM_ESITI.map(x=>`<option ${x===st.esito?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+          <div class="field s3"><label for="dmC">Acquirente, ente o controparte</label><input class="input" id="dmC" value="${esc(st.ctrp)}" placeholder="Es. nome dell’acquirente o del demolitore"></div>
+          <div class="field s3"><label for="dmV">Valore di cessione (€)</label><input class="input" type="number" step="0.01" id="dmV" value="${esc(st.valore)}"></div>
+          <div class="field s3"><label for="dmN">Documento di cessione</label><input class="input" id="dmN" value="${esc(st.doc)}" placeholder="Fattura, verbale di demolizione, contratto"></div>
+          <div class="field s6"><label for="dmT">Note</label><textarea class="input" id="dmT" rows="2">${esc(st.note)}</textarea></div></div>
+          <h4 style="margin:10px 0 4px">Km alla chiusura</h4>
+          <table class="grid mini"><thead><tr><th>Targa</th><th>Veicolo</th><th class="num">Ultimi km noti</th><th>Km alla chiusura</th></tr></thead><tbody>${list.map((x,i)=>`<tr><td>${plate(x.targa)}</td><td>${esc(mezzoName(x))}</td><td class="num">${x.km?numF.format(x.km):'–'}${x.kmData?`<span class="sub">${fmtD(x.kmData)}</span>`:''}</td><td><input class="input" type="number" min="0" data-km="${i}" value="${esc(st.km[x.targa])}"></td></tr>`).join('')}</tbody></table>`;
+      }else if(p===1){
+        corpo=list.map(x=>{const pe=dismPendenze(x,st.D);
+          return `<fieldset style="margin:8px 0;padding:8px 12px"><legend><b>${esc(x.targa)}</b> ${esc(mezzoName(x))}</legend>
+            ${pe.length?pe.map(e=>`<div style="margin:4px 0">${e.az?`<label class="radio"><input type="checkbox" data-az="${esc(x.targa+'|'+e.k)}" ${st.az[x.targa+'|'+e.k]===false?'':'checked'}><span><b>${esc(e.az_l)}</b><small>${esc(e.etichetta)}</small></span></label>`:`<div>⚠ ${esc(e.etichetta)}</div>`}</div>`).join(''):'<div class="muted">Nessuna pendenza: noleggi, assegnazioni, manutenzioni, sinistri, verbali e leasing sono tutti chiusi.</div>'}
+          </fieldset>`;}).join('')+`<p class="muted" style="font-size:12.5px">Le pendenze con l’avviso ⚠ non si chiudono da qui: restano nel loro elenco e puoi gestirle anche dopo l’archiviazione, senza perdere lo storico.</p>`;
+      }else if(p===2){
+        const voci=cdcVoci();
+        corpo=voci.length?voci.map((v,i)=>{
+          const bl=[];if(v.uso.altriMezzi.length)bl.push(`${v.uso.altriMezzi.length} altri mezzi in flotta`);if(v.uso.contratti.length)bl.push(`${v.uso.contratti.length} contratti non conclusi`);if(v.uso.persone)bl.push(`${v.uso.persone} dipendenti o utenti`);
+          const puo=!bl.length&&!!v.cdc,def=st.sc[`cd${i}`]||(puo?'elimina':'scollega');
+          return `<fieldset style="margin:8px 0;padding:8px 12px"><legend><b>${esc(v.lab)}</b></legend>
+            <div class="muted">Mezzi abbinati: <b>${esc(v.mezzi.map(x=>x.targa).join(', '))}</b>${v.uso.storico?` · compare in ${v.uso.storico} registrazioni dello storico (restano)`:''}</div>
+            ${bl.length?`<div class="alert" style="margin:6px 0">Non si può eliminare: è ancora usato da ${esc(bl.join(', '))}.</div>`:''}
+            <label class="radio"><input type="radio" data-cd name="cd${i}" value="elimina" ${puo?'':'disabled'} ${def==='elimina'?'checked':''}><span><b>Elimina il centro di costo</b></span></label>
+            <label class="radio"><input type="radio" data-cd name="cd${i}" value="scollega" ${def==='scollega'?'checked':''}><span><b>Scollega solo i mezzi in dismissione</b><small>Il centro di costo resta in anagrafica</small></span></label>
+            <label class="radio"><input type="radio" data-cd name="cd${i}" value="tieni" ${def==='tieni'?'checked':''}><span><b>Lascia tutto com’è</b></span></label></fieldset>`;}).join('')
+          :'<div class="muted">Nessun mezzo risulta abbinato a un centro di costo.</div>';
+      }else{
+        corpo=`<h4 style="margin:0 0 6px">Checklist di dismissione</h4>${DISM_CHECK.map(([k,l])=>`<label class="radio" style="margin:3px 0"><input type="checkbox" data-ck="${k}" ${st.chk[k]?'checked':''}><span>${esc(l)}</span></label>`).join('')}
+          <div class="calcbox" style="margin-top:12px"><div><small>Mezzi</small><b>${list.length}</b></div><div><small>Chiusura</small><b>${fmtD(st.D)}</b></div><div><small>Esito</small><b style="font-size:14px">${esc(st.esito)}</b></div>${st.valore!==''?`<div><small>Valore</small><b>${eur(+st.valore||0)}</b></div>`:''}</div>
+          <p class="muted" style="font-size:12.5px">Spunta ciò che è fatto: quello che resta non spuntato viene annotato nello storico del mezzo come da completare.</p>`;
+      }
+      m.innerHTML=`<div class="box wide" role="dialog" aria-modal="true" style="max-width:780px;max-height:94vh;overflow:auto">
+        <h3>Dismissione ${list.length===1?'del mezzo '+esc(list[0].targa):'di '+list.length+' mezzi'}</h3>
+        <div class="muted" style="margin-bottom:8px">${PASSI.map((x,i)=>`<span style="${i===p?'font-weight:700;color:var(--brand,#0b5c78)':''}">${i+1}. ${x}</span>`).join(' &nbsp;›&nbsp; ')}</div>
+        ${corpo}
+        <div class="acts"><button class="btn" data-a="x">Annulla</button>${p>0?'<button class="btn" data-a="b">Indietro</button>':''}${p<3?'<button class="btn primary" data-a="n">Avanti</button>':'<button class="btn primary" data-a="ok">Archivia e chiudi lo storico</button>'}</div></div>`;
+    };
+    m.addEventListener('click',e=>{
+      const a=e.target.closest('[data-a]');if(!a&&e.target!==m)return;
+      const k=a&&a.dataset.a;if(!k)return;
+      if(k==='x'){m.remove();res(null);return;}
+      salvaPasso();
+      if(k==='n'){
+        if(st.passo===0){if(!st.D){toast('Indica la data di chiusura.',true);return;}if(st.D>oggi&&!window.confirm('La data di chiusura è nel futuro. Continuare?'))return;}
+        st.passo++;paint();}
+      else if(k==='b'){st.passo--;paint();}
+      else if(k==='ok'){m.remove();res({...st,voci:cdcVoci()});}
+    });
+    document.body.appendChild(m);paint();
+  });
+}
+openArchivia=async function(list,onDone){
+  list=(list||[]).filter(m=>!ARCH(m));
+  if(!list.length){toast('Nessun mezzo da archiviare: sono già tutti in archivio.',true);return;}
+  const r=await dismBox(list);if(!r)return;
+  const D=r.D;let ch=0;
+  /* pendenze da chiudere */
+  for(const m of list){
+    for(const e of dismPendenze(m,D)){
+      if(!e.az||r.az[m.targa+'|'+e.k]===false)continue;
+      if(e.k==='nol')for(const x of e.rec){if(!x.fine||x.fine>D){x.fine=D>=x.inizio?D:x.inizio;ch++;}}
+      if(e.k==='ass')for(const x of e.rec){x.al=D;ch++;}
+    }
+  }
+  /* centri di costo */
+  let el=0,sco=0;
+  r.voci.forEach((v,i)=>{
+    const s=r.sc[`cd${i}`]||(!v.cdc||v.uso.altriMezzi.length||v.uso.contratti.length||v.uso.persone?'scollega':'elimina');
+    if(s==='tieni')return;
+    if(s==='elimina'&&v.cdc&&!(v.uso.altriMezzi.length||v.uso.contratti.length||v.uso.persone)){S.cdc=S.cdc.filter(c=>c!==v.cdc);if(S.filt&&S.filt.cdc===v.lab)S.filt.cdc='';el++;}
+    for(const m of v.mezzi)if(m.centroCosto===v.lab){m.centroCosto='';sco++;}
+  });
+  /* il mezzo */
+  const stato=r.esito==='Venduto'?'Venduto':/Rottamato|Furto/.test(r.esito)?'Dismesso':null;
+  const mancanti=DISM_CHECK.filter(([k])=>!r.chk[k]).map(([,l])=>l);
+  for(const m of list){
+    m.archiviato='Sì';m.dataArchivio=D;m.dataUscitaFlotta=D;m.motivoArchivio=r.esito+(r.ctrp?' – '+r.ctrp:'');
+    if(stato)m.stato=stato;
+    m.dismEsito=r.esito;m.dismControparte=r.ctrp;m.dismValore=r.valore===''?'':+r.valore;m.dismDocumento=r.doc;m.dismNote=r.note;
+    const km=r.km[m.targa];if(km!==''&&km!=null){m.dismKm=+km;m.km=+km;m.kmData=D;}
+    m.dismChecklist=DISM_CHECK.map(([k,l])=>`${r.chk[k]?'☑':'☐'} ${l}`).join('\n');
+  }
+  markDirty();renderSide();
+  toast(`${list.length===1?'Mezzo archiviato':list.length+' mezzi archiviati'} con chiusura al ${fmtD(D)}${ch?`; ${ch} noleggi o assegnazioni chiusi`:''}${el?`; ${el} centri di costo eliminati`:''}${sco?`; ${sco} mezzi scollegati dai centri di costo`:''}.${mancanti.length?` Restano da completare ${mancanti.length} voci della checklist.`:''}`);
+  if(onDone)onDone();else render();
+};
 
 const MENU_LAYOUT=[
  {g:'Panoramica',c:'#2563eb',k:['cruscotto','calendario','grafici']},
