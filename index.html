@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.58';
+const APP_VERSION='2026.10.59';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -6415,7 +6415,8 @@ function renderCap(){
 /* ---------- FATTURAZIONE E PROFORMA ---------- */
 MODS.fat.onDelete=f=>{
   S.righe=S.righe.filter(r=>r.proforma!==f.codice);
-  for(const st of ['vrb','sin','mov','mpt'])for(const r of S[st])if(r.proforma===f.codice)r.proforma='';
+  for(const st of ['vrb','sin','mov','mpt','adl'])for(const r of S[st]||[])if(r.proforma===f.codice)r.proforma='';
+  for(const r of S.man||[])if(r.proformaAddebito===f.codice)r.proformaAddebito='';
   for(const st of ['vrb','sin'])for(const r of S[st])for(const k of ['proformaImporto','proformaGestione','proformaCommissione'])if(r[k]===f.codice)r[k]='';
 };
 /* Descrizione stampata: aggiunge, se mancano, contratto di riferimento, periodo e giorni, canone mensile */
@@ -6589,7 +6590,7 @@ function bindRighe(d,paint){
   d.querySelectorAll('tr[data-r] input').forEach(i=>i.onchange=()=>{const r=S.righe.find(x=>x.id===i.closest('tr').dataset.r);const k=i.dataset.k;
     r[k]=['quantita','prezzo','aliquota'].includes(k)?(parseFloat(i.value)||0):i.value.trim();if(k==='natura'&&r.natura)r.aliquota=0;r.imponibile=r2((+r.quantita||0)*(+r.prezzo||0));markDirty();paint();});
   d.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const r=S.righe.find(x=>x.id===b.dataset.del);S.righe=S.righe.filter(x=>x!==r);
-    const src=r.origine&&(S.vrb.find(x=>x.codice===r.origine)||S.sin.find(x=>x.codice===r.origine)||S.mov.find(x=>x.codice===r.origine)||S.mpt.find(x=>x.codice===r.origine));if(src){const fk=fatCampoMarca(r);if(src[fk]===r.proforma)src[fk]='';}markDirty();paint();});
+    const src=r.origine&&(S.vrb.find(x=>x.codice===r.origine)||S.sin.find(x=>x.codice===r.origine)||S.mov.find(x=>x.codice===r.origine)||S.mpt.find(x=>x.codice===r.origine)||S.adl.find(x=>x.codice===r.origine)||S.man.find(x=>x.codice===r.origine));if(src){const fk=fatCampoMarca(r);if(src[fk]===r.proforma)src[fk]='';}markDirty();paint();});
 }
 function renderFattWizard(tabs){
   const u=ui('fatW');u.mese=u.mese||S.par.mese.slice(0,7);u.src=u.src||{can:true,vrb:true,sin:true,mov:true,mp:true};if(u.src.mp===undefined)u.src.mp=true;if(u.split===undefined)u.split=true;
@@ -6635,6 +6636,7 @@ function renderFattWizard(tabs){
   if(false)for(const v of S.vrb)if(v.cliente&&!v.proforma&&+v.speseGestione>0&&['Rinotificato','Chiuso','Pagato','Dati conducente comunicati'].includes(v.stato)&&(v.rinotificaData||v.dataNotifica)<=me)
     lines.push({cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),tipo:(v.voceAddebito==='Rinotifica'?'Rinotifica verbale':'Gestione amministrativa verbale'),descrizione:`${v.voceAddebito==='Rinotifica'?'Rinotifica':'Gestione amministrativa'} verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale||v.dataNotifica)} – ${v.ente}`,targa:v.targa,origine:v.codice,vrb:v.codice,quantita:1,prezzo:spese,aliquota:ivaStd,natura:''});
   if(u.src.sin)fatRigheSinistri({ivaStd,emitDi,lines});
+  if(u.src.adl!==false)fatRigheAddebiti({ivaStd,emitDi,lines,scarti});
   if(false)for(const s of S.sin)if(s.riaddebitoA==='Cliente'&&s.cliente&&!s.proforma&&+s.importoRiaddebito>0)
     lines.push({cli:s.cliente,emit:emitDi(s.targa,s.data),cdc:s.centroCosto||cdcFor(s.targa,s.data),tipo:'Franchigia sinistro',descrizione:`Addebito franchigia/danni sinistro ${s.codice} del ${fmtD(s.data)}`,targa:s.targa,origine:s.codice,quantita:1,prezzo:+s.importoRiaddebito,aliquota:ivaStd,natura:''});
   if(u.src.mov)for(const m of S.mov)if(m.riaddebita==='Sì'&&m.cliente&&!m.proforma&&m.data<=me)
@@ -6664,8 +6666,8 @@ function renderFattWizard(tabs){
     <div class="field"><label>Società emittente</label><select class="input" data-e><option value="">Tutte le società (${titN.length})</option>${titN.map(t=>`<option ${t===u.emit?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
     <div class="field"><label>Cliente</label><select class="input" data-fcli><option value="">Tutti i clienti (${cliAll.length})</option>${cliAll.map(c=>`<option ${c===u.cli?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
     ${cdcAll.length?`<div class="field"><label>Centro di costo</label><select class="input" data-fcdc><option value="">Tutti</option>${cdcAll.map(c=>`<option value="${esc(c)}" ${c===u.fcdc?'selected':''}>${esc(cdcNome(c))}</option>`).join('')}</select></div>`:''}
-    <label class="check" style="align-self:end"><input type="checkbox" data-split ${u.split?'checked':''}> Una proforma per centro di costo</label>
-    ${[['can','Canoni'],['vrb','Spese verbali'],['sin','Riaddebiti sinistri'],['mov','Pedaggi e carburante'],['mp','Mancati pedaggi']].map(([k,l])=>`<label class="check" style="align-self:end"><input type="checkbox" data-src="${k}" ${u.src[k]?'checked':''}> ${l}</label>`).join('')}
+    <button class="btn" style="align-self:end" data-adl>+ Addebito libero</button><label class="check" style="align-self:end"><input type="checkbox" data-split ${u.split?'checked':''}> Una proforma per centro di costo</label>
+    ${[['can','Canoni'],['vrb','Spese verbali'],['sin','Riaddebiti sinistri'],['mov','Pedaggi e carburante'],['mp','Mancati pedaggi'],['adl','Addebiti liberi e manutenzioni']].map(([k,l])=>`<label class="check" style="align-self:end"><input type="checkbox" data-src="${k}" ${u.src[k]!==false&&(u.src[k]||k==='adl')?'checked':''}> ${l}</label>`).join('')}
    </div>
    ${nascoste.length?`<p class="muted" style="margin:-4px 0 8px;font-size:13px">Il filtro <b>${esc(u.emit)}</b> sta nascondendo ${nascoste.length} rig${nascoste.length===1?'a':'he'} di ${[...new Set(nascoste.map(x=>x.cli))].length} client${[...new Set(nascoste.map(x=>x.cli))].length===1?'e':'i'} intestate ad altre società. Scegli <b>Tutte le società</b> per vedere tutto.</p>`:''}
    ${scarti.length?`<div class="panel" style="border-left:3px solid var(--warn,#8A5A00)"><b>${scarti.length} contratt${scarti.length===1?'o':'i'} da sistemare in anagrafica</b><table class="grid mini"><tbody>${scarti.map(x=>`<tr><td>${esc(x.n||'(senza numero)')}</td><td>${x.t?plate(x.t):''}</td><td>${esc(x.m)}</td></tr>`).join('')}</tbody></table></div>`:''}
@@ -6694,6 +6696,7 @@ function renderFattWizard(tabs){
   const sp=m.querySelector('[data-split]');if(sp)sp.onchange=()=>{u.split=sp.checked;u.excl.clear();renderFatt();};
   m.querySelectorAll('[data-c]').forEach(c=>c.onchange=()=>{c.checked?u.excl.delete(c.dataset.c):u.excl.add(c.dataset.c);renderFatt();});
   fatLegaRiaddebiti(m,()=>renderFatt());
+  const ba=m.querySelector('[data-adl]');if(ba)ba.onclick=()=>adlNuovo({data:todayISO(),quantita:1,cliente:u.cli||''});
   const create=()=>{
     const out=[];
     for(const c of daCreare){
@@ -15581,7 +15584,7 @@ if(typeof PARAMS_EXTRA!=='undefined'&&!PARAMS_EXTRA.some(p=>p[0]==='gestioneSini
 const sinGestione=()=>{const v=S.par&&S.par.gestioneSinistro;const n=parseFloat(v);return v===''||v==null||isNaN(n)?20:n;};
 
 /* a quale segno di «già fatturata» appartiene una riga della proforma */
-const fatCampoMarca=r=>r.tipo==='Riaddebito verbale'?'proformaImporto':r.tipo==='Commissione pagamento verbale'?'proformaCommissione':r.tipo==='Gestione sinistro'?'proformaGestione':'proforma';
+const fatCampoMarca=r=>r.tipo==='Addebito manutenzione'?'proformaAddebito':r.tipo==='Riaddebito verbale'?'proformaImporto':r.tipo==='Commissione pagamento verbale'?'proformaCommissione':r.tipo==='Gestione sinistro'?'proformaGestione':'proforma';
 
 if(typeof PARAMS_EXTRA!=='undefined'&&!PARAMS_EXTRA.some(p=>p[0]==='commissioneVerbale'))
   PARAMS_EXTRA.push(['commissioneVerbale',68,'Verbali Global One: commissione di pagamento per verbale (€)',1.5]);
@@ -20949,6 +20952,107 @@ function renderAmzDanni(){
   if(typeof AREE_DI_STORE!=='undefined')(AREE_DI_STORE.adn=AREE_DI_STORE.adn||[]).includes('amm')||AREE_DI_STORE.adn.push('amm');
   const a=AREE.find(x=>x.k==='amm');if(a&&!a.store.includes('adn'))a.store.push('adn');
 })();
+
+/* =====================================================================
+   ADDEBITI LIBERI AI CLIENTI E ADDEBITI DALLE MANUTENZIONI (2026.10.59)
+   Addebiti liberi: voci scelte dall'utente, con cliente, importo e IVA, che
+   entrano nel riepilogo di fatturazione fino a quando non finiscono in una
+   proforma. Manutenzioni: se il danno meccanico o di carrozzeria è da girare
+   al cliente, l'intervento propone la riga di addebito (importo e IVA a scelta).
+   ===================================================================== */
+const ADL_VOCI=['Spese varie','Danni al veicolo','Pulizia straordinaria','Carburante mancante','Penale','Rimborso spese','Altro'];
+const ADL_IVA=['IVA ordinaria','Senza IVA – risarcimento danni (N2.2)','Escluso art. 15 – anticipazione (N1)'];
+const MAN_VOCI=['Danni meccanici','Danni di carrozzeria','Danni meccanici e di carrozzeria','Altro'];
+MODS.adl={sheet:'Addebiti clienti',store:'adl',title:'Addebiti ai clienti',code:'AL',yearly:true,attach:true,wide:true,
+ groups:[
+  {t:'L’addebito',f:[
+   fd('data','Data','date',{req:true,span:'s2',def:''}),
+   fd('cliente','Cliente','ref',{ref:'soc',flt:'cli',req:true,span:'s4'}),
+   fd('targa','Targa (facoltativa)','ref',{ref:'mezzo',plate:true,span:'s3'}),
+   fd('voce','Voce','sel',{opts:ADL_VOCI,def:ADL_VOCI[0],span:'s3'}),
+   fd('descrizione','Descrizione in proforma','text',{req:true,span:'s6'}),
+   fd('quantita','Quantità','int',{def:1,span:'s2'}),
+   fd('importo','Importo unitario (€, IVA esclusa)','eur',{req:true,span:'s2'}),
+   fd('iva','Trattamento IVA','sel',{opts:ADL_IVA,def:ADL_IVA[0],span:'s2'}),
+   fd('centroCosto','Centro di costo','ref',{ref:'cdc',span:'s3'}),
+   fd('note','Note interne','area',{span:'s6'}),
+   fd('proforma','Proforma','text',{span:'s3',hint:'Compilato alla creazione della proforma',ro:true})]}]};
+ammRegistraModuli(['adl']);
+MODS.adl.canDelete=x=>x.proforma?'L’addebito è già nella proforma '+x.proforma+': annulla prima la proforma.':'';
+MODS.adl.validate=(x,errs)=>{if(!(+x.importo>0))errs.importo='Indica l’importo da addebitare.';if(!(+x.quantita>0))errs.quantita='La quantità deve essere almeno 1.';};
+{
+  const g=MODS.man.groups.find(x=>x.f.some(f=>f.k==='aCarico')).f;
+  if(!g.some(f=>f.k==='riaddebitaCliente')){
+    const i=g.findIndex(f=>f.k==='aCarico');
+    g.splice(i+1,0,
+      fd('riaddebitaCliente','Addebita al cliente','sel',{opts:['','Sì','No'],span:'s3',hint:'Sì: danni meccanici o di carrozzeria da girare al cliente. Vuoto = si propone se «Costo a carico di» è Cliente'}),
+      fd('clienteAddebito','Cliente da addebitare','ref',{ref:'soc',flt:'cli',span:'s3',hint:'Vuoto = il cliente che aveva il mezzo a noleggio alla data dell’intervento'}),
+      fd('voceAddebito','Voce in proforma','sel',{opts:MAN_VOCI,def:MAN_VOCI[0],span:'s3'}),
+      fd('importoAddebito','Importo da addebitare (€, IVA esclusa)','eur',{span:'s3',hint:'Vuoto = costo consuntivo, o preventivo se manca'}),
+      fd('ivaAddebito','Trattamento IVA','sel',{opts:ADL_IVA,def:ADL_IVA[1],span:'s3'}),
+      fd('proformaAddebito','Proforma dell’addebito','text',{hidden:true}));
+    ammCampi(MODS.man);
+  }
+  try{const o=MODS.righe.fmap.tipo.opts;for(const t of ['Addebito libero','Addebito manutenzione'])if(o&&!o.includes(t))o.push(t);}catch(e){}
+  const mn=MODS.man.canDelete;
+  const mv=MODS.man.validate;
+}
+const adlIva=(t,ivaStd)=>/N2\.2/.test(t||'')?{aliquota:0,natura:'N2.2'}:/N1/.test(t||'')?{aliquota:0,natura:'N1'}:{aliquota:ivaStd,natura:''};
+function manAddebito(m){
+  const r=m.riaddebitaCliente==='Sì'||(m.aCarico==='Cliente'&&!m.riaddebitaCliente);
+  return r&&m.stato!=='Annullata';
+}
+function fatRigheAddebiti({ivaStd,emitDi,lines,scarti}){
+  for(const a of S.adl){
+    if(a.proforma||!a.cliente||!(+a.importo>0))continue;
+    const iv=adlIva(a.iva,ivaStd);
+    lines.push({cli:a.cliente,emit:emitDi(a.targa,a.data),cdc:a.centroCosto||(a.targa?cdcFor(a.targa,a.data):''),targa:a.targa||'',origine:a.codice,
+      quantita:+a.quantita||1,prezzo:+a.importo,...iv,id:'adl:'+a.codice,opz:true,tipo:'Addebito libero',
+      descrizione:a.descrizione||a.voce||'Addebito',mark:['adl',a.codice,'proforma']});
+  }
+  for(const m of S.man){
+    if(!manAddebito(m)||m.proformaAddebito)continue;
+    const d=m.dataIngresso||m.dataSegnalazione||'';
+    const r=m.targa?rentalOn(m.targa,d||todayISO()):null;
+    const cli=m.clienteAddebito||(r&&r.locataria)||'';
+    const imp=+m.importoAddebito>0?+m.importoAddebito:(+m.consuntivo>0?+m.consuntivo:(+m.preventivo>0?+m.preventivo:0));
+    if(!cli){scarti.push({n:m.codice,t:m.targa,m:'manutenzione da addebitare al cliente, ma non risulta il cliente: indicalo nella scheda'});continue;}
+    if(!imp){scarti.push({n:m.codice,t:m.targa,m:'manutenzione da addebitare al cliente, ma manca l’importo (consuntivo, preventivo o importo da addebitare)'});continue;}
+    lines.push({cli,emit:emitDi(m.targa,d),cdc:cdcFor(m.targa,d),targa:m.targa,origine:m.codice,quantita:1,prezzo:imp,
+      ...adlIva(m.ivaAddebito||ADL_IVA[1],ivaStd),id:'man:'+m.codice,opz:true,tipo:'Addebito manutenzione',
+      descrizione:`${m.voceAddebito||MAN_VOCI[0]} – intervento ${m.codice} del ${fmtD(d)} (${m.tipo||'manutenzione'})${m.lavori?': '+String(m.lavori).slice(0,120):''}`,
+      mark:['man',m.codice,'proformaAddebito']});
+  }
+}
+/* menu, ruoli, aree */
+{
+  const g=MENU.find(x=>x.items.some(([k])=>k==='fatturazione'));
+  if(g&&!g.items.some(([k])=>k==='adl'))g.items.splice(g.items.findIndex(([k])=>k==='fatturazione')+1,0,['adl','Addebiti ai clienti']);
+  for(const r of Object.values(RUOLI)){
+    if(r.tabs&&r.tabs.includes('fatturazione')&&!r.tabs.includes('adl'))r.tabs.push('adl');
+    if(Array.isArray(r.scrivi)&&(r.scrivi.includes('righe')||r.scrivi.includes('fat'))&&!r.scrivi.includes('adl'))r.scrivi.push('adl');
+  }
+  const a=AREE.find(x=>x.k==='fatturazione');if(a&&!a.store.includes('adl'))a.store.push('adl');
+  if(typeof AREE_DI_STORE!=='undefined')(AREE_DI_STORE.adl=AREE_DI_STORE.adl||[]).includes('fatturazione')||AREE_DI_STORE.adl.push('fatturazione');
+}
+function adlNuovo(preset){openRecord('adl',null,{preset:preset||{data:todayISO(),quantita:1},onSaved:()=>render()});}
+function renderAdl(){
+  genericList('adl',{
+    sub:'Addebiti liberi ai clienti (spese varie, danni, penali…): compaiono nel riepilogo di Fatturazione e proforma finché non finiscono in una proforma. Gli addebiti sulle manutenzioni si impostano nella scheda dell’intervento.',
+    newLabel:'Nuovo addebito',searchPh:'Cliente, targa, descrizione',search:['codice','cliente','targa','descrizione'],
+    buttons:[{l:'Vai alla fatturazione',fn:()=>{S.tab='fatturazione';render();}}],
+    filters:[{k:'voce',label:'Voce',opts:()=>ADL_VOCI,all:'Tutte'},
+             {k:'__f',label:'Fatturazione',all:'Tutti',opts:()=>['Da fatturare','In proforma'],test:(r,v)=>v==='In proforma'?!!r.proforma:!r.proforma}],
+    ledger:l=>`<div><b>${l.length}</b><small>addebiti</small></div><div><b>${eur(r2(l.filter(x=>!x.proforma).reduce((a,x)=>a+(+x.quantita||1)*(+x.importo||0),0)))}</b><small>da fatturare (IVA esclusa)</small></div>`,
+    sort:(a,b)=>(b.data||'').localeCompare(a.data||''),
+    cols:[{l:'Addebito',v:r=>`<b>${esc(r.codice)}</b><span class="sub">${fmtD(r.data)} · ${esc(r.voce||'')}</span>`},
+      {l:'Cliente',v:r=>esc(r.cliente||'')},{l:'Targa',v:r=>r.targa?plate(r.targa):''},
+      {l:'Descrizione',v:r=>esc(r.descrizione||'')},
+      {l:'Importo',cls:'num',v:r=>`${eur((+r.quantita||1)*(+r.importo||0))}<span class="sub">${esc((r.iva||'').split(' ')[0]==='IVA'?'+ IVA':'senza IVA')}</span>`},
+      {l:'Proforma',v:r=>r.proforma?esc(r.proforma):'<span class="muted">da fatturare</span>'}],
+    empty:'Nessun addebito libero. Registra il primo: finirà nel riepilogo di fatturazione.'});
+}
+VIEWS.adl=()=>renderAdl();
 
 /* =====================================================================
    RICONSEGNA: KM E CONDIZIONI DAL CONTRATTO, CHIUSURA CON PROFORMA (2026.10.44)
