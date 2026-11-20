@@ -1173,7 +1173,7 @@ async function loadWorkbook(buf,name,{fromDraft}={}){
   const wp=wb.getWorksheet('Parametri');const p=k=>cv(wp.getCell('B'+PR[k]));
   const mese=anyToISO(p('mese'))||todayISO();
   S.par={mese:mese.slice(0,8)+'01',iva:toNum(p('iva'))===''?0.22:toNum(p('iva')),termine:(toNum(p('termine'))===''?30:toNum(p('termine'))),preavviso:p('preavviso')||30,
-    penaleRecesso:p('penaleRecesso')||3,speseSanz:toNum(p('speseSanz'))===''?25:toNum(p('speseSanz')),eta:p('eta')||21,anniPat:p('anniPat')||2,
+    penaleRecesso:p('penaleRecesso')||3,speseSanz:toNum(p('speseSanz'))===''?20:toNum(p('speseSanz')),eta:p('eta')||21,anniPat:p('anniPat')||2,
     luogo:str(p('luogo')),prefisso:str(p('prefisso'))||'NOL-',penaleRit:toNum(p('penaleRit'))===''?1.5:toNum(p('penaleRit')),mora:str(p('mora'))||'D.Lgs. 231/2002',quadroTag:str(p('quadroTag'))||'Q'};
   loadModules(wb);
 }
@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.57';
+const APP_VERSION='2026.10.58';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
