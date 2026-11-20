@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.54';
+const APP_VERSION='2026.10.55';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -15611,7 +15611,7 @@ function fatRigheVerbali({me,ivaStd,emitDi,lines,scarti}){
           prezzo:imp,aliquota:0,natura:'N1',mark:['vrb',v.codice,'proformaImporto']});
         const com=vrbCommissione();
         if(com>0&&!v.proformaCommissione)comm={...base,id:'vrb-com:'+v.codice,opz:true,sub:true,tipo:'Commissione pagamento verbale',
-          descrizione:`Commissione di pagamento ${rif}`,prezzo:com,aliquota:ivaStd,natura:'',mark:['vrb',v.codice,'proformaCommissione']};
+          descrizione:`Commissione di pagamento ${rif}`,prezzo:com,aliquota:0,natura:'N1',mark:['vrb',v.codice,'proformaCommissione']};
       }
     }
     else if(!go&&v.riaddebitaImporto==='Sì'&&!v.proformaImporto&&!['Annullato'].includes(v.stato)){
