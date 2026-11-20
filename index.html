@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.53';
+const APP_VERSION='2026.10.54';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -6416,7 +6416,7 @@ function renderCap(){
 MODS.fat.onDelete=f=>{
   S.righe=S.righe.filter(r=>r.proforma!==f.codice);
   for(const st of ['vrb','sin','mov','mpt'])for(const r of S[st])if(r.proforma===f.codice)r.proforma='';
-  for(const st of ['vrb','sin'])for(const r of S[st])for(const k of ['proformaImporto','proformaGestione'])if(r[k]===f.codice)r[k]='';
+  for(const st of ['vrb','sin'])for(const r of S[st])for(const k of ['proformaImporto','proformaGestione','proformaCommissione'])if(r[k]===f.codice)r[k]='';
 };
 /* Descrizione stampata: aggiunge, se mancano, contratto di riferimento, periodo e giorni, canone mensile */
 function fatDescrizioneStampa(r,f){
@@ -15581,16 +15581,40 @@ if(typeof PARAMS_EXTRA!=='undefined'&&!PARAMS_EXTRA.some(p=>p[0]==='gestioneSini
 const sinGestione=()=>{const v=S.par&&S.par.gestioneSinistro;const n=parseFloat(v);return v===''||v==null||isNaN(n)?20:n;};
 
 /* a quale segno di «già fatturata» appartiene una riga della proforma */
-const fatCampoMarca=r=>r.tipo==='Riaddebito verbale'?'proformaImporto':r.tipo==='Gestione sinistro'?'proformaGestione':'proforma';
+const fatCampoMarca=r=>r.tipo==='Riaddebito verbale'?'proformaImporto':r.tipo==='Commissione pagamento verbale'?'proformaCommissione':r.tipo==='Gestione sinistro'?'proformaGestione':'proforma';
 
+if(typeof PARAMS_EXTRA!=='undefined'&&!PARAMS_EXTRA.some(p=>p[0]==='commissioneVerbale'))
+  PARAMS_EXTRA.push(['commissioneVerbale',68,'Verbali Global One: commissione di pagamento per verbale (€)',1.5]);
+const vrbCommissione=()=>{const v=S.par&&S.par.commissioneVerbale;const n=parseFloat(String(v).replace(',','.'));return v===''||v==null||isNaN(n)?1.5:n;};
+{
+  const g=MODS.vrb.groups.find(x=>x.f.some(f=>f.k==='proformaImporto')).f;
+  if(!g.some(f=>f.k==='proformaCommissione')){g.push(fd('proformaCommissione','Proforma della commissione','text',{hidden:true}));ammCampi(MODS.vrb);}
+  try{const o=MODS.righe.fmap.tipo.opts;if(o&&!o.includes('Commissione pagamento verbale'))o.push('Commissione pagamento verbale');}catch(e){}
+}
 function fatRigheVerbali({me,ivaStd,emitDi,lines,scarti}){
   for(const v of S.vrb){
     if(!v.cliente)continue;
     const base={cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),targa:v.targa,origine:v.codice,quantita:1};
     const rif=`verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale||v.dataNotifica)}${v.ente?' – '+v.ente:''}`;
     /* 1 · l'importo del verbale, anche se l'ha pagato la società */
-    let conImporto=false;
-    if(v.riaddebitaImporto==='Sì'&&!v.proformaImporto&&!['Annullato'].includes(v.stato)){
+    let conImporto=false,comm=null;
+    const go=/global\s*one/i.test(v.cliente);
+    /* Global One: in proforma il costo sostenuto per pagare il verbale (solo importo ridotto), la commissione di pagamento e la gestione */
+    if(go&&!v.proformaImporto&&v.stato!=='Annullato'&&v.tipoResponsabile==='Cliente locatario'
+       &&(+v.importoPagato>0||v.pagatoIl||v.stato==='Pagato')&&!/cliente|locatari/i.test(v.pagatoDa||'')){
+      const imp=+v.importoRidotto>0?+v.importoRidotto:0;
+      if(!imp)scarti.push({n:v.numeroVerbale,t:v.targa,m:'verbale Global One pagato, ma l’importo ridotto non è indicato'});
+      else if((v.pagatoIl||v.dataNotifica||'')<=me){
+        conImporto=true;
+        lines.push({...base,id:'vrb-imp:'+v.codice,opz:true,tipo:'Riaddebito verbale',
+          descrizione:`Pagamento in misura ridotta – ${rif}`,
+          prezzo:imp,aliquota:0,natura:'N1',mark:['vrb',v.codice,'proformaImporto']});
+        const com=vrbCommissione();
+        if(com>0&&!v.proformaCommissione)comm={...base,id:'vrb-com:'+v.codice,opz:true,sub:true,tipo:'Commissione pagamento verbale',
+          descrizione:`Commissione di pagamento ${rif}`,prezzo:com,aliquota:ivaStd,natura:'',mark:['vrb',v.codice,'proformaCommissione']};
+      }
+    }
+    else if(!go&&v.riaddebitaImporto==='Sì'&&!v.proformaImporto&&!['Annullato'].includes(v.stato)){
       const imp=+v.importoPagato>0?+v.importoPagato:0;
       if(!imp)scarti.push({n:v.numeroVerbale,t:v.targa,m:'verbale da riaddebitare al cliente, ma l’importo pagato non è indicato'});
       else if((v.pagatoIl||v.dataNotifica||'')<=me){
@@ -15607,6 +15631,8 @@ function fatRigheVerbali({me,ivaStd,emitDi,lines,scarti}){
         descrizione:`${rin?'Rinotifica':'Gestione amministrativa'} ${rif}`,
         prezzo:+v.speseGestione,aliquota:ivaStd,natura:''});
     }
+    /* 3 · la commissione di pagamento (Global One), in coda al verbale */
+    if(comm)lines.push(comm);
   }
 }
 function fatRigheSinistri({ivaStd,emitDi,lines}){
