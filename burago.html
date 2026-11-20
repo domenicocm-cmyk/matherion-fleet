@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.56';
+const APP_VERSION='2026.10.57';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -6644,7 +6644,7 @@ function renderFattWizard(tabs){
       dal:o.inizio>ms?o.inizio:ms,al:o.fine<me?o.fine:me,giorni:g,canoneMensile:+o.canone,modello:o.modello});}
   if(u.src.vrb)fatRigheVerbali({me,ivaStd,emitDi,lines,scarti});
   if(false)for(const v of S.vrb)if(v.cliente&&!v.proforma&&+v.speseGestione>0&&['Rinotificato','Chiuso','Pagato','Dati conducente comunicati'].includes(v.stato)&&(v.rinotificaData||v.dataNotifica)<=me)
-    lines.push({cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),tipo:(v.voceAddebito==='Rinotifica'?'Rinotifica verbale':'Gestione amministrativa verbale'),descrizione:`${v.voceAddebito==='Rinotifica'?'Rinotifica':'Gestione amministrativa'} verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale||v.dataNotifica)} – ${v.ente}`,targa:v.targa,origine:v.codice,vrb:v.codice,quantita:1,prezzo:+v.speseGestione,aliquota:ivaStd,natura:''});
+    lines.push({cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),tipo:(v.voceAddebito==='Rinotifica'?'Rinotifica verbale':'Gestione amministrativa verbale'),descrizione:`${v.voceAddebito==='Rinotifica'?'Rinotifica':'Gestione amministrativa'} verbale n. ${v.numeroVerbale} del ${fmtD(v.dataVerbale||v.dataNotifica)} – ${v.ente}`,targa:v.targa,origine:v.codice,vrb:v.codice,quantita:1,prezzo:spese,aliquota:ivaStd,natura:''});
   if(u.src.sin)fatRigheSinistri({ivaStd,emitDi,lines});
   if(false)for(const s of S.sin)if(s.riaddebitoA==='Cliente'&&s.cliente&&!s.proforma&&+s.importoRiaddebito>0)
     lines.push({cli:s.cliente,emit:emitDi(s.targa,s.data),cdc:s.centroCosto||cdcFor(s.targa,s.data),tipo:'Franchigia sinistro',descrizione:`Addebito franchigia/danni sinistro ${s.codice} del ${fmtD(s.data)}`,targa:s.targa,origine:s.codice,quantita:1,prezzo:+s.importoRiaddebito,aliquota:ivaStd,natura:''});
@@ -15641,12 +15641,16 @@ function fatRigheVerbali({me,ivaStd,emitDi,lines,scarti}){
           prezzo:imp,aliquota:0,natura:'N1',mark:['vrb',v.codice,'proformaImporto']});}
     }
     /* 2 · le spese di gestione, subito sotto il verbale */
-    if(+v.speseGestione>0&&!v.proforma&&['Rinotificato','Chiuso','Pagato','Dati conducente comunicati'].includes(v.stato)&&(v.rinotificaData||v.dataNotifica)<=me){
-      const rin=v.voceAddebito==='Rinotifica';
+    /* spese: quelle del verbale; se non indicate, il valore standard dei parametri (verbali inseriti prima che fosse valorizzato) */
+    const spese=(v.speseGestione===''||v.speseGestione==null)?(+S.par.speseSanz||0):(+v.speseGestione||0);
+    const rinotificato=v.stato==='Rinotificato'||+v.nRinotifiche>0||!!v.rinotificaData;
+    const statoOk=rinotificato||!['Annullato','Ricevuto','Da verificare','Da rinotificare'].includes(v.stato);
+    if(spese>0&&!v.proforma&&statoOk&&v.stato!=='Annullato'&&v.tipoResponsabile!=='Dipendente'&&(v.rinotificaData||v.dataNotifica||'')<=me){
+      const rin=v.voceAddebito==='Rinotifica'||(rinotificato&&!v.voceAddebito);
       lines.push({...base,id:'vrb-ges:'+v.codice,opz:true,sub:conImporto,vrb:v.codice,
         tipo:rin?'Rinotifica verbale':'Gestione amministrativa verbale',
         descrizione:`${rin?'Rinotifica':'Gestione amministrativa'} ${rif}`,
-        prezzo:+v.speseGestione,aliquota:ivaStd,natura:''});
+        prezzo:spese,aliquota:ivaStd,natura:''});
     }
     /* 3 · la commissione di pagamento (Global One), in coda al verbale */
     if(comm)lines.push(comm);
