@@ -1279,7 +1279,7 @@ function nextQuadro(inizio){
 const mezzoBy=t=>S.mezzi.find(m=>m.targa===t);
 function rentalAt(targa,from,to,exceptId){return S.rows.find(r=>r.id!==exceptId&&r.targa===targa&&r.inizio&&r.fine&&from<=r.fine&&to>=r.inizio);}
 // mezzo in uso interno: utilizzatore = società titolare (es. Fast Rent) oppure assegnato a un dipendente
-const APP_VERSION='2026.10.55';
+const APP_VERSION='2026.10.56';
 function normSoc(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ')
   .replace(/\b(s ?r ?l ?s?|s ?p ?a|s ?a ?s|s ?n ?c|s ?a ?p ?a|srls|spa|sas|snc|unipersonale|societa|soc)\b/g,' ').replace(/\s+/g,' ').trim();}
 function titolariNorm(){return (S.soc||[]).filter(x=>x.titolare==='Sì').map(x=>normSoc(x.ragione)).filter(Boolean);}
@@ -15607,6 +15607,8 @@ const vrbCommissione=()=>{const v=S.par&&S.par.commissioneVerbale;const n=parseF
   try{const o=MODS.righe.fmap.tipo.opts;if(o&&!o.includes('Commissione pagamento verbale'))o.push('Commissione pagamento verbale');}catch(e){}
 }
 function fatRigheVerbali({me,ivaStd,emitDi,lines,scarti}){
+  /* le spese dei verbali sono addebiti già maturati: si propongono fino a oggi anche se il mese scelto è precedente (si fattura a ottobre a inizio novembre) */
+  const oggiIso=todayISO();if(oggiIso>me)me=oggiIso;
   for(const v of S.vrb){
     if(!v.cliente)continue;
     const base={cli:v.cliente,emit:emitDi(v.targa,v.dataInfrazione),cdc:v.centroCosto||cdcFor(v.targa,v.dataInfrazione),targa:v.targa,origine:v.codice,quantita:1};
@@ -15615,8 +15617,8 @@ function fatRigheVerbali({me,ivaStd,emitDi,lines,scarti}){
     let conImporto=false,comm=null;
     const go=/global\s*one/i.test(v.cliente);
     /* Global One: in proforma il costo sostenuto per pagare il verbale (solo importo ridotto), la commissione di pagamento e la gestione */
-    if(go&&!v.proformaImporto&&v.stato!=='Annullato'&&v.tipoResponsabile==='Cliente locatario'
-       &&(+v.importoPagato>0||v.pagatoIl||v.stato==='Pagato')&&!/cliente|locatari/i.test(v.pagatoDa||'')){
+    if(go&&!v.proformaImporto&&v.stato!=='Annullato'&&v.tipoResponsabile!=='Dipendente'
+       &&(+v.importoPagato>0||v.pagatoIl||v.stato==='Pagato')&&!/cliente|dipendente/i.test(v.pagatoDa||'')){
       const imp=+v.importoRidotto>0?+v.importoRidotto:0;
       if(!imp)scarti.push({n:v.numeroVerbale,t:v.targa,m:'verbale Global One pagato, ma l’importo ridotto non è indicato'});
       else if((v.pagatoIl||v.dataNotifica||'')<=me){
